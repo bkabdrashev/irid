@@ -6,16 +6,16 @@ typedef struct {
 } Parser;
 
 Parser p = {0};
-void parser_init(cstr source, cstr path) {
+void parse_init(cstr source, cstr path) {
   p.temp = {0};
   p.source = source;
   p.path = path;
 }
 
-Astid parser_parse(Slice_Token tokens) {
+Astid parse_parse(Slice_Token tokens) {
   s32 statements = 0;
-  while () {
-    Astid astid = parser_statement(token);
+  while (lexer_is_eof()) {
+    Astid astid = parse_statement(token);
     statements++;
   }
   Astid block = astid_new_block(statements);
@@ -25,8 +25,8 @@ Astid astid_from_source(cstr source, cstr path) {
   lexer_init(source, name);
   Slice_Token tokens = lexer_lex();
 
-  parser_init(source, name);
-  Astid astid = parser_parse(tokens);
+  parse_init(source, name);
+  Astid astid = parse_parse(tokens);
   return astid;
 }
 
@@ -51,7 +51,7 @@ b32 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
-void parser_test(void) {
+void parse_test(void) {
   test("a = 1", "{ a = 1; }");
 }
 
