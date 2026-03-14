@@ -1,32 +1,106 @@
 typedef struct {
-  Arena temp;
-  s32  token;
+  Slice_Ast stack;
+  Slice_Ast asts;
+  Slice_Token tokens;
+  s32  tok;
   cstr source;
   cstr path;
 } Parser;
 
-Parser p = {0};
-void parse_init(cstr source, cstr path) {
-  p.temp = {0};
-  p.source = source;
-  p.path = path;
+Parser parser = {0};
+// a = 1
+// 
+// a
+// 1
+// assign
+// 
+// a = 1+2
+
+Astid parse_push_ast() {
+  Token token = slice_token_at(parser.tokens, parser.tok);
+  Ast ast = { .tag = token.tag, .value = token.value };
+  slice_ast_push(parser.asts, ast);
 }
 
-Astid parse_parse(Slice_Token tokens) {
+void parse_stack_transfer() {
+  Ast ast = slice_ast_pop(parser.stack):
+  slice_ast_push(parser.asts, ast);
+}
+
+void parse_stack_push() {
+  Token token = slice_token_at(parser.tokens, parser.tok);
+  Ast ast = { .tag = token.tag, .value = token.value };
+  slice_ast_push(parser.stack, ast);
+}
+
+void parse_infix_left_precedence(TokenTag tag) {
+  switch (tag) {
+  case TokenTag_plus: return 11;
+  case TokenTag_star: return 13;
+  }
+}
+
+void parse_infix_right_precedence(TokenTag tag) {
+  switch (tag) {
+  case TokenTag_plus: return 12;
+  case TokenTag_star: return 14;
+  }
+}
+
+b32 parse_stack_not_have_lower_precedence() {
+  Token token = slice_token_at(parser.tokens, parser.tok);
+  if (slice_ast_empty(parser.stack)) return true;
+  Ast stack_ast = slice_ast_top(parser.stack);
+  s32 on_stack_precedence  = parse_infix_left_precedence(ast.tag);
+  s32 on_stream_precedence = parse_infix_right_precedence(token.tag);
+  1 + 2 * 3
+  1,2,3
+  +*
+  if (on_stack_precedence <= on_stream_precedence) {
+    return false;
+  }
+  return true;
+}
+
+Astid parse_expression() {
+  if (parse_match_token(TokenTag_int)) {
+    parse_ast_push()
+  }
+  else if (parse_match_token(TokenTag_plus)) {
+    while (parse_stack_has_not_lower_precedence()) {
+      parse_stack_transfer();
+    }
+    parse_stack_push();
+  }
+  else if (parse_match_token(TokenTag_star)) {
+    while (parse_stack_has_not_lower_precedence()) {
+      parse_stack_transfer_ast();
+    }
+    parse_stack_push();
+  }
+}
+
+Astid parse_statement() {
+  Astid astid = {0};
+  if (parse_match_token(Token_do)) {
+    astid = parse_statement(p);
+  }
+  return astid;
+}
+
+Astid parse_tokens(Slice_Token tokens) {
   s32 statements = 0;
-  while (lexer_is_eof()) {
-    Astid astid = parse_statement(token);
+  while (lex_is_not_eof(slice_token_at(tokens, parser.tok))) {
+    Astid astid = parse_statement();
     statements++;
+    parser.tok++;
   }
   Astid block = astid_new_block(statements);
 }
 
 Astid astid_from_source(cstr source, cstr path) {
-  lexer_init(source, name);
-  Slice_Token tokens = lexer_lex();
-
-  parse_init(source, name);
-  Astid astid = parse_parse(tokens);
+  Slice_Token tokens = lex_source(source, path);
+  Astid astid = parse_tokens(tokens);
   return astid;
 }
 
