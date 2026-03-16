@@ -36,3 +36,25 @@ typedef intptr_t  smp; //   signed memory pointer
 #define MB(a) (KB(a)*1024)
 #define GB(a) (MB(a)*1024)
 #define TB(a) (GB(a)*1024)
+
+typedef struct {
+  void* base;
+  void* top;
+  umi   size;
+} Arena; 
+
+void arena_init(Arena* arena, umi size) {
+  arena->base = malloc(size);
+  arena->top = arena->base;
+  arena->size = size;
+  arena->alignment = 8;
+}
+
+void* arena_alloc(Arena* arena, umi size) {
+  assert(top+size <= base+arena->size);
+  arena->top = (arena->top + size + arena->alignment - 1) & ~(arena->alignment - 1);
+  return arena->top;
+}
+
+Arena temp_arena = {0};
+

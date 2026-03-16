@@ -1,4 +1,7 @@
 #include "lex.c"
+#include <string.h>
+#include "common.c"
+
 typedef enum {
   AstFlag_unary  = 1 << 8,
   AstFlag_binary = 1 << 9,
@@ -10,7 +13,7 @@ typedef enum {
   AstKind_neg = TokenKind_minus | AstFlag_unary,
   AstKind_arr  = TokenKind_brace_close | AstFlag_binary,
   AstKind_call = 123 | AstFlag_binary,
-  AstKind_block = 123 | AstFlag_binary,
+  AstKind_block = 124 | AstFlag_binary,
 } AstKind;
 
 typedef struct {
@@ -35,8 +38,10 @@ typedef struct {
   umi  length;
 } Slice_Ast;
 
-void slice_ast_push(Slice_Ast slice, Ast item) {
+s32 slice_ast_push(Slice_Ast slice, Ast item) {
+  s32 index = slice.length;
   slice.base[slice.length++] = item;
+  return index;
 }
 
 Ast slice_ast_pop(Slice_Ast slice) {
@@ -74,10 +79,11 @@ typedef struct {
 
 Parser parser = {0};
 
-void parse_ast_final_push() {
+Astid parse_ast_final_push() {
   Token token = slice_token_at(parser.tokens, parser.tok);
   Ast ast = { .kind = token.kind, .value = token.value };
-  slice_ast_push(parser.ast_final, ast);
+  Astid astid = { .index = slice_ast_push(parser.ast_final, ast) };
+  return astid;
 }
 
 void parse_ast_final_push_unary() {
@@ -261,20 +267,27 @@ Astid astid_from_source(cstr source, cstr path) {
   return astid;
 }
 
+cstr cstr_from_astid(Astid astid) {
+}
+
 cstr source_to_cstr_from_ast(cstr source, cstr name) {
   Astid astid = astid_from_source(source, name);
-  return cstr_from_ast(astid);
+  return cstr_from_astid(astid);
 }
 
-b32 _test_ast(cstr file_name, u32 line, cc8* source, cc8* expected) {
-  if (!test_str(source_to_cstr_from_ast(source, cstr_from_source_info(file_name, line)), expected)) {
-    printf("%s(%i): at test source: %s\n", file_name, line, source);
-    return false;
-  }
-  return true;
+cstr cstr_from_source_info(cstr file_name, cstr line) {
+  umi len1 = strlen(file_name);
+  umi len2 = strlen(line);
+  cstr str = arena_alloc(temp_arena, len1 + len2 + 2 + 1);
+  strcat(str, file_name);
+  strcat(str, "(");
+  strcat(str, line);
+  strcat(str, ")");
+  return str;
 }
 
-b32 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
+b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
+  arena_init(&temp_arena);
   Astid astid = astid_from_source(source, cstr_from_source_info(file_name, line));
   b32 result = test_at_source(cstr_from_ast(astid), expected, file_name, line, source);
   return result;

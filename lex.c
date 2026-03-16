@@ -58,7 +58,8 @@ typedef struct {
 
 Lexer lexer = {0};
 
-void lex_source(cstr source, cstr file_path) {
+Slice_Token lex_source(cstr source, cstr file_path) {
+  Slice_Token slice_token = {0};
   lexer.source = source;
   lexer.stream = source;
   lexer.wasnewline = true;
@@ -114,7 +115,10 @@ void lex_source(cstr source, cstr file_path) {
     } break;
     default: {} break;
     }
+
+    slice_token_push(slice_token, token);
   }
+  return slice_token;
 }
 
 
