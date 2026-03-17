@@ -1,7 +1,3 @@
-#include <ctype.h>
-#include "str.c"
-#include "common.c"
-
 typedef enum {
   TokenFlag_separates = 1 << 8,
 } TokenFlag;
@@ -40,7 +36,7 @@ void slice_token_push(Slice_Token slice, Token item) {
   slice.base[slice.length++] = item;
 }
 
-Token slice_token_pop(Slice_Token slice, Token item) {
+Token slice_token_pop(Slice_Token slice) {
   return slice.base[slice.length--];
 }
 
@@ -52,6 +48,7 @@ Token slice_token_at(Slice_Token slice, s32 at) {
 typedef struct {
   cstr source;
   cstr stream;
+  cstr file_path;
   b8   wasnewline;
   b8   wasspace;
 } Lexer;
@@ -62,6 +59,7 @@ Slice_Token lex_source(cstr source, cstr file_path) {
   Slice_Token slice_token = {0};
   lexer.source = source;
   lexer.stream = source;
+  lexer.file_path = file_path;
   lexer.wasnewline = true;
   lexer.wasspace   = true;
 

@@ -1,8 +1,7 @@
-#include <sys/types.h>
-#include <stdint.h>
-
 #define false (0)
 #define true (1)
+
+typedef  char     c8;
 
 typedef int8_t    s8;
 typedef int16_t   s16;
@@ -32,15 +31,16 @@ typedef intptr_t  smp; //   signed memory pointer
 #define S32_MAX INT32_MAX
 #define S32_MIN INT32_MIN
 
-#define KB(a) ((a)*1024)
-#define MB(a) (KB(a)*1024)
-#define GB(a) (MB(a)*1024)
-#define TB(a) (GB(a)*1024)
+#define KB(a) ((a)*1024llu)
+#define MB(a) (KB(a)*1024llu)
+#define GB(a) (MB(a)*1024llu)
+#define TB(a) (GB(a)*1024llu)
 
 typedef struct {
-  void* base;
-  void* top;
+  c8* base;
+  c8* top;
   umi   size;
+  s8    alignment;
 } Arena; 
 
 void arena_init(Arena* arena, umi size) {
@@ -51,10 +51,11 @@ void arena_init(Arena* arena, umi size) {
 }
 
 void* arena_alloc(Arena* arena, umi size) {
-  assert(top+size <= base+arena->size);
-  arena->top = (arena->top + size + arena->alignment - 1) & ~(arena->alignment - 1);
+  assert(arena->top + size <= arena->base + arena->size);
+  umi first_bits_off_mask = ~(arena->alignment - 1);
+  umi overshoot_up        = ((umi)arena->top + size + arena->alignment - 1);
+  arena->top = (void*)(overshoot_up & first_bits_off_mask);
   return arena->top;
 }
 
 Arena temp_arena = {0};
-
