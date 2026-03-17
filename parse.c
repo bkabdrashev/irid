@@ -82,7 +82,7 @@ Astid parse_ast_final_push(AstKind kind, s32 value) {
 }
 
 void parse_ast_final_push_unary() {
-  Token token = slice_token_at(parser.tokens, parser.tok);
+  Token token = slice_token_at(&parser.tokens, parser.tok);
   Ast ast = { .kind = token.kind | AstFlag_unary, .value = token.value };
   slice_ast_push(parser.ast_final, ast);
 }
@@ -128,7 +128,7 @@ s32 parse_infix_right_precedence(TokenKind kind) {
 }
 
 b32 parse_ast_stack_is_top_higher_precedence() {
-  Token token = slice_token_at(parser.tokens, parser.tok);
+  Token token = slice_token_at(&parser.tokens, parser.tok);
   if (slice_ast_empty(parser.ast_stack)) return true;
   Ast stack_ast = slice_ast_top(parser.ast_stack);
   s32 on_stack_precedence  = parse_infix_left_precedence((TokenKind)stack_ast.kind);
@@ -156,11 +156,11 @@ TokenKind parse_current_token_kind() {
   return parser.tokens.base[parser.tok].kind;
 }
 
-b8 parse_current_token_kind_is(TokenKind kind) {
+b8 parse_is_current_token(TokenKind kind) {
   return parser.tokens.base[parser.tok].kind == kind;
 }
 
-b8 parse_current_token_flag_is(TokenFlag flag) {
+b8 parse_current_token_is_flag(TokenFlag flag) {
   Token token = parse_current_token();
   return (token.kind & flag) != 0;
 }
@@ -170,7 +170,7 @@ b8 parse_is_token_separates_expression() {
   return (token.kind & TokenFlag_separates) != 0;
 }
 
-Astid parse_expression() {
+void parse_expression() {
   while (!parse_is_token_separates_expression()) {
     switch (parse_state_stack_pop()) {
     case Parse_State_expression: {
@@ -251,10 +251,12 @@ Astid parse_statement() {
 }
 
 Astid parse_tokens(Slice_Token tokens) {
+  parser.ast_final.base = malloc(GB(2));
+  parser.ast_stack.base = malloc(GB(2));
   parser.tokens = tokens;
   parser.tok = 0;
   s32 statements = 0;
-  while (!parse_current_token_kind_is(TokenKind_eof)) {
+  while (!parse_is_current_token(TokenKind_eof)) {
     parse_statement();
     statements++;
     parser.tok++;
@@ -294,7 +296,7 @@ cstr cstr_from_source_info(cstr file_name, s32 line) {
 }
 
 b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
-  arena_init(&temp_arena, GB(2));
+  arena_init(&temp_arena, MB(2));
   Astid astid = astid_from_source(source, cstr_from_source_info(file_name, line));
   b32 result = test_at_source(cstr_from_astid(astid), expected, file_name, line, source);
   return result;
@@ -303,7 +305,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a = 1", "{ a = 1; }");
+  test("a + b", "{ a = 1; }");
 }
 
 #undef test

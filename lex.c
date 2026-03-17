@@ -32,16 +32,16 @@ typedef struct {
   umi    length;
 } Slice_Token;
 
-void slice_token_push(Slice_Token slice, Token item) {
-  slice.base[slice.length++] = item;
+void slice_token_push(Slice_Token* slice, Token item) {
+  slice->base[slice->length++] = item;
 }
 
-Token slice_token_pop(Slice_Token slice) {
-  return slice.base[slice.length--];
+Token slice_token_pop(Slice_Token* slice) {
+  return slice->base[slice->length--];
 }
 
-Token slice_token_at(Slice_Token slice, s32 at) {
-  return slice.base[at];
+Token slice_token_at(Slice_Token* slice, s32 at) {
+  return slice->base[at];
 }
 
 
@@ -57,6 +57,7 @@ Lexer lexer = {0};
 
 Slice_Token lex_source(cstr source, cstr file_path) {
   Slice_Token slice_token = {0};
+  slice_token.base = malloc(MB(2));
   lexer.source = source;
   lexer.stream = source;
   lexer.file_path = file_path;
@@ -69,12 +70,12 @@ Slice_Token lex_source(cstr source, cstr file_path) {
     case ' ': case '\t': case '\v' :
       lexer.stream++;
       lexer.wasspace = true;
-      break;
-    case '\n': case '\r': {
+      continue;
+    case '\n': case '\r': 
       lexer.stream++;
       lexer.wasspace = true;
       lexer.wasnewline = true;
-    } break;
+      continue;
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
     case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
     case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
@@ -111,11 +112,18 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       }
       lexer.stream++;
     } break;
-    default: {} break;
+    case '\0': {
+      token.kind = TokenKind_eof;
+    } break;
+    default: {
+      lexer.stream++;
+    } break;
     }
 
-    slice_token_push(slice_token, token);
+    slice_token_push(&slice_token, token);
   }
+  token.kind = TokenKind_eof;
+  slice_token_push(&slice_token, token);
   return slice_token;
 }
 
