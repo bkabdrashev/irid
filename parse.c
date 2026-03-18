@@ -4,6 +4,7 @@ typedef enum {
 } AstFlag;
 
 typedef enum {
+  AstKind_name = TokenKind_name,
   AstKind_add = TokenKind_plus  | AstFlag_binary,
   AstKind_sub = TokenKind_minus | AstFlag_binary,
   AstKind_neg = TokenKind_minus | AstFlag_unary,
@@ -16,6 +17,7 @@ typedef struct {
   AstKind kind;
   union {
     u32 value;
+    istr str;
   };
 } Ast; 
 
@@ -34,20 +36,20 @@ typedef struct {
   umi  length;
 } Slice_Ast;
 
-s32 slice_ast_push(Slice_Ast slice, Ast item) {
-  s32 index = slice.length;
-  slice.base[slice.length++] = item;
+s32 slice_ast_push(Slice_Ast* slice, Ast item) {
+  s32 index = slice->length;
+  slice->base[slice->length++] = item;
   return index;
 }
 
-Ast slice_ast_pop(Slice_Ast slice) {
-  return slice.base[--slice.length];
+Ast slice_ast_pop(Slice_Ast* slice) {
+  return slice->base[--slice->length];
 }
-Ast slice_ast_top(Slice_Ast slice) {
-  return slice.base[slice.length-1];
+Ast slice_ast_top(Slice_Ast* slice) {
+  return slice->base[slice->length-1];
 }
-b8 slice_ast_empty(Slice_Ast slice) {
-  return slice.length == 0;
+b8 slice_ast_empty(Slice_Ast* slice) {
+  return slice->length == 0;
 }
 
 typedef struct {
@@ -55,12 +57,12 @@ typedef struct {
   umi  length;
 } Slice_Parse_State;
 
-void slice_parse_state_push(Slice_Parse_State slice, Parse_State item) {
-  slice.base[slice.length++] = item;
+void slice_parse_state_push(Slice_Parse_State* slice, Parse_State item) {
+  slice->base[slice->length++] = item;
 }
 
-Parse_State slice_parse_state_pop(Slice_Parse_State slice) {
-  return slice.base[slice.length--];
+Parse_State slice_parse_state_pop(Slice_Parse_State* slice) {
+  return slice->base[slice->length--];
 }
 
 typedef struct {
@@ -77,38 +79,38 @@ Parser parser = {0};
 
 Astid parse_ast_final_push(AstKind kind, s32 value) {
   Ast ast = { .kind = kind, .value = value };
-  Astid astid = { .index = slice_ast_push(parser.ast_final, ast) };
+  Astid astid = { .index = slice_ast_push(&parser.ast_final, ast) };
   return astid;
 }
 
 void parse_ast_final_push_unary() {
   Token token = slice_token_at(&parser.tokens, parser.tok);
   Ast ast = { .kind = token.kind | AstFlag_unary, .value = token.value };
-  slice_ast_push(parser.ast_final, ast);
+  slice_ast_push(&parser.ast_final, ast);
 }
 
 void parse_ast_stack_transfer_to_ast_final() {
-  Ast ast = slice_ast_pop(parser.ast_stack);
-  slice_ast_push(parser.ast_final, ast);
+  Ast ast = slice_ast_pop(&parser.ast_stack);
+  slice_ast_push(&parser.ast_final, ast);
 }
 
 b8 parse_ast_stack_is_top(TokenKind kind) {
-  Ast ast = slice_ast_top(parser.ast_stack);
+  Ast ast = slice_ast_top(&parser.ast_stack);
   return ast.kind == (AstKind)kind;
 }
 
 void parse_ast_stack_push(AstKind kind, s32 value) {
   Ast ast = { .kind = kind, .value = value };
-  slice_ast_push(parser.ast_stack, ast);
+  slice_ast_push(&parser.ast_stack, ast);
 }
 
 void parse_ast_stack_push_kind(AstKind kind) {
   Ast ast = { .kind = kind, .value = 0 };
-  slice_ast_push(parser.ast_stack, ast);
+  slice_ast_push(&parser.ast_stack, ast);
 }
 
 Ast parse_ast_stack_pop() {
-  return slice_ast_pop(parser.ast_stack);
+  return slice_ast_pop(&parser.ast_stack);
 }
 
 s32 parse_infix_left_precedence(TokenKind kind) {
@@ -129,8 +131,8 @@ s32 parse_infix_right_precedence(TokenKind kind) {
 
 b32 parse_ast_stack_is_top_higher_precedence() {
   Token token = slice_token_at(&parser.tokens, parser.tok);
-  if (slice_ast_empty(parser.ast_stack)) return true;
-  Ast stack_ast = slice_ast_top(parser.ast_stack);
+  if (slice_ast_empty(&parser.ast_stack)) return true;
+  Ast stack_ast = slice_ast_top(&parser.ast_stack);
   s32 on_stack_precedence  = parse_infix_left_precedence((TokenKind)stack_ast.kind);
   s32 on_stream_precedence = parse_infix_right_precedence(token.kind);
   if (on_stack_precedence <= on_stream_precedence) {
@@ -140,12 +142,12 @@ b32 parse_ast_stack_is_top_higher_precedence() {
 }
 
 Parse_State parse_state_stack_pop() {
-  Parse_State state = slice_parse_state_pop(parser.state_stack);
+  Parse_State state = slice_parse_state_pop(&parser.state_stack);
   return state;
 }
 
 void parse_state_stack_push(Parse_State parse_state) {
-  slice_parse_state_push(parser.state_stack, parse_state);
+  slice_parse_state_push(&parser.state_stack, parse_state);
 }
 
 Token parse_current_token() {
@@ -163,6 +165,10 @@ b8 parse_is_current_token(TokenKind kind) {
 b8 parse_current_token_is_flag(TokenFlag flag) {
   Token token = parse_current_token();
   return (token.kind & flag) != 0;
+}
+
+void parse_next_token() {
+  parser.tok++;
 }
 
 b8 parse_is_token_separates_expression() {
@@ -211,6 +217,7 @@ void parse_expression() {
         break;
       default: break;
       }
+      parse_next_token();
     } break;
     case Parse_State_infix_or_suffix: {
       Token token = parse_current_token();
@@ -251,15 +258,15 @@ Astid parse_statement() {
 }
 
 Astid parse_tokens(Slice_Token tokens) {
-  parser.ast_final.base = malloc(GB(2));
-  parser.ast_stack.base = malloc(GB(2));
+  parser.ast_final.base = malloc(MB(2));
+  parser.ast_stack.base = malloc(MB(2));
+  parser.state_stack.base = malloc(MB(2));
   parser.tokens = tokens;
   parser.tok = 0;
   s32 statements = 0;
   while (!parse_is_current_token(TokenKind_eof)) {
-    parse_statement();
+    parse_expression();
     statements++;
-    parser.tok++;
   }
   Astid block = parse_ast_final_push(AstKind_block, statements);
   return block;
@@ -271,10 +278,23 @@ Astid astid_from_source(cstr source, cstr path) {
   return astid;
 }
 
-cstr cstr_from_astid(Astid astid) {
+void string_builder_push_ast(String_Builder* sb, Ast ast) {
+  switch (ast.kind) {
+  case AstKind_add:
+    string_builder_push_cstr(sb, " + ");
+    break;
+  case AstKind_name:
+    string_builder_push_istr(sb, ast.str);
+  default: {
+  }break;
+  }
+}
+
+cstr cstr_from_slice_ast(Slice_Ast* slice) {
+  String_Builder sb = string_builder_begin(&temp_arena);
   Ast ast = parser.ast_final.base[astid.index];
-  if (ast.kind == AstKind_add) return "+";
-  return "test";
+  cstr str = string_builder_end(&sb);
+  return str;
 }
 
 cstr source_to_cstr_from_ast(cstr source, cstr name) {
