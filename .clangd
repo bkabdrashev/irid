@@ -1,0 +1,4 @@
+If:
+  PathMatch: [.*\.h, .*\.c]
+CompileFlags:
+  Add: [-include, ./includes.h]
