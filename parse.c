@@ -17,7 +17,7 @@ typedef struct {
   AstKind kind;
   union {
     u32 value;
-    istr str;
+    Istr istr;
   };
 } Ast; 
 
@@ -89,6 +89,10 @@ void parse_ast_final_push_unary() {
   slice_ast_push(&parser.ast_final, ast);
 }
 
+b8 parse_ast_stack_is_empty() {
+  return slice_ast_empty(&parser.ast_stack);
+}
+
 void parse_ast_stack_transfer_to_ast_final() {
   Ast ast = slice_ast_pop(&parser.ast_stack);
   slice_ast_push(&parser.ast_final, ast);
@@ -129,12 +133,11 @@ s32 parse_infix_right_precedence(TokenKind kind) {
   }
 }
 
-b32 parse_ast_stack_is_top_higher_precedence() {
-  Token token = slice_token_at(&parser.tokens, parser.tok);
+b8 parse_ast_stack_is_top_higher_precedence(TokenKind kind) {
   if (slice_ast_empty(&parser.ast_stack)) return true;
   Ast stack_ast = slice_ast_top(&parser.ast_stack);
   s32 on_stack_precedence  = parse_infix_left_precedence((TokenKind)stack_ast.kind);
-  s32 on_stream_precedence = parse_infix_right_precedence(token.kind);
+  s32 on_stream_precedence = parse_infix_right_precedence(kind);
   if (on_stack_precedence <= on_stream_precedence) {
     return false;
   }
@@ -180,6 +183,7 @@ void parse_expression() {
   while (!parse_is_token_separates_expression()) {
     switch (parse_state_stack_pop()) {
     case Parse_State_expression: {
+      printf("expressoin\n");
       Token token = parse_current_token();
       switch (token.kind) {
       case TokenKind_minus_prefix: case TokenKind_minus:
@@ -220,27 +224,28 @@ void parse_expression() {
       parse_next_token();
     } break;
     case Parse_State_infix_or_suffix: {
+      printf("infix or suffix\n");
       Token token = parse_current_token();
       switch (token.kind) {
       case TokenKind_plus:
       case TokenKind_minus:
       case TokenKind_star:
       case TokenKind_brace_open:
-        while (parse_ast_stack_is_top_higher_precedence()) {
+        while (parse_ast_stack_is_top_higher_precedence(token.kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
         parse_ast_stack_push((AstKind)token.kind, token.value);
         parse_state_stack_push(Parse_State_expression);
         break;
       case TokenKind_at:
-        while (parse_ast_stack_is_top_higher_precedence()) {
+        while (parse_ast_stack_is_top_higher_precedence(token.kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
         parse_ast_final_push((AstKind)token.kind, token.value);
         parse_state_stack_push(Parse_State_infix_or_suffix);
         break;
       default:
-        while (parse_ast_stack_is_top_higher_precedence()) {
+        while (parse_ast_stack_is_top_higher_precedence(token.kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
         parse_ast_stack_push_kind(AstKind_call);
@@ -249,6 +254,9 @@ void parse_expression() {
       }
     } break;
     }
+  }
+  while (!parse_ast_stack_is_empty()) {
+    parse_ast_stack_transfer_to_ast_final();
   }
 }
 
@@ -273,7 +281,9 @@ Astid parse_tokens(Slice_Token tokens) {
 }
 
 Astid astid_from_source(cstr source, cstr path) {
+  istr_init();
   Slice_Token tokens = lex_source(source, path);
+  // printf("%s\n", cstr_from_slice_token(tokens));
   Astid astid = parse_tokens(tokens);
   return astid;
 }
@@ -284,22 +294,26 @@ void string_builder_push_ast(String_Builder* sb, Ast ast) {
     string_builder_push_cstr(sb, " + ");
     break;
   case AstKind_name:
-    string_builder_push_istr(sb, ast.str);
+    string_builder_push_istr(sb, ast.istr);
+    break;
   default: {
+    string_builder_push_cstr(sb, "<error>");
   }break;
   }
 }
 
-cstr cstr_from_slice_ast(Slice_Ast* slice) {
+cstr cstr_from_slice_ast(Slice_Ast slice) {
   String_Builder sb = string_builder_begin(&temp_arena);
-  Ast ast = parser.ast_final.base[astid.index];
+  for (Ast* ast = slice.base; ast < slice.base + slice.length; ast++) {
+    string_builder_push_ast(&sb, *ast);
+  }
   cstr str = string_builder_end(&sb);
   return str;
 }
 
 cstr source_to_cstr_from_ast(cstr source, cstr name) {
-  Astid astid = astid_from_source(source, name);
-  return cstr_from_astid(astid);
+  astid_from_source(source, name);
+  return cstr_from_slice_ast(parser.ast_final);
 }
 
 cstr cstr_from_source_info(cstr file_name, s32 line) {
@@ -317,8 +331,8 @@ cstr cstr_from_source_info(cstr file_name, s32 line) {
 
 b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
   arena_init(&temp_arena, MB(2));
-  Astid astid = astid_from_source(source, cstr_from_source_info(file_name, line));
-  b32 result = test_at_source(cstr_from_astid(astid), expected, file_name, line, source);
+  cstr resulted = source_to_cstr_from_ast(source, cstr_from_source_info(file_name, line));
+  b8 result = test_at_source(resulted, expected, file_name, line, source);
   return result;
 }
 

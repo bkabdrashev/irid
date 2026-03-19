@@ -24,6 +24,7 @@ typedef struct {
   union {
     s64 s64_val;
     u64 value;
+    Istr istr;
   };
 } Token;
 
@@ -83,10 +84,12 @@ Slice_Token lex_source(cstr source, cstr file_path) {
     case 'K': case 'L': case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T':
     case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
     {
+      cstr start = lexer.stream;
       token.kind = TokenKind_name;
       while (isalnum(*lexer.stream)) {
         lexer.stream++;
       }
+      token.istr = istr_from_range(start, lexer.stream);
     } break;
     case '+': {
       token.kind = TokenKind_plus;
@@ -125,6 +128,60 @@ Slice_Token lex_source(cstr source, cstr file_path) {
   token.kind = TokenKind_eof;
   slice_token_push(&slice_token, token);
   return slice_token;
+}
+
+cstr cstr_from_slice_token(Slice_Token slice) {
+  String_Builder sb = string_builder_begin(&temp_arena);
+  for (Token* token = slice.base; token < slice.base + slice.length; token++) {
+    switch (token->kind) {
+    case TokenKind_eof:
+      string_builder_push_cstr(&sb, "eof");
+      break;
+    case TokenKind_name:
+      cstr str =  cstr_from_istr(token->istr);
+      string_builder_push_cstr(&sb, str);
+      break;
+    case TokenKind_int:
+      string_builder_push_cstr(&sb, "todo");
+      break;
+    case TokenKind_plus:
+      string_builder_push_cstr(&sb, " + ");
+      break;
+    case TokenKind_plus_prefix:
+      string_builder_push_cstr(&sb, " prefix + ");
+      break;
+    case TokenKind_minus:
+      string_builder_push_cstr(&sb, " - ");
+      break;
+    case TokenKind_minus_prefix:
+      string_builder_push_cstr(&sb, " prefix - ");
+      break;
+    case TokenKind_star:
+      string_builder_push_cstr(&sb, " * ");
+      break;
+    case TokenKind_at:
+      string_builder_push_cstr(&sb, " @ ");
+      break;
+    case TokenKind_brace_open:
+      string_builder_push_cstr(&sb, " [ ");
+      break;
+    case TokenKind_brace_prefix_open:
+      string_builder_push_cstr(&sb, " prefix [ ");
+      break;
+    case TokenKind_brace_close:
+      string_builder_push_cstr(&sb, " ] ");
+      break;
+    case TokenKind_paren_open:
+      string_builder_push_cstr(&sb, " ( ");
+      break;
+    case TokenKind_paren_close:
+      string_builder_push_cstr(&sb, " ) ");
+      break;
+    }
+    string_builder_push_cstr(&sb, "\n");
+  }
+  cstr str = string_builder_end(&sb);
+  return str;
 }
 
 

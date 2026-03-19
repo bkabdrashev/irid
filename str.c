@@ -7,57 +7,72 @@ typedef struct {
 } Str;
 
 typedef struct {
-  umi buffer_len;
-  c8* buffer;
+  c8* buffer_top;
+  c8* buffer_bot;
   Str* strings;
-  Istr* istrs;
   umi len;
   umi cap;
 } Internal_Strings;
 
 Internal_Strings internal_strings = {0};
 void istr_init() {
-  internal_strings.buffer  = malloc(MB(4));
+  internal_strings.buffer_bot = malloc(MB(4));
+  internal_strings.buffer_top = internal_strings.buffer_bot;
   internal_strings.strings = malloc(MB(1));
-  internal_strings.istrs   = malloc(MB(1));
-  internal_strings.len        = 1;
-  internal_strings.cap        = MB(1);
-  internal_strings.buffer_len = 1;
-  internal_strings.buffer[0]  = '\0';
-  internal_strings.lengths[0] = 0;
-  internal_strings.strings[0] = (Str){ .base = internal_strings.buffer, .length = 0 };
+  internal_strings.len     = 0;
+  internal_strings.cap     = MB(1);
 }
 
 cstr cstr_from_istr(Istr istr) {
-  // TODO: figure it out!
   return internal_strings.strings[istr.index].base;
+}
+
+umi istr_length(Istr istr) {
+  return internal_strings.strings[istr.index].length;
 }
 
 Istr istr_from_cstr(cstr str) {
   umi len  = strlen(str);
-  assert(IS_POW2(internal_strings.cap));
-  assert(internal_strings.len < internal_strings.cap);
-  u64 i = hash_bytes(str, len);
+  Istr istr = { .index = hash_bytes(str, len) };
   for (;;) {
-    i &= internal_strings->cap - 1;
-    Str slice = internal_strings.strings[i];
+    istr.index &= internal_strings.cap - 1;
+    Str slice = internal_strings.strings[istr.index];
     if (!slice.base) {
-      slice.base = internal_strings.buffer + internal_strings.buffer_len;
+      slice.base = internal_strings.buffer_top;
       slice.length = len;
       memcpy(slice.base, str, len + 1);
-      internal_strings.buffer_len += len + 1;
+      internal_strings.buffer_top += len + 1;
+      internal_strings.strings[istr.index] = slice;
       return istr;
     }
-    else {
-      cstr iternal_cstr  = internal_strings.strings[istr.index];
-      umi iternal_length = internal_strings.lengths[istr.index];
-      if (iternal_length == len && strncmp(iternal_cstr, str, len) == 0) {
-        return internal_strings->istrs[i];
-      }
+    else if (slice.length == len && strncmp(slice.base, str, len) == 0) {
+      return istr;
     }
-    i++;
+    istr.index++;
   }
   return (Istr){0};
+}
+
+Istr istr_from_range(cstr begin, cstr end) {
+  umi len   = end - begin;
+  Istr istr = { .index = hash_bytes(begin, len) };
+  for (;;) {
+    istr.index &= internal_strings.cap - 1;
+    Str slice = internal_strings.strings[istr.index];
+    if (!slice.base) {
+      slice.base = internal_strings.buffer_top;
+      slice.length = len;
+      memcpy(slice.base, begin, len);
+      slice.base[len] = '\0';
+      internal_strings.buffer_top += len + 1;
+      internal_strings.strings[istr.index] = slice;
+      return istr;
+    }
+    else if (slice.length == len && strncmp(slice.base, begin, len) == 0) {
+      return istr;
+    }
+    istr.index++;
+  }
 }
 
 typedef struct {
@@ -81,7 +96,7 @@ void string_builder_push_cstr(String_Builder* sb, cstr str) {
 }
 
 void string_builder_push_istr(String_Builder* sb, Istr str) {
-  cstr internal = istr_get(str);
+  cstr internal = cstr_from_istr(str);
   string_builder_push_cstr(sb, internal);
 }
 

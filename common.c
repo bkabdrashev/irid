@@ -59,3 +59,14 @@ void* arena_alloc(Arena* arena, umi size) {
 }
 
 Arena temp_arena = {0};
+
+u64 hash_bytes(const void* ptr, u64 len) {
+  u64 x = 0xcbf29ce484222325;
+  c8* buf = (c8 *)ptr;
+  for (u64 i = 0; i < len; i++) {
+    x ^= buf[i];
+    x *= 0x100000001b3;
+    x ^= x >> 32;
+  }
+  return x;
+}
