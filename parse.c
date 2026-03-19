@@ -4,10 +4,12 @@ typedef enum {
 } AstFlag;
 
 typedef enum {
+  AstKind_eof  = TokenKind_eof,
   AstKind_name = TokenKind_name,
-  AstKind_add = TokenKind_plus  | AstFlag_binary,
-  AstKind_sub = TokenKind_minus | AstFlag_binary,
-  AstKind_neg = TokenKind_minus | AstFlag_unary,
+  AstKind_add  = TokenKind_plus  | AstFlag_binary,
+  AstKind_sub  = TokenKind_minus | AstFlag_binary,
+  AstKind_mul  = TokenKind_star  | AstFlag_binary,
+  AstKind_neg  = TokenKind_minus | AstFlag_unary,
   AstKind_arr  = TokenKind_brace_close | AstFlag_binary,
   AstKind_call = 123 | AstFlag_binary,
   AstKind_block = 124 | AstFlag_binary,
@@ -16,7 +18,8 @@ typedef enum {
 typedef struct {
   AstKind kind;
   union {
-    u32 value;
+    u64 value;
+    s64 val_s64;
     Istr istr;
   };
 } Ast; 
@@ -62,7 +65,7 @@ void slice_parse_state_push(Slice_Parse_State* slice, Parse_State item) {
 }
 
 Parse_State slice_parse_state_pop(Slice_Parse_State* slice) {
-  return slice->base[slice->length--];
+  return slice->base[--slice->length];
 }
 
 typedef struct {
@@ -117,26 +120,26 @@ Ast parse_ast_stack_pop() {
   return slice_ast_pop(&parser.ast_stack);
 }
 
-s32 parse_infix_left_precedence(TokenKind kind) {
+s32 parse_infix_left_precedence(AstKind kind) {
   switch (kind) {
-  case TokenKind_plus: return 11;
-  case TokenKind_star: return 13;
-  default :            return -1;
+  case AstKind_add: return 11;
+  case AstKind_mul:  return 13;
+  default :          return -1;
   }
 }
 
-s32 parse_infix_right_precedence(TokenKind kind) {
+s32 parse_infix_right_precedence(AstKind kind) {
   switch (kind) {
-  case TokenKind_plus: return 12;
-  case TokenKind_star: return 14;
-  default :            return -1;
+  case AstKind_add: return 12;
+  case AstKind_mul: return 14;
+  default :         return -1;
   }
 }
 
-b8 parse_ast_stack_is_top_higher_precedence(TokenKind kind) {
-  if (slice_ast_empty(&parser.ast_stack)) return true;
+b8 parse_ast_stack_is_top_higher_precedence(AstKind kind) {
+  if (slice_ast_empty(&parser.ast_stack)) return false;
   Ast stack_ast = slice_ast_top(&parser.ast_stack);
-  s32 on_stack_precedence  = parse_infix_left_precedence((TokenKind)stack_ast.kind);
+  s32 on_stack_precedence  = parse_infix_left_precedence(stack_ast.kind);
   s32 on_stream_precedence = parse_infix_right_precedence(kind);
   if (on_stack_precedence <= on_stream_precedence) {
     return false;
@@ -180,10 +183,11 @@ b8 parse_is_token_separates_expression() {
 }
 
 void parse_expression() {
+  // TODO: 1) seprates expresssion is wrong (a+b) does seprate but we should keep going
+  //       2) state info is wrong: (a+b) is in infix state when ) is proccessed
   while (!parse_is_token_separates_expression()) {
     switch (parse_state_stack_pop()) {
     case Parse_State_expression: {
-      printf("expressoin\n");
       Token token = parse_current_token();
       switch (token.kind) {
       case TokenKind_minus_prefix: case TokenKind_minus:
@@ -221,39 +225,41 @@ void parse_expression() {
         break;
       default: break;
       }
-      parse_next_token();
     } break;
     case Parse_State_infix_or_suffix: {
-      printf("infix or suffix\n");
       Token token = parse_current_token();
       switch (token.kind) {
       case TokenKind_plus:
       case TokenKind_minus:
       case TokenKind_star:
-      case TokenKind_brace_open:
-        while (parse_ast_stack_is_top_higher_precedence(token.kind)) {
+      case TokenKind_brace_open: {
+        AstKind kind = (AstKind)token.kind | AstFlag_binary;
+        while (parse_ast_stack_is_top_higher_precedence(kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
-        parse_ast_stack_push((AstKind)token.kind, token.value);
+        parse_ast_stack_push(kind, token.value);
         parse_state_stack_push(Parse_State_expression);
-        break;
-      case TokenKind_at:
-        while (parse_ast_stack_is_top_higher_precedence(token.kind)) {
+      } break;
+      case TokenKind_at: {
+        AstKind kind = (AstKind)token.kind;
+        while (parse_ast_stack_is_top_higher_precedence(kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
-        parse_ast_final_push((AstKind)token.kind, token.value);
+        parse_ast_final_push(kind, token.value);
         parse_state_stack_push(Parse_State_infix_or_suffix);
-        break;
-      default:
-        while (parse_ast_stack_is_top_higher_precedence(token.kind)) {
+      } break;
+      default: {
+        AstKind kind = (AstKind)token.kind;
+        while (parse_ast_stack_is_top_higher_precedence(kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
         parse_ast_stack_push_kind(AstKind_call);
         parse_state_stack_push(Parse_State_infix_or_suffix);
-        break;
+      } break;
       }
     } break;
     }
+    parse_next_token();
   }
   while (!parse_ast_stack_is_empty()) {
     parse_ast_stack_transfer_to_ast_final();
@@ -288,17 +294,34 @@ Astid astid_from_source(cstr source, cstr path) {
   return astid;
 }
 
+void string_builder_push_s64(String_Builder* sb, s64 val) {
+  c8 line_str[20];
+  sprintf(line_str, "%li", val);
+  string_builder_push_cstr(sb, line_str);
+}
+
 void string_builder_push_ast(String_Builder* sb, Ast ast) {
   switch (ast.kind) {
   case AstKind_add:
-    string_builder_push_cstr(sb, " + ");
-    break;
+    string_builder_push_cstr(sb, "+");
+  break;
+  case AstKind_mul:
+    string_builder_push_cstr(sb, "*");
+  break;
   case AstKind_name:
-    string_builder_push_istr(sb, ast.istr);
-    break;
-  default: {
+    cstr str = cstr_from_istr(ast.istr);
+    string_builder_push_cstr(sb, str);
+  break;
+  case AstKind_block:
+    string_builder_push_cstr(sb, "block ");
+    string_builder_push_s64(sb, ast.val_s64);
+  break;
+  case AstKind_eof:
+    string_builder_push_cstr(sb, "eof");
+  break;
+  default: 
     string_builder_push_cstr(sb, "<error>");
-  }break;
+  break;
   }
 }
 
@@ -306,6 +329,7 @@ cstr cstr_from_slice_ast(Slice_Ast slice) {
   String_Builder sb = string_builder_begin(&temp_arena);
   for (Ast* ast = slice.base; ast < slice.base + slice.length; ast++) {
     string_builder_push_ast(&sb, *ast);
+    string_builder_push_cstr(&sb, ", ");
   }
   cstr str = string_builder_end(&sb);
   return str;
@@ -339,7 +363,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a + b", "{ a = 1; }");
+  test("(a+b)", "{ a = 1; }");
 }
 
 #undef test

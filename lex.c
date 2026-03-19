@@ -104,8 +104,16 @@ Slice_Token lex_source(cstr source, cstr file_path) {
        token.kind = TokenKind_minus_prefix;
       }
     } break;
+    case '*': {
+      token.kind = TokenKind_star;
+      lexer.stream++;
+    } break;
     case '(': {
       token.kind = TokenKind_paren_open;
+      lexer.stream++;
+    } break;
+    case ')': {
+      token.kind = TokenKind_paren_close;
       lexer.stream++;
     } break;
     case '[': {
@@ -113,6 +121,10 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       if (lexer.wasnewline) {
         token.kind = TokenKind_brace_prefix_open;
       }
+      lexer.stream++;
+    } break;
+    case ']': {
+      token.kind = TokenKind_brace_close;
       lexer.stream++;
     } break;
     case '\0': {
@@ -123,6 +135,8 @@ Slice_Token lex_source(cstr source, cstr file_path) {
     } break;
     }
 
+    lexer.wasnewline = false;
+    lexer.wasspace   = false;
     slice_token_push(&slice_token, token);
   }
   token.kind = TokenKind_eof;
