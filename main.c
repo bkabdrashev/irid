@@ -1,3 +1,4 @@
+// gcc -g -Wall -Wextra -pedantic -fsanitize=address -fanalyzer main.c && ./a.out
 #include "includes.h"
 // #include "irgen.c"
 // #include "typeid.c"

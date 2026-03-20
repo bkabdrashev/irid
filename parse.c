@@ -248,6 +248,13 @@ void parse_expression() {
         parse_ast_final_push(kind, token.value);
         parse_state_stack_push(Parse_State_infix_or_suffix);
       } break;
+      case TokenKind_paren_close:
+        while (!parse_ast_stack_is_top(TokenKind_paren_open)) {
+          parse_ast_stack_transfer_to_ast_final();
+        }
+        parse_ast_stack_pop(); // pops TokenKind_paren_open
+        parse_state_stack_push(Parse_State_infix_or_suffix);
+        break;
       default: {
         AstKind kind = (AstKind)token.kind;
         while (parse_ast_stack_is_top_higher_precedence(kind)) {
@@ -272,13 +279,14 @@ Astid parse_statement() {
 }
 
 Astid parse_tokens(Slice_Token tokens) {
-  parser.ast_final.base = malloc(MB(2));
-  parser.ast_stack.base = malloc(MB(2));
-  parser.state_stack.base = malloc(MB(2));
+  parser.ast_final.base = xmalloc(MB(2));
+  parser.ast_stack.base = xmalloc(MB(2));
+  parser.state_stack.base = xmalloc(MB(2));
   parser.tokens = tokens;
   parser.tok = 0;
   s32 statements = 0;
   while (!parse_is_current_token(TokenKind_eof)) {
+    parse_state_stack_push(Parse_State_expression);
     parse_expression();
     statements++;
   }
@@ -289,7 +297,7 @@ Astid parse_tokens(Slice_Token tokens) {
 Astid astid_from_source(cstr source, cstr path) {
   istr_init();
   Slice_Token tokens = lex_source(source, path);
-  // printf("%s\n", cstr_from_slice_token(tokens));
+  printf("%s\n", cstr_from_slice_token(tokens));
   Astid astid = parse_tokens(tokens);
   return astid;
 }
@@ -308,10 +316,10 @@ void string_builder_push_ast(String_Builder* sb, Ast ast) {
   case AstKind_mul:
     string_builder_push_cstr(sb, "*");
   break;
-  case AstKind_name:
+  case AstKind_name: {
     cstr str = cstr_from_istr(ast.istr);
     string_builder_push_cstr(sb, str);
-  break;
+  } break;
   case AstKind_block:
     string_builder_push_cstr(sb, "block ");
     string_builder_push_s64(sb, ast.val_s64);
@@ -354,16 +362,17 @@ cstr cstr_from_source_info(cstr file_name, s32 line) {
 }
 
 b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
-  arena_init(&temp_arena, MB(2));
+  arena_init(&temp_arena, MB(4));
   cstr resulted = source_to_cstr_from_ast(source, cstr_from_source_info(file_name, line));
   b8 result = test_at_source(resulted, expected, file_name, line, source);
+  arena_free(&temp_arena);
   return result;
 }
 
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("(a+b)", "{ a = 1; }");
+  test("((a*b+c*d))*e", "{ a = 1; }");
 }
 
 #undef test

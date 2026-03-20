@@ -39,23 +39,27 @@ typedef intptr_t  smp; //   signed memory pointer
 typedef struct {
   c8* base;
   c8* top;
-  umi   size;
+  umi   capacity;
   s8    alignment;
 } Arena; 
 
-void arena_init(Arena* arena, umi size) {
-  arena->base = malloc(size);
+void arena_init(Arena* arena, umi capacity) {
+  arena->base = malloc(capacity);
   arena->top = arena->base;
-  arena->size = size;
+  arena->capacity = capacity;
   arena->alignment = 8;
 }
 
 void* arena_alloc(Arena* arena, umi size) {
-  assert(arena->top + size <= arena->base + arena->size);
+  assert(arena->top + size <= arena->base + arena->capacity);
   umi first_bits_off_mask = ~(arena->alignment - 1);
   umi overshoot_up        = ((umi)arena->top + size + arena->alignment - 1);
   arena->top = (void*)(overshoot_up & first_bits_off_mask);
   return arena->top;
+}
+
+void arena_free(Arena* arena) {
+  arena->top = arena->base;
 }
 
 Arena temp_arena = {0};
@@ -69,4 +73,13 @@ u64 hash_bytes(const void* ptr, u64 len) {
     x ^= x >> 32;
   }
   return x;
+}
+
+void* xmalloc(umi num_bytes) {
+  void* ptr = malloc(num_bytes);
+  if (!ptr) {
+    perror("xmalloc failed");
+    exit(1);
+  }
+  return ptr;
 }

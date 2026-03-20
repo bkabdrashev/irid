@@ -14,9 +14,9 @@ typedef enum {
   TokenKind_at                 = 8,
   TokenKind_brace_open         = 9,
   TokenKind_brace_prefix_open  = 10,
-  TokenKind_brace_close        = 11 | TokenFlag_separates,
+  TokenKind_brace_close        = 11,
   TokenKind_paren_open         = 12,
-  TokenKind_paren_close        = 13 | TokenFlag_separates,
+  TokenKind_paren_close        = 13,
 } TokenKind;
 
 typedef struct {
@@ -58,7 +58,7 @@ Lexer lexer = {0};
 
 Slice_Token lex_source(cstr source, cstr file_path) {
   Slice_Token slice_token = {0};
-  slice_token.base = malloc(MB(2));
+  slice_token.base = xmalloc(MB(2));
   lexer.source = source;
   lexer.stream = source;
   lexer.file_path = file_path;
