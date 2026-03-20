@@ -151,10 +151,10 @@ cstr cstr_from_slice_token(Slice_Token slice) {
     case TokenKind_eof:
       string_builder_push_cstr(&sb, "eof");
       break;
-    case TokenKind_name:
+    case TokenKind_name: {
       cstr str =  cstr_from_istr(token->istr);
       string_builder_push_cstr(&sb, str);
-      break;
+    } break;
     case TokenKind_int:
       string_builder_push_cstr(&sb, "todo");
       break;

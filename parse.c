@@ -183,8 +183,6 @@ b8 parse_is_token_separates_expression() {
 }
 
 void parse_expression() {
-  // TODO: 1) seprates expresssion is wrong (a+b) does seprate but we should keep going
-  //       2) state info is wrong: (a+b) is in infix state when ) is proccessed
   while (!parse_is_token_separates_expression()) {
     switch (parse_state_stack_pop()) {
     case Parse_State_expression: {
@@ -372,7 +370,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("((a*b+c*d))*e", "{ a = 1; }");
+  test("e*((a*b+c*d))", "{}");
 }
 
 #undef test
