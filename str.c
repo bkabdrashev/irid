@@ -77,28 +77,70 @@ Istr istr_from_range(cstr begin, cstr end) {
 
 typedef struct {
   c8* base;
-  umi length;
+  umi size;
+  umi capacity;
 } String_Builder;
 
 String_Builder string_builder_begin(Arena* arena) {
   String_Builder sb;
   sb.base = arena_alloc(arena, MB(1));
-  sb.length = 0;
+  sb.capacity = MB(1);
+  sb.size = 0;
   return sb;
 }
 
 cstr string_builder_end(String_Builder* sb) {
+  sb->base[sb->size] = '\0';
   return sb->base;
 }
 
 void string_builder_push_cstr(String_Builder* sb, cstr str) {
-  strcat(sb->base, str);
+  while (*str) {
+    sb->base[sb->size++] = *str++;
+  }
+}
+
+void string_builder_push_s64(String_Builder* sb, s64 val) {
+  c8 line_str[20];
+  sprintf(line_str, "%li", val);
+  string_builder_push_cstr(sb, line_str);
 }
 
 void string_builder_push_istr(String_Builder* sb, Istr str) {
   cstr internal = cstr_from_istr(str);
   string_builder_push_cstr(sb, internal);
 }
+
+void string_builder_push_string_builder(String_Builder* sb, String_Builder one) {
+  for (umi i = 0; i < one.size; i++) {
+    sb->base[sb->size++] = one.base[i];
+  }
+}
+
+typedef struct {
+  String_Builder* base;
+  umi  length;
+} Slice_String_Builder;
+
+s32 slice_string_builder_push(Slice_String_Builder* slice, String_Builder item) {
+  s32 index = slice->length;
+  slice->base[slice->length++] = item;
+  return index;
+}
+String_Builder slice_string_builder_pop(Slice_String_Builder* slice) {
+  return slice->base[--slice->length];
+}
+String_Builder slice_string_builder_top(Slice_String_Builder* slice) {
+  return slice->base[slice->length-1];
+}
+String_Builder slice_string_builder_from_top(Slice_String_Builder* slice, s32 index) {
+  return slice->base[slice->length-1 - index];
+}
+b8 slice_string_builder_empty(Slice_String_Builder* slice) {
+  return slice->length == 0;
+}
+
+
 
 b8 cstr_eq(cstr a, cstr b) {
   return strcmp(a, b) == 0;

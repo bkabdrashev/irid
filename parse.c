@@ -300,45 +300,73 @@ Astid astid_from_source(cstr source, cstr path) {
   return astid;
 }
 
-void string_builder_push_s64(String_Builder* sb, s64 val) {
-  c8 line_str[20];
-  sprintf(line_str, "%li", val);
-  string_builder_push_cstr(sb, line_str);
+void parse_stringify_push_binary(Slice_String_Builder* stack, cstr op) {
+  String_Builder two = slice_string_builder_pop(stack);
+  String_Builder one = slice_string_builder_pop(stack);
+  String_Builder sb = {0};
+  sb.base = arena_alloc(&temp_arena, one.size + two.size + 3 + 2);
+  string_builder_push_cstr(&sb, "(");
+  string_builder_push_string_builder(&sb,  one);
+  string_builder_push_cstr(&sb, op);
+  string_builder_push_string_builder(&sb,  two);
+  string_builder_push_cstr(&sb, ")");
+
+  slice_string_builder_push(stack, sb);
 }
 
-void string_builder_push_ast(String_Builder* sb, Ast ast) {
+void string_builder_push_ast(Slice_String_Builder* stack, Ast ast) {
   switch (ast.kind) {
   case AstKind_add:
-    string_builder_push_cstr(sb, "+");
+    parse_stringify_push_binary(stack, " + ");
   break;
   case AstKind_mul:
-    string_builder_push_cstr(sb, "*");
+    parse_stringify_push_binary(stack, " * ");
   break;
   case AstKind_name: {
-    cstr str = cstr_from_istr(ast.istr);
-    string_builder_push_cstr(sb, str);
+    String_Builder sb = {0};
+    sb.base = arena_alloc(&temp_arena, istr_length(ast.istr));
+    string_builder_push_cstr(&sb, cstr_from_istr(ast.istr));
+    slice_string_builder_push(stack, sb);
   } break;
-  case AstKind_block:
-    string_builder_push_cstr(sb, "block ");
-    string_builder_push_s64(sb, ast.val_s64);
-  break;
-  case AstKind_eof:
-    string_builder_push_cstr(sb, "eof");
-  break;
-  default: 
-    string_builder_push_cstr(sb, "<error>");
-  break;
+  case AstKind_block: {
+    // { a; b; }
+    umi size = 0;
+    for (s32 i = 0; i < ast.val_s64; i++) {
+      String_Builder one = slice_string_builder_from_top(stack, i);
+      size += one.size + 1 + 1;
+    }
+    String_Builder sb = {0};
+    sb.base = arena_alloc(&temp_arena, size + 3);
+    string_builder_push_cstr(&sb, "{ ");
+    for (s32 i = ast.val_s64-1; i >= 0; i--) {
+      String_Builder one = slice_string_builder_from_top(stack, i);
+      string_builder_push_string_builder(&sb, one);
+      string_builder_push_cstr(&sb, "; ");
+    }
+    for (s32 i = ast.val_s64-1; i >= 0; i--) {
+      slice_string_builder_pop(stack);
+    }
+    string_builder_push_cstr(&sb, "}");
+    slice_string_builder_push(stack, sb);
+  } break;
+  default: {
+    String_Builder sb = {0};
+    umi len = strlen("<error>");
+    sb.base = arena_alloc(&temp_arena, len);
+    string_builder_push_cstr(&sb, "<error>");
+    slice_string_builder_push(stack, sb);
+  } break;
   }
 }
 
 cstr cstr_from_slice_ast(Slice_Ast slice) {
-  String_Builder sb = string_builder_begin(&temp_arena);
+  Slice_String_Builder stack = {0};
+  stack.base = arena_alloc(&temp_arena, MB(1));
   for (Ast* ast = slice.base; ast < slice.base + slice.length; ast++) {
-    string_builder_push_ast(&sb, *ast);
-    string_builder_push_cstr(&sb, ", ");
+    string_builder_push_ast(&stack, *ast);
   }
-  cstr str = string_builder_end(&sb);
-  return str;
+  String_Builder final = stack.base[0];
+  return string_builder_end(&final);
 }
 
 cstr source_to_cstr_from_ast(cstr source, cstr name) {
@@ -360,10 +388,10 @@ cstr cstr_from_source_info(cstr file_name, s32 line) {
 }
 
 b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
-  arena_init(&temp_arena, MB(4));
+  arena_init(&temp_arena, GB(1));
   cstr resulted = source_to_cstr_from_ast(source, cstr_from_source_info(file_name, line));
   b8 result = test_at_source(resulted, expected, file_name, line, source);
-  arena_free(&temp_arena);
+  arena_free_all(&temp_arena);
   return result;
 }
 

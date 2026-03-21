@@ -52,13 +52,14 @@ void arena_init(Arena* arena, umi capacity) {
 
 void* arena_alloc(Arena* arena, umi size) {
   assert(arena->top + size <= arena->base + arena->capacity);
+  void* result = arena->top;
   umi first_bits_off_mask = ~(arena->alignment - 1);
   umi overshoot_up        = ((umi)arena->top + size + arena->alignment - 1);
   arena->top = (void*)(overshoot_up & first_bits_off_mask);
-  return arena->top;
+  return result;
 }
 
-void arena_free(Arena* arena) {
+void arena_free_all(Arena* arena) {
   arena->top = arena->base;
 }
 
