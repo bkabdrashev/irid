@@ -86,17 +86,17 @@ Astid parse_ast_final_push(AstKind kind, s32 value) {
   return astid;
 }
 
-void parse_ast_final_push_unary() {
+void parse_ast_final_push_unary(void) {
   Token token = slice_token_at(&parser.tokens, parser.tok);
   Ast ast = { .kind = token.kind | AstFlag_unary, .value = token.value };
   slice_ast_push(&parser.ast_final, ast);
 }
 
-b8 parse_ast_stack_is_empty() {
+b8 parse_ast_stack_is_empty(void) {
   return slice_ast_empty(&parser.ast_stack);
 }
 
-void parse_ast_stack_transfer_to_ast_final() {
+void parse_ast_stack_transfer_to_ast_final(void) {
   Ast ast = slice_ast_pop(&parser.ast_stack);
   slice_ast_push(&parser.ast_final, ast);
 }
@@ -116,7 +116,7 @@ void parse_ast_stack_push_kind(AstKind kind) {
   slice_ast_push(&parser.ast_stack, ast);
 }
 
-Ast parse_ast_stack_pop() {
+Ast parse_ast_stack_pop(void) {
   return slice_ast_pop(&parser.ast_stack);
 }
 
@@ -147,7 +147,7 @@ b8 parse_ast_stack_is_top_higher_precedence(AstKind kind) {
   return true;
 }
 
-Parse_State parse_state_stack_pop() {
+Parse_State parse_state_stack_pop(void) {
   Parse_State state = slice_parse_state_pop(&parser.state_stack);
   return state;
 }
@@ -156,11 +156,11 @@ void parse_state_stack_push(Parse_State parse_state) {
   slice_parse_state_push(&parser.state_stack, parse_state);
 }
 
-Token parse_current_token() {
+Token parse_current_token(void) {
   return parser.tokens.base[parser.tok];
 }
 
-TokenKind parse_current_token_kind() {
+TokenKind parse_current_token_kind(void) {
   return parser.tokens.base[parser.tok].kind;
 }
 
@@ -173,16 +173,16 @@ b8 parse_current_token_is_flag(TokenFlag flag) {
   return (token.kind & flag) != 0;
 }
 
-void parse_next_token() {
+void parse_next_token(void) {
   parser.tok++;
 }
 
-b8 parse_is_token_separates_expression() {
+b8 parse_is_token_separates_expression(void) {
   Token token = parse_current_token();
   return (token.kind & TokenFlag_separates) != 0;
 }
 
-void parse_expression() {
+void parse_expression(void) {
   while (!parse_is_token_separates_expression()) {
     switch (parse_state_stack_pop()) {
     case Parse_State_expression: {
@@ -271,7 +271,7 @@ void parse_expression() {
   }
 }
 
-Astid parse_statement() {
+Astid parse_statement(void) {
   Astid astid = {0};
   return astid;
 }

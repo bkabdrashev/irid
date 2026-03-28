@@ -15,7 +15,7 @@ typedef struct {
 } Internal_Strings;
 
 Internal_Strings internal_strings = {0};
-void istr_init() {
+void istr_init(void) {
   internal_strings.buffer_bot = malloc(MB(4));
   internal_strings.buffer_top = internal_strings.buffer_bot;
   internal_strings.strings = malloc(MB(1));
@@ -102,7 +102,7 @@ void string_builder_push_cstr(String_Builder* sb, cstr str) {
 
 void string_builder_push_s64(String_Builder* sb, s64 val) {
   c8 line_str[20];
-  sprintf(line_str, "%li", val);
+  sprintf(line_str, "%lli", val);
   string_builder_push_cstr(sb, line_str);
 }
 
