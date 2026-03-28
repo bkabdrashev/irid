@@ -102,7 +102,7 @@ void string_builder_push_cstr(String_Builder* sb, cstr str) {
 
 void string_builder_push_s64(String_Builder* sb, s64 val) {
   c8 line_str[20];
-  sprintf(line_str, "%lli", val);
+  sprintf(line_str, "%li", val);
   string_builder_push_cstr(sb, line_str);
 }
 
