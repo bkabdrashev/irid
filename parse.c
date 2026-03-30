@@ -301,7 +301,7 @@ Astid astid_from_source(cstr source, cstr path) {
   return astid;
 }
 
-void parse_stringify_push_binary(Slice_String_Builder* stack, cstr op) {
+void ast_stringify_push_binary(Slice_String_Builder* stack, cstr op) {
   String_Builder two = slice_string_builder_pop(stack);
   String_Builder one = slice_string_builder_pop(stack);
   String_Builder sb = {0};
@@ -315,13 +315,13 @@ void parse_stringify_push_binary(Slice_String_Builder* stack, cstr op) {
   slice_string_builder_push(stack, sb);
 }
 
-void string_builder_push_ast(Slice_String_Builder* stack, Ast ast) {
+void ast_stringify_push_ast(Slice_String_Builder* stack, Ast ast) {
   switch (ast.kind) {
   case AstKind_add:
-    parse_stringify_push_binary(stack, " + ");
+    ast_stringify_push_binary(stack, " + ");
   break;
   case AstKind_mul:
-    parse_stringify_push_binary(stack, " * ");
+    ast_stringify_push_binary(stack, " * ");
   break;
   case AstKind_name: {
     String_Builder sb = {0};
@@ -362,9 +362,11 @@ void string_builder_push_ast(Slice_String_Builder* stack, Ast ast) {
 
 cstr cstr_from_slice_ast(Slice_Ast slice) {
   Slice_String_Builder stack = {0};
-  stack.base = arena_alloc(&temp_arena, MB(1));
+  // a,b,+ -> (a + b)
+  //   3   ->    7
+  stack.base = arena_alloc(&temp_arena, 3*sizeof(c8)*slice.length);
   for (Ast* ast = slice.base; ast < slice.base + slice.length; ast++) {
-    string_builder_push_ast(&stack, *ast);
+    ast_stringify_push_ast(&stack, *ast);
   }
   String_Builder final = stack.base[0];
   return string_builder_end(&final);
