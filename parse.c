@@ -277,9 +277,9 @@ Astid parse_statement(void) {
 }
 
 Astid parse_tokens(Slice_Token tokens) {
-  parser.ast_final.base = xmalloc(MB(2));
-  parser.ast_stack.base = xmalloc(MB(2));
-  parser.state_stack.base = xmalloc(MB(2));
+  parser.ast_final.base = xmalloc(sizeof(Ast) * tokens.length);
+  parser.ast_stack.base = xmalloc(sizeof(Ast) * tokens.length);
+  parser.state_stack.base = xmalloc(sizeof(Parse_State) * tokens.length);
   parser.tokens = tokens;
   parser.tok = 0;
   s32 statements = 0;
@@ -293,7 +293,8 @@ Astid parse_tokens(Slice_Token tokens) {
 }
 
 Astid astid_from_source(cstr source, cstr path) {
-  istr_init();
+  umi source_len = strlen(source);
+  istr_init(source_len+1);
   Slice_Token tokens = lex_source(source, path);
   printf("%s\n", cstr_from_slice_token(tokens));
   Astid astid = parse_tokens(tokens);
@@ -398,7 +399,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("e*((a*b+c*d))", "{}");
+  test("e*((a*b+c*d))\n(f+g)", "{}");
 }
 
 #undef test

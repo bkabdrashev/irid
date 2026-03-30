@@ -57,8 +57,9 @@ typedef struct {
 Lexer lexer = {0};
 
 Slice_Token lex_source(cstr source, cstr file_path) {
+  umi source_len = strlen(source);
   Slice_Token slice_token = {0};
-  slice_token.base = xmalloc(MB(2));
+  slice_token.base = xmalloc(sizeof(Token) * (source_len+1));
   lexer.source = source;
   lexer.stream = source;
   lexer.file_path = file_path;

@@ -15,12 +15,12 @@ typedef struct {
 } Internal_Strings;
 
 Internal_Strings internal_strings = {0};
-void istr_init(void) {
-  internal_strings.buffer_bot = malloc(MB(4));
+void istr_init(umi capacity) {
+  internal_strings.buffer_bot = xmalloc(capacity);
   internal_strings.buffer_top = internal_strings.buffer_bot;
-  internal_strings.strings = malloc(MB(1));
+  internal_strings.strings = xmalloc(capacity);
   internal_strings.len     = 0;
-  internal_strings.cap     = MB(1);
+  internal_strings.cap     = capacity;
 }
 
 cstr cstr_from_istr(Istr istr) {
