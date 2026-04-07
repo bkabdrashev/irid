@@ -400,9 +400,9 @@ void ast_stringify_push_ast(Slice_String_Builder* stack, Ast ast) {
 
 cstr cstr_from_slice_ast(Slice_Ast slice) {
   Slice_String_Builder stack = {0};
-  // a,b,+ -> (a + b)
-  //   3   ->    7
-  stack.base = arena_alloc(&temp_arena, 3*sizeof(c8)*slice.length);
+  // a,b,+,eof -> (a + b)\0
+  //   4       ->    8
+  stack.base = arena_alloc(&temp_arena, 3*sizeof(String_Builder)*slice.length);
   for (Ast* ast = slice.base; ast < slice.base + slice.length; ast++) {
     ast_stringify_push_ast(&stack, *ast);
   }
@@ -439,7 +439,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("e*((a*b+c*d))", "{}");
+  test("e*((a+b)*(c+d))", "{}");
 }
 
 #undef test
