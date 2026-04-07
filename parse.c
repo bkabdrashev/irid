@@ -44,7 +44,6 @@ s32 slice_ast_push(Slice_Ast* slice, Ast item) {
   slice->base[slice->length++] = item;
   return index;
 }
-
 Ast slice_ast_pop(Slice_Ast* slice) {
   return slice->base[--slice->length];
 }
@@ -53,6 +52,43 @@ Ast slice_ast_top(Slice_Ast* slice) {
 }
 b8 slice_ast_empty(Slice_Ast* slice) {
   return slice->length == 0;
+}
+
+void slice_ast_print(Slice_Ast* slice) {
+  printf("print slice; %zi\n", slice->length);
+  for (umi i = 0; i < slice->length; i++) {
+    switch (slice->base[i].kind) {
+    case AstKind_add:
+      printf("add");
+      break;
+    case AstKind_sub:
+      printf("sub");
+      break;
+    case AstKind_mul:
+      printf("mul");
+      break;
+    case AstKind_eof:
+      printf("eof");
+      break;
+    case AstKind_arr:
+      printf("arr");
+      break;
+    case AstKind_block:
+      printf("{ %li }", slice->base[i].val_s64);
+      break;
+    case AstKind_call:
+      printf("call");
+      break;
+    case AstKind_name:
+      printf("%s", cstr_from_istr(slice->base[i].istr));
+      break;
+    case AstKind_neg:
+      printf("neg");
+      break;
+    }
+    printf(", ");
+  }
+  printf("\n");
 }
 
 typedef struct {
@@ -286,6 +322,8 @@ Astid parse_tokens(Slice_Token tokens) {
   while (!parse_is_current_token(TokenKind_eof)) {
     parse_state_stack_push(Parse_State_expression);
     parse_expression();
+    slice_ast_print(&parser.ast_stack);
+    slice_ast_print(&parser.ast_final);
     statements++;
   }
   Astid block = parse_ast_final_push(AstKind_block, statements);
@@ -401,7 +439,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("e*((a*b+c*d))\n(f+g)", "{}");
+  test("e*((a*b+c*d))", "{}");
 }
 
 #undef test

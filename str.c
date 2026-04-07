@@ -16,9 +16,10 @@ typedef struct {
 
 Internal_Strings internal_strings = {0};
 void istr_init(umi capacity) {
+  capacity = power_of_2_up(capacity);
   internal_strings.buffer_bot = xmalloc(capacity);
   internal_strings.buffer_top = internal_strings.buffer_bot;
-  internal_strings.strings = xmalloc(capacity);
+  internal_strings.strings = xcalloc(sizeof(Str), capacity);
   internal_strings.len     = 0;
   internal_strings.cap     = capacity;
 }
