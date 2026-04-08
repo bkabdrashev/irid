@@ -17,6 +17,7 @@ typedef enum {
   TokenKind_brace_close        = 11,
   TokenKind_paren_open         = 12,
   TokenKind_paren_close        = 13,
+  TokenKind_semicolon          = 14 | TokenFlag_separates,
 } TokenKind;
 
 typedef struct {
@@ -128,6 +129,10 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       token.kind = TokenKind_brace_close;
       lexer.stream++;
     } break;
+    case ';': {
+      token.kind = TokenKind_semicolon;
+      lexer.stream++;
+    } break;
     case '\0': {
       token.kind = TokenKind_eof;
     } break;
@@ -146,7 +151,7 @@ Slice_Token lex_source(cstr source, cstr file_path) {
 }
 
 cstr cstr_from_slice_token(Slice_Token slice) {
-  String_Builder sb = string_builder_begin(&temp_arena);
+  String_Builder sb = string_builder_begin(&temp_arena, slice.length * 3 + 1);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {
     case TokenKind_eof:
@@ -157,43 +162,46 @@ cstr cstr_from_slice_token(Slice_Token slice) {
       string_builder_push_cstr(&sb, str);
     } break;
     case TokenKind_int:
-      string_builder_push_cstr(&sb, "todo");
+      string_builder_push_cstr(&sb, "int");
       break;
     case TokenKind_plus:
-      string_builder_push_cstr(&sb, " + ");
+      string_builder_push_cstr(&sb, "+");
       break;
     case TokenKind_plus_prefix:
-      string_builder_push_cstr(&sb, " prefix + ");
+      string_builder_push_cstr(&sb, "p+");
       break;
     case TokenKind_minus:
-      string_builder_push_cstr(&sb, " - ");
+      string_builder_push_cstr(&sb, "-");
       break;
     case TokenKind_minus_prefix:
-      string_builder_push_cstr(&sb, " prefix - ");
+      string_builder_push_cstr(&sb, "p-");
       break;
     case TokenKind_star:
-      string_builder_push_cstr(&sb, " * ");
+      string_builder_push_cstr(&sb, "*");
       break;
     case TokenKind_at:
-      string_builder_push_cstr(&sb, " @ ");
+      string_builder_push_cstr(&sb, "@");
       break;
     case TokenKind_brace_open:
-      string_builder_push_cstr(&sb, " [ ");
+      string_builder_push_cstr(&sb, "[");
       break;
     case TokenKind_brace_prefix_open:
-      string_builder_push_cstr(&sb, " prefix [ ");
+      string_builder_push_cstr(&sb, "p[");
       break;
     case TokenKind_brace_close:
-      string_builder_push_cstr(&sb, " ] ");
+      string_builder_push_cstr(&sb, "]");
       break;
     case TokenKind_paren_open:
-      string_builder_push_cstr(&sb, " ( ");
+      string_builder_push_cstr(&sb, "(");
       break;
     case TokenKind_paren_close:
-      string_builder_push_cstr(&sb, " ) ");
+      string_builder_push_cstr(&sb, ")");
+      break;
+    case TokenKind_semicolon:
+      string_builder_push_cstr(&sb, ";");
       break;
     }
-    string_builder_push_cstr(&sb, "\n");
+    string_builder_push_cstr(&sb, " ");
   }
   cstr str = string_builder_end(&sb);
   return str;

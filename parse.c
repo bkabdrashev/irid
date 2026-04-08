@@ -55,7 +55,6 @@ b8 slice_ast_empty(Slice_Ast* slice) {
 }
 
 void slice_ast_print(Slice_Ast* slice) {
-  printf("print slice; %zi\n", slice->length);
   for (umi i = 0; i < slice->length; i++) {
     switch (slice->base[i].kind) {
     case AstKind_add:
@@ -322,7 +321,12 @@ Astid parse_tokens(Slice_Token tokens) {
   while (!parse_is_current_token(TokenKind_eof)) {
     parse_state_stack_push(Parse_State_expression);
     parse_expression();
+    if (parse_is_current_token(TokenKind_semicolon)) {
+      parse_next_token();
+    }
+    printf("print ast stack; %zi\n", parser.ast_stack.length);
     slice_ast_print(&parser.ast_stack);
+    printf("print ast final; %zi\n", parser.ast_final.length);
     slice_ast_print(&parser.ast_final);
     statements++;
   }
@@ -439,7 +443,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("e*((a+b)*(c+d))", "{}");
+  test("a;b;", "{}");
 }
 
 #undef test

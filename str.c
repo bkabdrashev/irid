@@ -82,10 +82,10 @@ typedef struct {
   umi capacity;
 } String_Builder;
 
-String_Builder string_builder_begin(Arena* arena) {
+String_Builder string_builder_begin(Arena* arena, umi capacity) {
   String_Builder sb;
-  sb.base = arena_alloc(arena, MB(1));
-  sb.capacity = MB(1);
+  sb.base = arena_alloc(arena, capacity);
+  sb.capacity = capacity;
   sb.size = 0;
   return sb;
 }
