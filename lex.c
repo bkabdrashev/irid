@@ -1,5 +1,6 @@
 typedef enum {
   TokenFlag_separates = 1 << 8,
+  TokenFlag_prefix    = 1 << 9,
 } TokenFlag;
 
 typedef enum {
@@ -7,17 +8,18 @@ typedef enum {
   TokenKind_name               = 1,
   TokenKind_int                = 2,
   TokenKind_plus               = 3,
-  TokenKind_plus_prefix        = 4,
+  TokenKind_plus_prefix        = 3 | TokenFlag_prefix,
   TokenKind_minus              = 5,
-  TokenKind_minus_prefix       = 6,
+  TokenKind_minus_prefix       = 5 | TokenFlag_prefix,
   TokenKind_star               = 7,
   TokenKind_at                 = 8,
-  TokenKind_brace_open         = 9,
-  TokenKind_brace_prefix_open  = 10,
-  TokenKind_brace_close        = 11,
-  TokenKind_paren_open         = 12,
-  TokenKind_paren_close        = 13,
-  TokenKind_semicolon          = 14 | TokenFlag_separates,
+  TokenKind_at_prefix          = 8 | TokenFlag_prefix,
+  TokenKind_brace_open         = 10,
+  TokenKind_brace_prefix_open  = 11,
+  TokenKind_brace_close        = 12,
+  TokenKind_paren_open         = 13,
+  TokenKind_paren_close        = 14,
+  TokenKind_semicolon          = 15 | TokenFlag_separates,
 } TokenKind;
 
 typedef struct {
@@ -105,6 +107,7 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       if (lexer.wasnewline && !isspace(lexer.stream[1])) {
        token.kind = TokenKind_minus_prefix;
       }
+      lexer.stream++;
     } break;
     case '*': {
       token.kind = TokenKind_star;
@@ -127,6 +130,13 @@ Slice_Token lex_source(cstr source, cstr file_path) {
     } break;
     case ']': {
       token.kind = TokenKind_brace_close;
+      lexer.stream++;
+    } break;
+    case '@': {
+      token.kind = TokenKind_at;
+      if (lexer.wasnewline) {
+        token.kind = TokenKind_at_prefix;
+      }
       lexer.stream++;
     } break;
     case ';': {
@@ -181,6 +191,9 @@ cstr cstr_from_slice_token(Slice_Token slice) {
       break;
     case TokenKind_at:
       string_builder_push_cstr(&sb, "@");
+      break;
+    case TokenKind_at_prefix:
+      string_builder_push_cstr(&sb, "p@");
       break;
     case TokenKind_brace_open:
       string_builder_push_cstr(&sb, "[");

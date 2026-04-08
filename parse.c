@@ -10,6 +10,9 @@ typedef enum {
   AstKind_sub  = TokenKind_minus | AstFlag_binary,
   AstKind_mul  = TokenKind_star  | AstFlag_binary,
   AstKind_neg  = TokenKind_minus | AstFlag_unary,
+  AstKind_pos  = TokenKind_plus  | AstFlag_unary,
+  AstKind_ptr  = TokenKind_at    | AstFlag_unary,
+  AstKind_load = (TokenKind_at+1) | AstFlag_unary,
   AstKind_arr  = TokenKind_brace_close | AstFlag_binary,
   AstKind_call = 123 | AstFlag_binary,
   AstKind_block = 124 | AstFlag_binary,
@@ -72,6 +75,12 @@ void slice_ast_print(Slice_Ast* slice) {
     case AstKind_arr:
       printf("arr");
       break;
+    case AstKind_ptr:
+      printf("ptr");
+      break;
+    case AstKind_load:
+      printf("load");
+      break;
     case AstKind_block:
       printf("{ %li }", slice->base[i].val_s64);
       break;
@@ -83,6 +92,9 @@ void slice_ast_print(Slice_Ast* slice) {
       break;
     case AstKind_neg:
       printf("neg");
+      break;
+    case AstKind_pos:
+      printf("pos");
       break;
     }
     printf(", ");
@@ -121,10 +133,11 @@ Astid parse_ast_final_push(AstKind kind, s32 value) {
   return astid;
 }
 
-void parse_ast_final_push_unary(void) {
+void parse_ast_stack_push_unary(void) {
   Token token = slice_token_at(&parser.tokens, parser.tok);
-  Ast ast = { .kind = token.kind | AstFlag_unary, .value = token.value };
-  slice_ast_push(&parser.ast_final, ast);
+  TokenKind kind = token.kind & 0xff;
+  Ast ast = { .kind = kind | AstFlag_unary, .value = token.value };
+  slice_ast_push(&parser.ast_stack, ast);
 }
 
 b8 parse_ast_stack_is_empty(void) {
@@ -155,27 +168,37 @@ Ast parse_ast_stack_pop(void) {
   return slice_ast_pop(&parser.ast_stack);
 }
 
-s32 parse_infix_left_precedence(AstKind kind) {
+s32 parse_left_precedence(AstKind kind) {
   switch (kind) {
+  case AstKind_sub:
   case AstKind_add: return 11;
-  case AstKind_mul:  return 13;
+  case AstKind_mul: return 13;
+  case AstKind_ptr:
+  case AstKind_neg:
+  case AstKind_pos:  return 15;
+  case AstKind_load: return 17;
   default :          return -1;
   }
 }
 
-s32 parse_infix_right_precedence(AstKind kind) {
+s32 parse_right_precedence(AstKind kind) {
   switch (kind) {
+  case AstKind_sub:
   case AstKind_add: return 12;
   case AstKind_mul: return 14;
-  default :         return -1;
+  case AstKind_ptr:
+  case AstKind_neg:
+  case AstKind_pos:  return 16;
+  case AstKind_load: return 18;
+  default :          return -1;
   }
 }
 
 b8 parse_ast_stack_is_top_higher_precedence(AstKind kind) {
   if (slice_ast_empty(&parser.ast_stack)) return false;
   Ast stack_ast = slice_ast_top(&parser.ast_stack);
-  s32 on_stack_precedence  = parse_infix_left_precedence(stack_ast.kind);
-  s32 on_stream_precedence = parse_infix_right_precedence(kind);
+  s32 on_stack_precedence  = parse_left_precedence(stack_ast.kind);
+  s32 on_stream_precedence = parse_right_precedence(kind);
   if (on_stack_precedence <= on_stream_precedence) {
     return false;
   }
@@ -225,7 +248,8 @@ void parse_expression(void) {
       switch (token.kind) {
       case TokenKind_minus_prefix: case TokenKind_minus:
       case TokenKind_plus_prefix:  case TokenKind_plus:
-        parse_ast_final_push_unary();
+      case TokenKind_at_prefix:    case TokenKind_at:
+        parse_ast_stack_push_unary();
         parse_state_stack_push(Parse_State_expression);
         break;
       case TokenKind_int: case TokenKind_name:
@@ -357,13 +381,40 @@ void ast_stringify_push_binary(Slice_String_Builder* stack, cstr op) {
   slice_string_builder_push(stack, sb);
 }
 
+void ast_stringify_push_unary(Slice_String_Builder* stack, cstr op) {
+  String_Builder one = slice_string_builder_pop(stack);
+  String_Builder sb = {0};
+  sb.base = arena_alloc(&temp_arena, one.size + 3 + 2);
+  string_builder_push_cstr(&sb, "(");
+  string_builder_push_cstr(&sb, op);
+  string_builder_push_string_builder(&sb,  one);
+  string_builder_push_cstr(&sb, ")");
+
+  slice_string_builder_push(stack, sb);
+}
+
 void ast_stringify_push_ast(Slice_String_Builder* stack, Ast ast) {
   switch (ast.kind) {
   case AstKind_add:
     ast_stringify_push_binary(stack, " + ");
   break;
+  case AstKind_sub:
+    ast_stringify_push_binary(stack, " - ");
+  break;
   case AstKind_mul:
     ast_stringify_push_binary(stack, " * ");
+  break;
+  case AstKind_ptr:
+    ast_stringify_push_unary(stack, "ptr ");
+  break;
+  case AstKind_load:
+    ast_stringify_push_unary(stack, "load ");
+  break;
+  case AstKind_neg:
+    ast_stringify_push_unary(stack, "- ");
+  break;
+  case AstKind_pos:
+    ast_stringify_push_unary(stack, "+ ");
   break;
   case AstKind_name: {
     String_Builder sb = {0};
@@ -443,7 +494,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a;b;", "{}");
+  test("-a * +b", "{}");
 }
 
 #undef test
