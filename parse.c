@@ -298,7 +298,7 @@ void parse_expression(void) {
         parse_state_stack_push(Parse_State_expression);
       } break;
       case TokenKind_at: {
-        AstKind kind = (AstKind)token.kind;
+        AstKind kind = ((AstKind)token.kind + 1) | AstFlag_unary;
         while (parse_ast_stack_is_top_higher_precedence(kind)) {
           parse_ast_stack_transfer_to_ast_final();
         }
@@ -494,7 +494,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("-a * +b", "{}");
+  test("a@", "{}");
 }
 
 #undef test
