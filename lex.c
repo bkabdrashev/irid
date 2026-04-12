@@ -1,25 +1,27 @@
 typedef enum {
   TokenFlag_separates = 1 << 8,
   TokenFlag_prefix    = 1 << 9,
+  TokenFlag_call_rhs  = 1 << 10,
 } TokenFlag;
 
 typedef enum {
   TokenKind_eof                = 0 | TokenFlag_separates,
-  TokenKind_name               = 1,
-  TokenKind_int                = 2,
+  TokenKind_name               = 1 | TokenFlag_call_rhs,
+  TokenKind_int                = 2 | TokenFlag_call_rhs,
   TokenKind_plus               = 3,
   TokenKind_plus_prefix        = 3 | TokenFlag_prefix,
   TokenKind_minus              = 5,
   TokenKind_minus_prefix       = 5 | TokenFlag_prefix,
   TokenKind_star               = 7,
-  TokenKind_at                 = 8,
-  TokenKind_at_prefix          = 8 | TokenFlag_prefix,
-  TokenKind_brace_open         = 10,
-  TokenKind_brace_prefix_open  = 11,
-  TokenKind_brace_close        = 12,
-  TokenKind_paren_open         = 13,
-  TokenKind_paren_close        = 14,
-  TokenKind_semicolon          = 15 | TokenFlag_separates,
+  TokenKind_at                 = 8 | TokenFlag_call_rhs,
+  TokenKind_at_prefix          = 8 | TokenFlag_prefix | TokenFlag_call_rhs,
+  TokenKind_equal              = 10 | TokenFlag_separates,
+  TokenKind_brace_open         = 11 | TokenFlag_call_rhs,
+  TokenKind_brace_prefix_open  = 12 | TokenFlag_call_rhs,
+  TokenKind_brace_close        = 13,
+  TokenKind_paren_open         = 14 | TokenFlag_call_rhs,
+  TokenKind_paren_close        = 15,
+  TokenKind_semicolon          = 16 | TokenFlag_separates,
 } TokenKind;
 
 typedef struct {
@@ -113,6 +115,10 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       token.kind = TokenKind_star;
       lexer.stream++;
     } break;
+    case '=': {
+      token.kind = TokenKind_equal;
+      lexer.stream++;
+    } break;
     case '(': {
       token.kind = TokenKind_paren_open;
       lexer.stream++;
@@ -188,6 +194,9 @@ cstr cstr_from_slice_token(Slice_Token slice) {
       break;
     case TokenKind_star:
       string_builder_push_cstr(&sb, "*");
+      break;
+    case TokenKind_equal:
+      string_builder_push_cstr(&sb, "=");
       break;
     case TokenKind_at:
       string_builder_push_cstr(&sb, "@");

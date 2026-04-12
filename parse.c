@@ -12,6 +12,7 @@ typedef enum {
   AstKind_neg  = TokenKind_minus | AstFlag_unary,
   AstKind_pos  = TokenKind_plus  | AstFlag_unary,
   AstKind_ptr  = TokenKind_at    | AstFlag_unary,
+  AstKind_assign = TokenKind_equal | AstFlag_binary,
   AstKind_load = (TokenKind_at+1) | AstFlag_unary,
   AstKind_arr  = TokenKind_brace_close | AstFlag_binary,
   AstKind_call = 123 | AstFlag_binary,
@@ -39,7 +40,7 @@ typedef enum {
 
 typedef struct {
   Ast* base;
-  umi  length;
+  s32  length;
 } Slice_Ast;
 
 s32 slice_ast_push(Slice_Ast* slice, Ast item) {
@@ -58,7 +59,7 @@ b8 slice_ast_empty(Slice_Ast* slice) {
 }
 
 void slice_ast_print(Slice_Ast* slice) {
-  for (umi i = 0; i < slice->length; i++) {
+  for (s32 i = 0; i < slice->length; i++) {
     switch (slice->base[i].kind) {
     case AstKind_add:
       printf("add");
@@ -80,6 +81,9 @@ void slice_ast_print(Slice_Ast* slice) {
       break;
     case AstKind_load:
       printf("load");
+      break;
+    case AstKind_assign:
+      printf("=");
       break;
     case AstKind_block:
       printf("{ %li }", slice->base[i].val_s64);
@@ -118,6 +122,7 @@ Parse_State slice_parse_state_pop(Slice_Parse_State* slice) {
 typedef struct {
   Slice_Parse_State state_stack;
   Slice_Ast ast_stack;
+  Slice_Ast ast_inter;
   Slice_Ast ast_final;
   Slice_Token tokens;
   s32  tok;
@@ -127,10 +132,26 @@ typedef struct {
 
 Parser parser = {0};
 
-Astid parse_ast_final_push(AstKind kind, s32 value) {
+Astid parse_ast_push(Slice_Ast* slice, AstKind kind, s32 value) {
   Ast ast = { .kind = kind, .value = value };
-  Astid astid = { .index = slice_ast_push(&parser.ast_final, ast) };
+  Astid astid = { .index = slice_ast_push(slice, ast) };
   return astid;
+}
+void parse_transfer_all(Slice_Ast* from, Slice_Ast* to) {
+  for (s32 i = 0; i < from->length; i++) {
+    Ast ast = from->base[i];
+    slice_ast_push(to, ast);
+  }
+  from->length = 0;
+}
+
+void parse_transfer_one(Slice_Ast* from, Slice_Ast* to) {
+  Ast ast = slice_ast_pop(from);
+  slice_ast_push(to, ast);
+}
+
+b8 parse_ast_inter_is_empty(void) {
+  return slice_ast_empty(&parser.ast_inter);
 }
 
 void parse_ast_stack_push_unary(void) {
@@ -142,11 +163,6 @@ void parse_ast_stack_push_unary(void) {
 
 b8 parse_ast_stack_is_empty(void) {
   return slice_ast_empty(&parser.ast_stack);
-}
-
-void parse_ast_stack_transfer_to_ast_final(void) {
-  Ast ast = slice_ast_pop(&parser.ast_stack);
-  slice_ast_push(&parser.ast_final, ast);
 }
 
 b8 parse_ast_stack_is_top(TokenKind kind) {
@@ -253,7 +269,7 @@ void parse_expression(void) {
         parse_state_stack_push(Parse_State_expression);
         break;
       case TokenKind_int: case TokenKind_name:
-        parse_ast_final_push((AstKind)token.kind, token.value);
+        parse_ast_push(&parser.ast_inter, (AstKind)token.kind, token.value);
         parse_state_stack_push(Parse_State_infix_or_suffix);
         break;
       case TokenKind_paren_open:
@@ -262,7 +278,7 @@ void parse_expression(void) {
         break;
       case TokenKind_paren_close:
         while (!parse_ast_stack_is_top(TokenKind_paren_open)) {
-          parse_ast_stack_transfer_to_ast_final();
+          parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
         parse_ast_stack_pop(); // pops TokenKind_paren_open
         parse_state_stack_push(Parse_State_infix_or_suffix);
@@ -274,7 +290,7 @@ void parse_expression(void) {
         break;
       case TokenKind_brace_close:
         while (!parse_ast_stack_is_top(TokenKind_brace_open)) {
-          parse_ast_stack_transfer_to_ast_final();
+          parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
         parse_ast_stack_pop(); // pops TokenKind_brace_open
         parse_ast_stack_push_kind(AstKind_arr);// push TokenKind_brace_close
@@ -292,7 +308,7 @@ void parse_expression(void) {
       case TokenKind_brace_open: {
         AstKind kind = (AstKind)token.kind | AstFlag_binary;
         while (parse_ast_stack_is_top_higher_precedence(kind)) {
-          parse_ast_stack_transfer_to_ast_final();
+          parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
         parse_ast_stack_push(kind, token.value);
         parse_state_stack_push(Parse_State_expression);
@@ -300,25 +316,29 @@ void parse_expression(void) {
       case TokenKind_at: {
         AstKind kind = ((AstKind)token.kind + 1) | AstFlag_unary;
         while (parse_ast_stack_is_top_higher_precedence(kind)) {
-          parse_ast_stack_transfer_to_ast_final();
+          parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
-        parse_ast_final_push(kind, token.value);
+        parse_ast_push(&parser.ast_inter, kind, token.value);
         parse_state_stack_push(Parse_State_infix_or_suffix);
       } break;
       case TokenKind_paren_close:
         while (!parse_ast_stack_is_top(TokenKind_paren_open)) {
-          parse_ast_stack_transfer_to_ast_final();
+          parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
         parse_ast_stack_pop(); // pops TokenKind_paren_open
         parse_state_stack_push(Parse_State_infix_or_suffix);
         break;
       default: {
-        AstKind kind = (AstKind)token.kind;
-        while (parse_ast_stack_is_top_higher_precedence(kind)) {
-          parse_ast_stack_transfer_to_ast_final();
+        if (token.kind & TokenFlag_call_rhs) {
+          AstKind kind = (AstKind)token.kind;
+          while (parse_ast_stack_is_top_higher_precedence(kind)) {
+            parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
+          }
+          parse_ast_stack_push_kind(AstKind_call);
+          parse_state_stack_push(Parse_State_infix_or_suffix);
         }
-        parse_ast_stack_push_kind(AstKind_call);
-        parse_state_stack_push(Parse_State_infix_or_suffix);
+        else {
+        }
       } break;
       }
     } break;
@@ -326,7 +346,7 @@ void parse_expression(void) {
     parse_next_token();
   }
   while (!parse_ast_stack_is_empty()) {
-    parse_ast_stack_transfer_to_ast_final();
+    parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
   }
 }
 
@@ -336,8 +356,9 @@ Astid parse_statement(void) {
 }
 
 Astid parse_tokens(Slice_Token tokens) {
-  parser.ast_final.base = xmalloc(sizeof(Ast) * tokens.length);
+  parser.ast_inter.base = xmalloc(sizeof(Ast) * tokens.length);
   parser.ast_stack.base = xmalloc(sizeof(Ast) * tokens.length);
+  parser.ast_final.base = xmalloc(sizeof(Ast) * tokens.length);
   parser.state_stack.base = xmalloc(sizeof(Parse_State) * tokens.length);
   parser.tokens = tokens;
   parser.tok = 0;
@@ -348,13 +369,33 @@ Astid parse_tokens(Slice_Token tokens) {
     if (parse_is_current_token(TokenKind_semicolon)) {
       parse_next_token();
     }
-    printf("print ast stack; %zi\n", parser.ast_stack.length);
-    slice_ast_print(&parser.ast_stack);
-    printf("print ast final; %zi\n", parser.ast_final.length);
-    slice_ast_print(&parser.ast_final);
+    else if (parse_is_current_token(TokenKind_equal)) {
+      parse_next_token();
+      // a + b = c * d
+      // inter: a, b, +, =, c, d * 
+      // final: c, d, *, =, a,b,+
+      s32 here = parser.ast_inter.length;
+      parse_state_stack_push(Parse_State_expression);
+      parse_expression();
+      for (s32 i = here; i < parser.ast_inter.length; i++) {
+        Ast ast = parser.ast_inter.base[i];
+        slice_ast_push(&parser.ast_final, ast);
+      }
+      parse_ast_push(&parser.ast_final, AstKind_assign, 0);
+
+      parser.ast_inter.length = here;
+      parse_transfer_all(&parser.ast_inter, &parser.ast_final);
+      printf("Ast_inter: ");
+      slice_ast_print(&parser.ast_inter);
+      printf("Ast_final: ");
+      slice_ast_print(&parser.ast_final);
+    }
+    else {
+      parse_transfer_all(&parser.ast_inter, &parser.ast_final);
+    }
     statements++;
   }
-  Astid block = parse_ast_final_push(AstKind_block, statements);
+  Astid block = parse_ast_push(&parser.ast_final, AstKind_block, statements);
   return block;
 }
 
@@ -364,6 +405,7 @@ Astid astid_from_source(cstr source, cstr path) {
   Slice_Token tokens = lex_source(source, path);
   printf("%s\n", cstr_from_slice_token(tokens));
   Astid astid = parse_tokens(tokens);
+  slice_ast_print(&parser.ast_final);
   return astid;
 }
 
@@ -385,10 +427,8 @@ void ast_stringify_push_unary(Slice_String_Builder* stack, cstr op) {
   String_Builder one = slice_string_builder_pop(stack);
   String_Builder sb = {0};
   sb.base = arena_alloc(&temp_arena, one.size + 3 + 2);
-  string_builder_push_cstr(&sb, "(");
   string_builder_push_cstr(&sb, op);
   string_builder_push_string_builder(&sb,  one);
-  string_builder_push_cstr(&sb, ")");
 
   slice_string_builder_push(stack, sb);
 }
@@ -405,17 +445,25 @@ void ast_stringify_push_ast(Slice_String_Builder* stack, Ast ast) {
     ast_stringify_push_binary(stack, " * ");
   break;
   case AstKind_ptr:
-    ast_stringify_push_unary(stack, "ptr ");
+    ast_stringify_push_unary(stack, "@");
   break;
   case AstKind_load:
     ast_stringify_push_unary(stack, "load ");
   break;
   case AstKind_neg:
-    ast_stringify_push_unary(stack, "- ");
+    ast_stringify_push_unary(stack, "-");
   break;
   case AstKind_pos:
-    ast_stringify_push_unary(stack, "+ ");
+    ast_stringify_push_unary(stack, "+");
   break;
+  case AstKind_assign: {
+    String_Builder one = slice_string_builder_pop(stack);
+    String_Builder sb = {0};
+    sb.base = arena_alloc(&temp_arena, one.size + 3 + 2);
+    string_builder_push_string_builder(&sb,  one);
+    string_builder_push_cstr(&sb, " = ");
+    slice_string_builder_push(stack, sb);
+  } break;
   case AstKind_name: {
     String_Builder sb = {0};
     sb.base = arena_alloc(&temp_arena, istr_length(ast.istr));
@@ -458,9 +506,7 @@ cstr cstr_from_slice_ast(Slice_Ast slice) {
   // a,b,+,eof -> (a + b)\0
   //   4       ->    8
   stack.base = arena_alloc(&temp_arena, 3*sizeof(String_Builder)*slice.length);
-  for (Ast* ast = slice.base; ast < slice.base + slice.length; ast++) {
-    ast_stringify_push_ast(&stack, *ast);
-  }
+  ast_stringify_push_ast(&stack, *ast);
   String_Builder final = stack.base[0];
   return string_builder_end(&final);
 }
@@ -494,7 +540,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a@", "{}");
+  test("a = b", "{}");
 }
 
 #undef test
