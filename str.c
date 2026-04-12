@@ -79,13 +79,11 @@ Istr istr_from_range(cstr begin, cstr end) {
 typedef struct {
   c8* base;
   umi size;
-  umi capacity;
 } String_Builder;
 
 String_Builder string_builder_begin(Arena* arena, umi capacity) {
   String_Builder sb;
   sb.base = arena_alloc(arena, capacity);
-  sb.capacity = capacity;
   sb.size = 0;
   return sb;
 }
@@ -117,31 +115,6 @@ void string_builder_push_string_builder(String_Builder* sb, String_Builder one) 
     sb->base[sb->size++] = one.base[i];
   }
 }
-
-typedef struct {
-  String_Builder* base;
-  umi  length;
-} Slice_String_Builder;
-
-s32 slice_string_builder_push(Slice_String_Builder* slice, String_Builder item) {
-  s32 index = slice->length;
-  slice->base[slice->length++] = item;
-  return index;
-}
-String_Builder slice_string_builder_pop(Slice_String_Builder* slice) {
-  return slice->base[--slice->length];
-}
-String_Builder slice_string_builder_top(Slice_String_Builder* slice) {
-  return slice->base[slice->length-1];
-}
-String_Builder slice_string_builder_from_top(Slice_String_Builder* slice, s32 index) {
-  return slice->base[slice->length-1 - index];
-}
-b8 slice_string_builder_empty(Slice_String_Builder* slice) {
-  return slice->length == 0;
-}
-
-
 
 b8 cstr_eq(cstr a, cstr b) {
   return strcmp(a, b) == 0;

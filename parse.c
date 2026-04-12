@@ -16,7 +16,8 @@ typedef enum {
   AstKind_load = (TokenKind_at+1) | AstFlag_unary,
   AstKind_arr  = TokenKind_brace_close | AstFlag_binary,
   AstKind_call = 123 | AstFlag_binary,
-  AstKind_block = 124 | AstFlag_binary,
+  AstKind_block_enter = 124,
+  AstKind_block_leave = 125,
 } AstKind;
 
 typedef struct {
@@ -58,52 +59,62 @@ b8 slice_ast_empty(Slice_Ast* slice) {
   return slice->length == 0;
 }
 
-void slice_ast_print(Slice_Ast* slice) {
+cstr cstr_from_slice_ast(Slice_Ast* slice) {
+  String_Builder sb = string_builder_begin(&temp_arena, 6 * slice->length * sizeof(c8));
   for (s32 i = 0; i < slice->length; i++) {
     switch (slice->base[i].kind) {
     case AstKind_add:
-      printf("add");
-      break;
+      string_builder_push_cstr(&sb, "add");
+    break;
     case AstKind_sub:
-      printf("sub");
-      break;
+      string_builder_push_cstr(&sb, "sub");
+    break;
     case AstKind_mul:
-      printf("mul");
-      break;
+      string_builder_push_cstr(&sb, "mul");
+    break;
     case AstKind_eof:
-      printf("eof");
-      break;
+      string_builder_push_cstr(&sb, "eof");
+    break;
     case AstKind_arr:
-      printf("arr");
-      break;
+      string_builder_push_cstr(&sb, "arr");
+    break;
     case AstKind_ptr:
-      printf("ptr");
-      break;
+      string_builder_push_cstr(&sb, "ptr");
+    break;
     case AstKind_load:
-      printf("load");
-      break;
+      string_builder_push_cstr(&sb, "load");
+    break;
     case AstKind_assign:
-      printf("=");
-      break;
-    case AstKind_block:
-      printf("{ %li }", slice->base[i].val_s64);
-      break;
+      string_builder_push_cstr(&sb, "=");
+    break;
+    case AstKind_block_enter:
+      string_builder_push_cstr(&sb, "{");
+      string_builder_push_s64(&sb, slice->base[i].val_s64);
+    break;
+    case AstKind_block_leave:
+      string_builder_push_cstr(&sb, " }");
+    break;
     case AstKind_call:
-      printf("call");
-      break;
+      string_builder_push_cstr(&sb, "call");
+    break;
     case AstKind_name:
-      printf("%s", cstr_from_istr(slice->base[i].istr));
-      break;
+      string_builder_push_cstr(&sb, cstr_from_istr(slice->base[i].istr));
+    break;
     case AstKind_neg:
-      printf("neg");
-      break;
+      string_builder_push_cstr(&sb, "neg");
+    break;
     case AstKind_pos:
-      printf("pos");
-      break;
+      string_builder_push_cstr(&sb, "pos");
+    break;
     }
-    printf(", ");
+    string_builder_push_cstr(&sb, " ");
   }
-  printf("\n");
+  cstr result = string_builder_end(&sb);
+  return result;
+}
+
+void slice_ast_print(Slice_Ast* slice) {
+  printf("%s\n", cstr_from_slice_ast(slice));
 }
 
 typedef struct {
@@ -136,6 +147,9 @@ Astid parse_ast_push(Slice_Ast* slice, AstKind kind, s32 value) {
   Ast ast = { .kind = kind, .value = value };
   Astid astid = { .index = slice_ast_push(slice, ast) };
   return astid;
+}
+void parse_ast_set_value(Slice_Ast slice, Astid astid, s32 value) {
+  slice.base[astid.index].value = value;
 }
 void parse_transfer_all(Slice_Ast* from, Slice_Ast* to) {
   for (s32 i = 0; i < from->length; i++) {
@@ -355,14 +369,16 @@ Astid parse_statement(void) {
   return astid;
 }
 
-Astid parse_tokens(Slice_Token tokens) {
-  parser.ast_inter.base = xmalloc(sizeof(Ast) * tokens.length);
-  parser.ast_stack.base = xmalloc(sizeof(Ast) * tokens.length);
-  parser.ast_final.base = xmalloc(sizeof(Ast) * tokens.length);
-  parser.state_stack.base = xmalloc(sizeof(Parse_State) * tokens.length);
+void parse_tokens(Slice_Token tokens) {
+  s32 total_ast_slice_length = tokens.length + 2;
+  parser.ast_inter.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
+  parser.ast_stack.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
+  parser.ast_final.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
+  parser.state_stack.base = xmalloc(sizeof(Parse_State) * total_ast_slice_length);
   parser.tokens = tokens;
   parser.tok = 0;
   s32 statements = 0;
+  Astid block_enter = parse_ast_push(&parser.ast_final, AstKind_block_enter, 0);
   while (!parse_is_current_token(TokenKind_eof)) {
     parse_state_stack_push(Parse_State_expression);
     parse_expression();
@@ -387,133 +403,28 @@ Astid parse_tokens(Slice_Token tokens) {
       parse_transfer_all(&parser.ast_inter, &parser.ast_final);
       printf("Ast_inter: ");
       slice_ast_print(&parser.ast_inter);
-      printf("Ast_final: ");
-      slice_ast_print(&parser.ast_final);
     }
     else {
       parse_transfer_all(&parser.ast_inter, &parser.ast_final);
     }
     statements++;
   }
-  Astid block = parse_ast_push(&parser.ast_final, AstKind_block, statements);
-  return block;
+  parser.ast_final.base[block_enter.index].value = statements;
+  parse_ast_push(&parser.ast_final, AstKind_block_leave, 0);
 }
 
-Astid astid_from_source(cstr source, cstr path) {
+void astid_from_source(cstr source, cstr path) {
   umi source_len = strlen(source);
   istr_init(source_len+1);
   Slice_Token tokens = lex_source(source, path);
   printf("%s\n", cstr_from_slice_token(tokens));
-  Astid astid = parse_tokens(tokens);
+  parse_tokens(tokens);
   slice_ast_print(&parser.ast_final);
-  return astid;
-}
-
-void ast_stringify_push_binary(Slice_String_Builder* stack, cstr op) {
-  String_Builder two = slice_string_builder_pop(stack);
-  String_Builder one = slice_string_builder_pop(stack);
-  String_Builder sb = {0};
-  sb.base = arena_alloc(&temp_arena, one.size + two.size + 3 + 2);
-  string_builder_push_cstr(&sb, "(");
-  string_builder_push_string_builder(&sb,  one);
-  string_builder_push_cstr(&sb, op);
-  string_builder_push_string_builder(&sb,  two);
-  string_builder_push_cstr(&sb, ")");
-
-  slice_string_builder_push(stack, sb);
-}
-
-void ast_stringify_push_unary(Slice_String_Builder* stack, cstr op) {
-  String_Builder one = slice_string_builder_pop(stack);
-  String_Builder sb = {0};
-  sb.base = arena_alloc(&temp_arena, one.size + 3 + 2);
-  string_builder_push_cstr(&sb, op);
-  string_builder_push_string_builder(&sb,  one);
-
-  slice_string_builder_push(stack, sb);
-}
-
-void ast_stringify_push_ast(Slice_String_Builder* stack, Ast ast) {
-  switch (ast.kind) {
-  case AstKind_add:
-    ast_stringify_push_binary(stack, " + ");
-  break;
-  case AstKind_sub:
-    ast_stringify_push_binary(stack, " - ");
-  break;
-  case AstKind_mul:
-    ast_stringify_push_binary(stack, " * ");
-  break;
-  case AstKind_ptr:
-    ast_stringify_push_unary(stack, "@");
-  break;
-  case AstKind_load:
-    ast_stringify_push_unary(stack, "load ");
-  break;
-  case AstKind_neg:
-    ast_stringify_push_unary(stack, "-");
-  break;
-  case AstKind_pos:
-    ast_stringify_push_unary(stack, "+");
-  break;
-  case AstKind_assign: {
-    String_Builder one = slice_string_builder_pop(stack);
-    String_Builder sb = {0};
-    sb.base = arena_alloc(&temp_arena, one.size + 3 + 2);
-    string_builder_push_string_builder(&sb,  one);
-    string_builder_push_cstr(&sb, " = ");
-    slice_string_builder_push(stack, sb);
-  } break;
-  case AstKind_name: {
-    String_Builder sb = {0};
-    sb.base = arena_alloc(&temp_arena, istr_length(ast.istr));
-    string_builder_push_cstr(&sb, cstr_from_istr(ast.istr));
-    slice_string_builder_push(stack, sb);
-  } break;
-  case AstKind_block: {
-    // { a; b; }
-    umi size = 0;
-    for (s32 i = 0; i < ast.val_s64; i++) {
-      String_Builder one = slice_string_builder_from_top(stack, i);
-      size += one.size + 1 + 1;
-    }
-    String_Builder sb = {0};
-    sb.base = arena_alloc(&temp_arena, size + 3);
-    string_builder_push_cstr(&sb, "{ ");
-    for (s32 i = ast.val_s64-1; i >= 0; i--) {
-      String_Builder one = slice_string_builder_from_top(stack, i);
-      string_builder_push_string_builder(&sb, one);
-      string_builder_push_cstr(&sb, "; ");
-    }
-    for (s32 i = ast.val_s64-1; i >= 0; i--) {
-      slice_string_builder_pop(stack);
-    }
-    string_builder_push_cstr(&sb, "}");
-    slice_string_builder_push(stack, sb);
-  } break;
-  default: {
-    String_Builder sb = {0};
-    umi len = strlen("<error>");
-    sb.base = arena_alloc(&temp_arena, len);
-    string_builder_push_cstr(&sb, "<error>");
-    slice_string_builder_push(stack, sb);
-  } break;
-  }
-}
-
-cstr cstr_from_slice_ast(Slice_Ast slice) {
-  Slice_String_Builder stack = {0};
-  // a,b,+,eof -> (a + b)\0
-  //   4       ->    8
-  stack.base = arena_alloc(&temp_arena, 3*sizeof(String_Builder)*slice.length);
-  ast_stringify_push_ast(&stack, *ast);
-  String_Builder final = stack.base[0];
-  return string_builder_end(&final);
 }
 
 cstr source_to_cstr_from_ast(cstr source, cstr name) {
   astid_from_source(source, name);
-  return cstr_from_slice_ast(parser.ast_final);
+  return cstr_from_slice_ast(&parser.ast_final);
 }
 
 cstr cstr_from_source_info(cstr file_name, s32 line) {
