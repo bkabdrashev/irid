@@ -1,31 +1,38 @@
 typedef enum {
-  TokenFlag_separates = 1 << 8,
-  TokenFlag_prefix    = 1 << 9,
-  TokenFlag_call_rhs  = 1 << 10,
-} TokenFlag;
+  Token_Kind_Flag_separates = 1 << 8,
+  Token_Kind_Flag_prefix    = 1 << 9,
+} Token_Kind_Flag;
 
 typedef enum {
-  TokenKind_eof                = 0 | TokenFlag_separates,
-  TokenKind_name               = 1 | TokenFlag_call_rhs,
-  TokenKind_int                = 2 | TokenFlag_call_rhs,
-  TokenKind_plus               = 3,
-  TokenKind_plus_prefix        = 3 | TokenFlag_prefix,
-  TokenKind_minus              = 5,
-  TokenKind_minus_prefix       = 5 | TokenFlag_prefix,
-  TokenKind_star               = 7,
-  TokenKind_at                 = 8 | TokenFlag_call_rhs,
-  TokenKind_at_prefix          = 8 | TokenFlag_prefix | TokenFlag_call_rhs,
-  TokenKind_equal              = 10 | TokenFlag_separates,
-  TokenKind_brace_open         = 11 | TokenFlag_call_rhs,
-  TokenKind_brace_prefix_open  = 12 | TokenFlag_call_rhs,
-  TokenKind_brace_close        = 13,
-  TokenKind_paren_open         = 14 | TokenFlag_call_rhs,
-  TokenKind_paren_close        = 15,
-  TokenKind_semicolon          = 16 | TokenFlag_separates,
-} TokenKind;
+  Token_Flag_call_lhs  = 1 << 0,
+  Token_Flag_call_rhs  = 1 << 1,
+} Token_Flag;
+
+typedef enum {
+  Token_Kind_eof                = 0 | Token_Kind_Flag_separates,
+  Token_Kind_name               = 1,
+  Token_Kind_int                = 2,
+  Token_Kind_plus               = 3,
+  Token_Kind_plus_prefix        = 3 | Token_Kind_Flag_prefix,
+  Token_Kind_minus              = 5,
+  Token_Kind_minus_prefix       = 5 | Token_Kind_Flag_prefix,
+  Token_Kind_star               = 7,
+  Token_Kind_at                 = 8,
+  Token_Kind_at_prefix          = 8 | Token_Kind_Flag_prefix,
+  Token_Kind_equal              = 10 | Token_Kind_Flag_separates,
+  Token_Kind_brace_open         = 11,
+  Token_Kind_brace_prefix_open  = 12,
+  Token_Kind_brace_close        = 13,
+  Token_Kind_paren_open         = 14,
+  Token_Kind_paren_close        = 15,
+  Token_Kind_curly_open         = 16,
+  Token_Kind_curly_close        = 17,
+  Token_Kind_semicolon          = 18 | Token_Kind_Flag_separates,
+} Token_Kind;
 
 typedef struct {
-  TokenKind kind;
+  Token_Kind kind;
+  Token_Flag flag;
   union {
     s64 s64_val;
     u64 value;
@@ -71,8 +78,8 @@ Slice_Token lex_source(cstr source, cstr file_path) {
   lexer.wasnewline = true;
   lexer.wasspace   = true;
 
-  Token token = {0};
   while (*lexer.stream) {
+    Token token = {0};
     switch (*lexer.stream) {
     case ' ': case '\t': case '\v' :
       lexer.stream++;
@@ -91,77 +98,100 @@ Slice_Token lex_source(cstr source, cstr file_path) {
     case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
     {
       cstr start = lexer.stream;
-      token.kind = TokenKind_name;
+      token.kind = Token_Kind_name;
+      token.flag = Token_Flag_call_lhs;
+      if (!lexer.wasnewline) {
+        token.flag |= Token_Flag_call_rhs;
+      }
       while (isalnum(*lexer.stream)) {
         lexer.stream++;
       }
       token.istr = istr_from_range(start, lexer.stream);
     } break;
     case '+': {
-      token.kind = TokenKind_plus;
+      token.kind = Token_Kind_plus;
       if (lexer.wasnewline && !isspace(lexer.stream[1])) {
-        token.kind = TokenKind_plus_prefix;
+        token.kind = Token_Kind_plus_prefix;
       }
       lexer.stream++;
     } break;
     case '-': {
-      token.kind = TokenKind_minus;
+      token.kind = Token_Kind_minus;
       if (lexer.wasnewline && !isspace(lexer.stream[1])) {
-       token.kind = TokenKind_minus_prefix;
+       token.kind = Token_Kind_minus_prefix;
       }
       lexer.stream++;
     } break;
     case '*': {
-      token.kind = TokenKind_star;
+      token.kind = Token_Kind_star;
       lexer.stream++;
     } break;
     case '=': {
-      token.kind = TokenKind_equal;
+      token.kind = Token_Kind_equal;
       lexer.stream++;
     } break;
     case '(': {
-      token.kind = TokenKind_paren_open;
+      token.kind = Token_Kind_paren_open;
+      if (!lexer.wasnewline) {
+        token.flag = Token_Flag_call_rhs;
+      }
       lexer.stream++;
     } break;
     case ')': {
-      token.kind = TokenKind_paren_close;
+      token.kind = Token_Kind_paren_close;
+      token.flag = Token_Flag_call_lhs;
       lexer.stream++;
     } break;
     case '[': {
-      token.kind = TokenKind_brace_open;
+      token.kind = Token_Kind_brace_open;
       if (lexer.wasnewline) {
-        token.kind = TokenKind_brace_prefix_open;
+        token.kind = Token_Kind_brace_prefix_open;
       }
       lexer.stream++;
     } break;
     case ']': {
-      token.kind = TokenKind_brace_close;
+      token.kind = Token_Kind_brace_close;
+      token.flag = Token_Flag_call_lhs;
+      lexer.stream++;
+    } break;
+    case '{': {
+      token.kind = Token_Kind_curly_open;
+      if (!lexer.wasnewline) {
+        token.flag = Token_Flag_call_rhs;
+      }
+      lexer.stream++;
+    } break;
+    case '}': {
+      token.kind = Token_Kind_curly_close;
+      token.flag = Token_Flag_call_lhs;
       lexer.stream++;
     } break;
     case '@': {
-      token.kind = TokenKind_at;
+      token.kind = Token_Kind_at;
       if (lexer.wasnewline) {
-        token.kind = TokenKind_at_prefix;
+        token.kind = Token_Kind_at_prefix;
       }
       lexer.stream++;
     } break;
     case ';': {
-      token.kind = TokenKind_semicolon;
+      token.kind = Token_Kind_semicolon;
       lexer.stream++;
     } break;
     case '\0': {
-      token.kind = TokenKind_eof;
+      token.kind = Token_Kind_eof;
     } break;
     default: {
       lexer.stream++;
     } break;
     }
 
+    // NOTE: checks whether rhs should be disabled
+    token.kind &= ~(lexer.wasnewline << 11);
     lexer.wasnewline = false;
     lexer.wasspace   = false;
     slice_token_push(&slice_token, token);
   }
-  token.kind = TokenKind_eof;
+  Token token = { .kind = Token_Kind_eof };
   slice_token_push(&slice_token, token);
   return slice_token;
 }
@@ -170,56 +200,62 @@ cstr cstr_from_slice_token(Slice_Token slice) {
   String_Builder sb = string_builder_begin(&temp_arena, slice.length * 3 + 1);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {
-    case TokenKind_eof:
+    case Token_Kind_eof:
       string_builder_push_cstr(&sb, "eof");
       break;
-    case TokenKind_name: {
+    case Token_Kind_name: {
       cstr str =  cstr_from_istr(token->istr);
       string_builder_push_cstr(&sb, str);
     } break;
-    case TokenKind_int:
+    case Token_Kind_int:
       string_builder_push_cstr(&sb, "int");
       break;
-    case TokenKind_plus:
+    case Token_Kind_plus:
       string_builder_push_cstr(&sb, "+");
       break;
-    case TokenKind_plus_prefix:
+    case Token_Kind_plus_prefix:
       string_builder_push_cstr(&sb, "p+");
       break;
-    case TokenKind_minus:
+    case Token_Kind_minus:
       string_builder_push_cstr(&sb, "-");
       break;
-    case TokenKind_minus_prefix:
+    case Token_Kind_minus_prefix:
       string_builder_push_cstr(&sb, "p-");
       break;
-    case TokenKind_star:
+    case Token_Kind_star:
       string_builder_push_cstr(&sb, "*");
       break;
-    case TokenKind_equal:
+    case Token_Kind_equal:
       string_builder_push_cstr(&sb, "=");
       break;
-    case TokenKind_at:
+    case Token_Kind_at:
       string_builder_push_cstr(&sb, "@");
       break;
-    case TokenKind_at_prefix:
+    case Token_Kind_at_prefix:
       string_builder_push_cstr(&sb, "p@");
       break;
-    case TokenKind_brace_open:
+    case Token_Kind_brace_open:
       string_builder_push_cstr(&sb, "[");
       break;
-    case TokenKind_brace_prefix_open:
+    case Token_Kind_brace_prefix_open:
       string_builder_push_cstr(&sb, "p[");
       break;
-    case TokenKind_brace_close:
+    case Token_Kind_brace_close:
       string_builder_push_cstr(&sb, "]");
       break;
-    case TokenKind_paren_open:
+    case Token_Kind_paren_open:
       string_builder_push_cstr(&sb, "(");
       break;
-    case TokenKind_paren_close:
+    case Token_Kind_paren_close:
       string_builder_push_cstr(&sb, ")");
       break;
-    case TokenKind_semicolon:
+    case Token_Kind_curly_open:
+      string_builder_push_cstr(&sb, "{");
+      break;
+    case Token_Kind_curly_close:
+      string_builder_push_cstr(&sb, "}");
+      break;
+    case Token_Kind_semicolon:
       string_builder_push_cstr(&sb, ";");
       break;
     }
