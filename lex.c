@@ -186,7 +186,6 @@ Slice_Token lex_source(cstr source, cstr file_path) {
     }
 
     // NOTE: checks whether rhs should be disabled
-    token.kind &= ~(lexer.wasnewline << 11);
     lexer.wasnewline = false;
     lexer.wasspace   = false;
     slice_token_push(&slice_token, token);
