@@ -20,7 +20,7 @@ typedef enum {
   Ast_Kind_array_open      = (Token_Kind_brace_open+1)  | Ast_Flag_binary,
   Ast_Kind_array_close     = (Token_Kind_brace_close+1) | Ast_Flag_binary,
   Ast_Kind_assign          = Token_Kind_equal           | Ast_Flag_binary,
-  Ast_Kind_paren_open      = Token_Kind_paren_open      | Ast_Flag_list,
+  Ast_Kind_paren_open      = Token_Kind_paren_open,
   Ast_Kind_paren_close     = Token_Kind_paren_close,
   Ast_Kind_record_open     = (Token_Kind_paren_open+1) | Ast_Flag_list,
   Ast_Kind_record_close    = (Token_Kind_paren_close+1),
@@ -350,7 +350,7 @@ void parse_expression(void) {
         parse_ast_push(&parser.ast_stack, kind, token.value);
         parser.state = Parse_State_expression;
       } break;
-      case Token_Kind_paren_close:
+      case Token_Kind_paren_close: {
         Astid astid = slice_astid_pop(&parser.len_stack);
         while (!parse_ast_stack_is_top(Ast_Kind_paren_open)) {
           parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
@@ -363,7 +363,7 @@ void parse_expression(void) {
           parse_ast_push(&parser.ast_inter, Ast_Kind_record_close, 0); // pops Ast_Kind_paren_open
         }
         parser.state = Parse_State_infix_or_suffix;
-      break;
+      } break;
       case Token_Kind_brace_open:
       case Token_Kind_brace_prefix_open: {
         Ast_Kind kind = Ast_Kind_array_open;
@@ -445,7 +445,7 @@ void parse_expression(void) {
         if (!slice_astid_is_empty(&parser.len_stack)) {
           Astid top = slice_astid_top(&parser.len_stack);
           parser.ast_inter.base[top.index].val_s64++;
-          parser.ast_inter.base[top.index].kind = Ast_Kind_record_open;
+          parser.ast_inter.base[top.index].kind |= Ast_Flag_list;
         }
         parser.state = Parse_State_expression;
       break;
@@ -456,6 +456,14 @@ void parse_expression(void) {
             parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
           }
           parse_ast_stack_push_kind(Ast_Kind_call);
+          parser.state = Parse_State_expression;
+        }
+        else {
+          if (!slice_astid_is_empty(&parser.len_stack)) {
+            Astid top = slice_astid_top(&parser.len_stack);
+            parser.ast_inter.base[top.index].val_s64++;
+            parser.ast_inter.base[top.index].kind |= Ast_Flag_list;
+          }
           parser.state = Parse_State_expression;
         }
       } break;
@@ -481,7 +489,6 @@ void parse_tokens(Slice_Token tokens) {
   parser.ast_final.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
   parser.tokens = tokens;
   parser.tok = 0;
-  s32 statements = 0;
   Astid block_enter = parse_ast_push(&parser.ast_inter, Ast_Kind_block_enter, 0);
   parser.state = Parse_State_expression;
   slice_astid_push(&parser.len_stack, block_enter);
@@ -505,9 +512,10 @@ void parse_tokens(Slice_Token tokens) {
     else {
       parse_transfer_all(&parser.ast_inter, &parser.ast_final);
     }
-    statements++;
   }
-  parser.ast_final.base[block_enter.index].value = statements;
+  if (parser.state == Parse_State_infix_or_suffix) {
+    parser.ast_final.base[block_enter.index].val_s64++;
+  }
   parse_ast_push(&parser.ast_final, Ast_Kind_block_leave, 0);
 }
 
@@ -548,7 +556,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a;b;c", "{}");
+  test("a\n b c", "{}");
 }
 
 #undef test
