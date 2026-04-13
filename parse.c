@@ -7,6 +7,7 @@ typedef enum {
 typedef enum {
   Ast_Kind_eof  = Token_Kind_eof,
   Ast_Kind_name = Token_Kind_name,
+  Ast_Kind_tuple = Token_Kind_comma  | Ast_Flag_binary,
   Ast_Kind_add  = Token_Kind_plus  | Ast_Flag_binary,
   Ast_Kind_sub  = Token_Kind_minus | Ast_Flag_binary,
   Ast_Kind_mul  = Token_Kind_star  | Ast_Flag_binary,
@@ -61,6 +62,9 @@ cstr cstr_from_slice_ast(Slice_Ast* slice) {
   String_Builder sb = string_builder_begin(&temp_arena, 10 * slice->length * sizeof(c8));
   for (s32 i = 0; i < slice->length; i++) {
     switch (slice->base[i].kind) {
+    case Ast_Kind_tuple:
+      string_builder_push_cstr(&sb, "tuple");
+    break;
     case Ast_Kind_add:
       string_builder_push_cstr(&sb, "add");
     break;
@@ -205,6 +209,10 @@ Ast parse_ast_stack_pop(void) {
 
 s32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
+  case Ast_Kind_array:
+  case Ast_Kind_subscript:
+                       return 0;
+  case Ast_Kind_tuple: return 1;
   case Ast_Kind_sub:
   case Ast_Kind_add: return 11;
   case Ast_Kind_mul: return 13;
@@ -219,13 +227,16 @@ s32 parse_left_precedence(Ast_Kind kind) {
 
 s32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
+  case Ast_Kind_tuple: return 2;
   case Ast_Kind_sub:
   case Ast_Kind_add: return 12;
   case Ast_Kind_mul: return 14;
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:  return 16;
+  case Ast_Kind_array:
   case Ast_Kind_load: return 18;
+  case Ast_Kind_subscript:
   case Ast_Kind_call: return 20;
   default :          return -1;
   }
@@ -306,7 +317,8 @@ void parse_expression(void) {
       break;
       case Token_Kind_brace_open:
       case Token_Kind_brace_prefix_open:
-        parse_ast_stack_push((Ast_Kind)token.kind, token.value);
+        Ast_Kind kind = Ast_Kind_array;
+        parse_ast_stack_push(kind, token.value);
         parser.state = Parse_State_expression;
       break;
       case Token_Kind_brace_close:
@@ -326,9 +338,11 @@ void parse_expression(void) {
       case Token_Kind_plus:
       case Token_Kind_minus:
       case Token_Kind_star:
+      case Token_Kind_comma:
       case Token_Kind_brace_open: {
         parse_consume_token();
         Ast_Kind kind = (Ast_Kind)token.kind | Ast_Flag_binary;
+
         while (parse_ast_stack_is_top_higher_precedence(kind)) {
           parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
@@ -349,6 +363,7 @@ void parse_expression(void) {
         while (!parse_ast_stack_is_top(Ast_Kind_array)) {
           parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
+        parse_ast_push(&parser.ast_inter, Ast_Kind_subscript, token.value);
         parse_ast_stack_pop(); // pops Ast_Kind_arr
         parser.state = Parse_State_infix_or_suffix;
       break;
@@ -460,7 +475,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a(b)", "{}");
+  test("a-b[c+d]", "{}");
 }
 
 #undef test

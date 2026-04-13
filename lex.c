@@ -28,6 +28,7 @@ typedef enum {
   Token_Kind_curly_open         = 16,
   Token_Kind_curly_close        = 17,
   Token_Kind_semicolon          = 18 | Token_Kind_Flag_separates,
+  Token_Kind_comma              = 19,
 } Token_Kind;
 
 typedef struct {
@@ -177,6 +178,10 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       token.kind = Token_Kind_semicolon;
       lexer.stream++;
     } break;
+    case ',': {
+      token.kind = Token_Kind_comma;
+      lexer.stream++;
+    } break;
     case '\0': {
       token.kind = Token_Kind_eof;
     } break;
@@ -255,6 +260,9 @@ cstr cstr_from_slice_token(Slice_Token slice) {
       string_builder_push_cstr(&sb, "}");
       break;
     case Token_Kind_semicolon:
+      string_builder_push_cstr(&sb, ";");
+      break;
+    case Token_Kind_comma:
       string_builder_push_cstr(&sb, ";");
       break;
     }
