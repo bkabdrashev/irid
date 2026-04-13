@@ -27,7 +27,7 @@ typedef enum {
   Token_Kind_paren_close        = 15,
   Token_Kind_curly_open         = 16,
   Token_Kind_curly_close        = 17,
-  Token_Kind_semicolon          = 18 | Token_Kind_Flag_separates,
+  Token_Kind_semicolon          = 18,
   Token_Kind_comma              = 19,
 } Token_Kind;
 
@@ -263,7 +263,7 @@ cstr cstr_from_slice_token(Slice_Token slice) {
       string_builder_push_cstr(&sb, ";");
       break;
     case Token_Kind_comma:
-      string_builder_push_cstr(&sb, ";");
+      string_builder_push_cstr(&sb, ",");
       break;
     }
     string_builder_push_cstr(&sb, " ");
