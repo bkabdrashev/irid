@@ -35,15 +35,15 @@ typedef struct {
   Token_Kind kind;
   Token_Flag flag;
   union {
-    s64 s64_val;
-    u64 value;
+    S64  s64;
+    U64  value;
     Istr istr;
   };
 } Token;
 
 typedef struct {
   Token* base;
-  umi    length;
+  Umi    length;
 } Slice_Token;
 
 void slice_token_push(Slice_Token* slice, Token item) {
@@ -54,23 +54,23 @@ Token slice_token_pop(Slice_Token* slice) {
   return slice->base[slice->length--];
 }
 
-Token slice_token_at(Slice_Token* slice, s32 at) {
+Token slice_token_at(Slice_Token* slice, S32 at) {
   return slice->base[at];
 }
 
 
 typedef struct {
-  cstr source;
-  cstr stream;
-  cstr file_path;
-  b8   wasnewline;
-  b8   wasspace;
+  Cstr source;
+  Cstr stream;
+  Cstr file_path;
+  B8   wasnewline;
+  B8   wasspace;
 } Lexer;
 
 Lexer lexer = {0};
 
-Slice_Token lex_source(cstr source, cstr file_path) {
-  umi source_len = strlen(source);
+Slice_Token lex_source(Cstr source, Cstr file_path) {
+  Umi source_len = strlen(source);
   Slice_Token slice_token = {0};
   slice_token.base = xmalloc(sizeof(Token) * (source_len+1));
   lexer.source = source;
@@ -91,14 +91,65 @@ Slice_Token lex_source(cstr source, cstr file_path) {
       lexer.wasspace = true;
       lexer.wasnewline = true;
       continue;
+    case '0': case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9': {
+      token.kind = Token_Kind_int;
+      S32 base = 10;
+      if (*lexer.stream == '0') {
+        lexer.stream++;
+        if (tolower(*lexer.stream) == 'x') {
+          lexer.stream++;
+          base = 16;
+        }
+        else if (tolower(*lexer.stream) == 'b') {
+          lexer.stream++;
+          base = 2;
+        }
+        else if (isdigit(*lexer.stream)) {
+          base = 8;
+        }
+      }
+      U64 val = 0;
+      for (;;) {
+        if (*lexer.stream == '_') {
+          lexer.stream++;
+          continue;
+        }
+        S32 digit = 0;
+        switch (*lexer.stream) {
+        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+          digit = *lexer.stream - '0';
+        break;
+        case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+          digit = *lexer.stream - 'a' + 10;
+        break;
+        case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+          digit = *lexer.stream - 'A' + 10;
+        break;
+        default:
+          digit = 16;
+        break;
+        }
+
+        if (digit == 16 && *lexer.stream != '0') {
+          break;
+        }
+        if (digit >= base) {
+          printf("Digit '%c' out of range for base %d", *lexer.stream, base);
+          digit = 0;
+        }
+        val = val*base + digit;
+        lexer.stream++;
+      }
+      token.s64 = val;
+    } break;
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
     case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
     case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
     case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J':
     case 'K': case 'L': case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T':
-    case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
-    {
-      cstr start = lexer.stream;
+    case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': {
+      Cstr start = lexer.stream;
       token.kind = Token_Kind_name;
       token.flag = Token_Flag_call_lhs;
       if (!lexer.wasnewline) {
@@ -200,7 +251,7 @@ Slice_Token lex_source(cstr source, cstr file_path) {
   return slice_token;
 }
 
-cstr cstr_from_slice_token(Slice_Token slice) {
+Cstr cstr_from_slice_token(Slice_Token slice) {
   String_Builder sb = string_builder_begin(&temp_arena, slice.length * 3 + 1);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {
@@ -208,11 +259,11 @@ cstr cstr_from_slice_token(Slice_Token slice) {
       string_builder_push_cstr(&sb, "eof");
       break;
     case Token_Kind_name: {
-      cstr str =  cstr_from_istr(token->istr);
+      Cstr str =  cstr_from_istr(token->istr);
       string_builder_push_cstr(&sb, str);
     } break;
     case Token_Kind_int:
-      string_builder_push_cstr(&sb, "int");
+      string_builder_push_s64(&sb, token->s64);
       break;
     case Token_Kind_plus:
       string_builder_push_cstr(&sb, "+");
@@ -268,7 +319,7 @@ cstr cstr_from_slice_token(Slice_Token slice) {
     }
     string_builder_push_cstr(&sb, " ");
   }
-  cstr str = string_builder_end(&sb);
+  Cstr str = string_builder_end(&sb);
   return str;
 }
 

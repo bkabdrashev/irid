@@ -7,6 +7,7 @@ typedef enum {
 typedef enum {
   Ast_Kind_eof  = Token_Kind_eof,
   Ast_Kind_name = Token_Kind_name,
+  Ast_Kind_int  = Token_Kind_int,
   Ast_Kind_tuple = Token_Kind_comma  | Ast_Flag_binary,
   Ast_Kind_add  = Token_Kind_plus  | Ast_Flag_binary,
   Ast_Kind_sub  = Token_Kind_minus | Ast_Flag_binary,
@@ -32,23 +33,23 @@ typedef enum {
 typedef struct {
   Ast_Kind kind;
   union {
-    u64 value;
-    s64 val_s64;
+    U64 value;
+    S64 s64;
     Istr istr;
   };
 } Ast; 
 
 typedef struct {
-  s32 index;
+  S32 index;
 } Astid;
 
 typedef struct {
   Ast* base;
-  s32  length;
+  S32  length;
 } Slice_Ast;
 
-s32 slice_ast_push(Slice_Ast* slice, Ast item) {
-  s32 index = slice->length;
+S32 slice_ast_push(Slice_Ast* slice, Ast item) {
+  S32 index = slice->length;
   slice->base[slice->length++] = item;
   return index;
 }
@@ -58,17 +59,17 @@ Ast slice_ast_pop(Slice_Ast* slice) {
 Ast slice_ast_top(Slice_Ast* slice) {
   return slice->base[slice->length-1];
 }
-b8 slice_ast_is_empty(Slice_Ast* slice) {
+B8 slice_ast_is_empty(Slice_Ast* slice) {
   return slice->length == 0;
 }
 
 typedef struct {
   Astid* base;
-  s32  length;
+  S32  length;
 } Slice_Astid;
 
-s32 slice_astid_push(Slice_Astid* slice, Astid item) {
-  s32 index = slice->length;
+S32 slice_astid_push(Slice_Astid* slice, Astid item) {
+  S32 index = slice->length;
   slice->base[slice->length++] = item;
   return index;
 }
@@ -78,13 +79,13 @@ Astid slice_astid_pop(Slice_Astid* slice) {
 Astid slice_astid_top(Slice_Astid* slice) {
   return slice->base[slice->length-1];
 }
-b8 slice_astid_is_empty(Slice_Astid* slice) {
+B8 slice_astid_is_empty(Slice_Astid* slice) {
   return slice->length == 0;
 }
 
-cstr cstr_from_slice_ast(Slice_Ast* slice) {
-  String_Builder sb = string_builder_begin(&temp_arena, 10 * slice->length * sizeof(c8));
-  for (s32 i = 0; i < slice->length; i++) {
+Cstr cstr_from_slice_ast(Slice_Ast* slice) {
+  String_Builder sb = string_builder_begin(&temp_arena, 10 * slice->length * sizeof(C8));
+  for (S32 i = 0; i < slice->length; i++) {
     switch (slice->base[i].kind) {
     case Ast_Kind_tuple:
       string_builder_push_cstr(&sb, "tuple");
@@ -124,27 +125,30 @@ cstr cstr_from_slice_ast(Slice_Ast* slice) {
     break;
     case Ast_Kind_block_enter:
       string_builder_push_cstr(&sb, "{");
-      string_builder_push_s64(&sb, slice->base[i].val_s64);
+      string_builder_push_s64(&sb, slice->base[i].s64);
     break;
     case Ast_Kind_block_leave:
       string_builder_push_cstr(&sb, "}");
     break;
     case Ast_Kind_paren_open:
       string_builder_push_cstr(&sb, "(");
-      string_builder_push_s64(&sb, slice->base[i].val_s64);
+      string_builder_push_s64(&sb, slice->base[i].s64);
     break;
     case Ast_Kind_paren_close:
       string_builder_push_cstr(&sb, ")");
     break;
     case Ast_Kind_record_open:
       string_builder_push_cstr(&sb, "r(");
-      string_builder_push_s64(&sb, slice->base[i].val_s64);
+      string_builder_push_s64(&sb, slice->base[i].s64);
     break;
     case Ast_Kind_record_close:
       string_builder_push_cstr(&sb, ")r");
     break;
     case Ast_Kind_call:
       string_builder_push_cstr(&sb, "call");
+    break;
+    case Ast_Kind_int:
+      string_builder_push_s64(&sb, slice->base[i].s64);
     break;
     case Ast_Kind_name:
       string_builder_push_cstr(&sb, cstr_from_istr(slice->base[i].istr));
@@ -158,7 +162,7 @@ cstr cstr_from_slice_ast(Slice_Ast* slice) {
     }
     string_builder_push_cstr(&sb, " ");
   }
-  cstr result = string_builder_end(&sb);
+  Cstr result = string_builder_end(&sb);
   return result;
 }
 
@@ -178,23 +182,23 @@ typedef struct {
   Slice_Ast ast_inter;
   Slice_Ast ast_final;
   Slice_Token tokens;
-  s32  tok;
-  cstr source;
-  cstr path;
+  S32  tok;
+  Cstr source;
+  Cstr path;
 } Parser;
 
 Parser parser = {0};
 
-Astid parse_ast_push(Slice_Ast* slice, Ast_Kind kind, s32 value) {
+Astid parse_ast_push(Slice_Ast* slice, Ast_Kind kind, S32 value) {
   Ast ast = { .kind = kind, .value = value };
   Astid astid = { .index = slice_ast_push(slice, ast) };
   return astid;
 }
-void parse_ast_set_value(Slice_Ast slice, Astid astid, s32 value) {
+void parse_ast_set_value(Slice_Ast slice, Astid astid, S32 value) {
   slice.base[astid.index].value = value;
 }
 void parse_transfer_all(Slice_Ast* from, Slice_Ast* to) {
-  for (s32 i = 0; i < from->length; i++) {
+  for (S32 i = 0; i < from->length; i++) {
     Ast ast = from->base[i];
     slice_ast_push(to, ast);
   }
@@ -206,7 +210,7 @@ void parse_transfer_one(Slice_Ast* from, Slice_Ast* to) {
   slice_ast_push(to, ast);
 }
 
-b8 parse_ast_inter_is_empty(void) {
+B8 parse_ast_inter_is_empty(void) {
   return slice_ast_is_empty(&parser.ast_inter);
 }
 
@@ -217,11 +221,11 @@ void parse_ast_stack_push_unary(void) {
   slice_ast_push(&parser.ast_stack, ast);
 }
 
-b8 parse_ast_stack_is_empty(void) {
+B8 parse_ast_stack_is_empty(void) {
   return slice_ast_is_empty(&parser.ast_stack);
 }
 
-b8 parse_ast_stack_is_top(Ast_Kind kind) {
+B8 parse_ast_stack_is_top(Ast_Kind kind) {
   Ast ast = slice_ast_top(&parser.ast_stack);
   return ast.kind == (Ast_Kind)kind;
 }
@@ -231,7 +235,7 @@ Ast parse_ast_stack_top() {
   return ast;
 }
 
-void parse_ast_stack_push(Ast_Kind kind, s32 value) {
+void parse_ast_stack_push(Ast_Kind kind, S32 value) {
   Ast ast = { .kind = kind, .value = value };
   slice_ast_push(&parser.ast_stack, ast);
 }
@@ -245,7 +249,7 @@ Ast parse_ast_stack_pop(void) {
   return slice_ast_pop(&parser.ast_stack);
 }
 
-s32 parse_left_precedence(Ast_Kind kind) {
+S32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_array_open:
   case Ast_Kind_subscript_open:
@@ -265,7 +269,7 @@ s32 parse_left_precedence(Ast_Kind kind) {
   }
 }
 
-s32 parse_right_precedence(Ast_Kind kind) {
+S32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_tuple: return 2;
   case Ast_Kind_sub:
@@ -282,11 +286,11 @@ s32 parse_right_precedence(Ast_Kind kind) {
   }
 }
 
-b8 parse_ast_stack_is_top_higher_precedence(Ast_Kind kind) {
+B8 parse_ast_stack_is_top_higher_precedence(Ast_Kind kind) {
   if (slice_ast_is_empty(&parser.ast_stack)) return false;
   Ast stack_ast = slice_ast_top(&parser.ast_stack);
-  s32 on_stack_precedence  = parse_left_precedence(stack_ast.kind);
-  s32 on_stream_precedence = parse_right_precedence(kind);
+  S32 on_stack_precedence  = parse_left_precedence(stack_ast.kind);
+  S32 on_stream_precedence = parse_right_precedence(kind);
   if (on_stack_precedence <= on_stream_precedence) {
     return false;
   }
@@ -305,11 +309,11 @@ Token_Kind parse_current_token_kind(void) {
   return parser.tokens.base[parser.tok].kind;
 }
 
-b8 parse_is_current_token(Token_Kind kind) {
+B8 parse_is_current_token(Token_Kind kind) {
   return parser.tokens.base[parser.tok].kind == kind;
 }
 
-b8 parse_current_token_is_flag(Token_Flag flag) {
+B8 parse_current_token_is_flag(Token_Flag flag) {
   Token token = parse_current_token();
   return (token.kind & flag) != 0;
 }
@@ -318,7 +322,7 @@ void parse_consume_token(void) {
   parser.tok++;
 }
 
-b8 parse_is_token_separates_expression(void) {
+B8 parse_is_token_separates_expression(void) {
   Token token = parse_current_token();
   return (token.kind & Token_Kind_Flag_separates) != 0;
 }
@@ -427,7 +431,7 @@ void parse_expression(void) {
       case Token_Kind_paren_close: {
         parse_consume_token();
         Astid astid = slice_astid_pop(&parser.len_stack);
-        parser.ast_inter.base[astid.index].val_s64++;
+        parser.ast_inter.base[astid.index].s64++;
         while (!parse_ast_stack_is_top(Ast_Kind_paren_open)) {
           parse_transfer_one(&parser.ast_stack, &parser.ast_inter);
         }
@@ -444,7 +448,7 @@ void parse_expression(void) {
         parse_consume_token();
         if (!slice_astid_is_empty(&parser.len_stack)) {
           Astid top = slice_astid_top(&parser.len_stack);
-          parser.ast_inter.base[top.index].val_s64++;
+          parser.ast_inter.base[top.index].s64++;
           parser.ast_inter.base[top.index].kind |= Ast_Flag_list;
         }
         parser.state = Parse_State_expression;
@@ -461,7 +465,7 @@ void parse_expression(void) {
         else {
           if (!slice_astid_is_empty(&parser.len_stack)) {
             Astid top = slice_astid_top(&parser.len_stack);
-            parser.ast_inter.base[top.index].val_s64++;
+            parser.ast_inter.base[top.index].s64++;
             parser.ast_inter.base[top.index].kind |= Ast_Flag_list;
           }
           parser.state = Parse_State_expression;
@@ -482,8 +486,8 @@ Astid parse_statement(void) {
 }
 
 void parse_tokens(Slice_Token tokens) {
-  s32 total_ast_slice_length = 2*tokens.length + 2;
-  parser.len_stack.base = xmalloc(sizeof(s32) * total_ast_slice_length);
+  S32 total_ast_slice_length = 2*tokens.length + 2;
+  parser.len_stack.base = xmalloc(sizeof(S32) * total_ast_slice_length);
   parser.ast_inter.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
   parser.ast_stack.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
   parser.ast_final.base = xmalloc(sizeof(Ast) * total_ast_slice_length);
@@ -498,10 +502,10 @@ void parse_tokens(Slice_Token tokens) {
       parse_consume_token();
       // a + b = c * d
       // inter: a, b, +, =, c, d * 
-      s32 here = parser.ast_inter.length;
+      S32 here = parser.ast_inter.length;
       parse_ast_push(&parser.ast_stack, Ast_Kind_assign, 0);
       parse_expression();
-      for (s32 i = here; i < parser.ast_inter.length; i++) {
+      for (S32 i = here; i < parser.ast_inter.length; i++) {
         Ast ast = parser.ast_inter.base[i];
         slice_ast_push(&parser.ast_final, ast);
       }
@@ -514,30 +518,30 @@ void parse_tokens(Slice_Token tokens) {
     }
   }
   if (parser.state == Parse_State_infix_or_suffix) {
-    parser.ast_final.base[block_enter.index].val_s64++;
+    parser.ast_final.base[block_enter.index].s64++;
   }
   parse_ast_push(&parser.ast_final, Ast_Kind_block_leave, 0);
 }
 
-void astid_from_source(cstr source, cstr path) {
-  umi source_len = strlen(source);
+void astid_from_source(Cstr source, Cstr path) {
+  Umi source_len = strlen(source);
   istr_init(source_len+1);
   Slice_Token tokens = lex_source(source, path);
   printf("%s\n", cstr_from_slice_token(tokens));
   parse_tokens(tokens);
 }
 
-cstr source_to_cstr_from_ast(cstr source, cstr name) {
+Cstr source_to_cstr_from_ast(Cstr source, Cstr name) {
   astid_from_source(source, name);
   return cstr_from_slice_ast(&parser.ast_final);
 }
 
-cstr cstr_from_source_info(cstr file_name, s32 line) {
-  umi len1 = strlen(file_name);
-  c8  line_str[10];
+Cstr cstr_from_source_info(Cstr file_name, S32 line) {
+  Umi len1 = strlen(file_name);
+  C8  line_str[10];
   sprintf(line_str, "%i", line);
-  umi len2 = strlen(line_str);
-  c8* buf = arena_alloc(&temp_arena, len1 + len2 + 2 + 1);
+  Umi len2 = strlen(line_str);
+  C8* buf = arena_alloc(&temp_arena, len1 + len2 + 2 + 1);
   strcat(buf, file_name);
   strcat(buf, "(");
   strcat(buf, line_str);
@@ -545,10 +549,10 @@ cstr cstr_from_source_info(cstr file_name, s32 line) {
   return buf;
 }
 
-b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
+B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
   arena_init(&temp_arena, GB(1));
-  cstr resulted = source_to_cstr_from_ast(source, cstr_from_source_info(file_name, line));
-  b8 result = test_at_source(resulted, expected, file_name, line, source);
+  Cstr resulted = source_to_cstr_from_ast(source, cstr_from_source_info(file_name, line));
+  B8 result = test_at_source(resulted, expected, file_name, line, source);
   arena_free_all(&temp_arena);
   return result;
 }
@@ -556,7 +560,7 @@ b8 _test_ast(cstr expected, cstr file_name, s32 line, cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a\n b c", "{}");
+  test("a=3", "{}");
 }
 
 #undef test

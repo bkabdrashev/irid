@@ -14,7 +14,7 @@ void irid_assign(Funid funid, Astid astid, Irid irid) {
   } break;
   case AstKind_record : {
     Astid_Record astid_record = astid_record(astid);
-    for (s32 i = 0; i < slice_ast_field_length(astid_record.fields); i++) {
+    for (S32 i = 0; i < slice_ast_field_length(astid_record.fields); i++) {
       Ast_Field field = slice_ast_field_at(astid_record.fields, i);
       Irid at = irid_new_binary(funid, IrKind_position_access, irid, i);
       if (field.name) {
@@ -41,7 +41,7 @@ Irid irid_gen(Funid funid, Astid astid) {
   Irid result = IridNone;
   switch (astid_kind(astid)) {
   case AstKind_record_start : {
-    s32 record_length = astid_record_length(astid);
+    S32 record_length = astid_record_length(astid);
     irid_record_start(funid, record_length);
   } break;
   case AstKind_record_end : {
@@ -145,7 +145,7 @@ Irid irid_gen(Funid funid, Astid astid) {
     result = irid_addr_of(funid, of);
   } break;
   case AstKind_inr : {
-    s64 s64_val = astid_int(astid);
+    S64 s64_val = astid_int(astid);
     result = irid_new_int(funid, s64_val);
   } break;
   case AstKind_name : {
@@ -239,7 +239,7 @@ Irid irid_gen(Funid funid, Astid astid) {
       }
     }
     else if (astid_kind(field_access.two) == AstKind_int) {
-      s64 position = astid_int(field_access.two)
+      S64 position = astid_int(field_access.two)
       if (irid_kind(funid, lhs_irid) == AstKind_load) {
         irid_set_kind(funid, lhs_irid, IrKind_position_offset)
         irid_set_position_offset_position(funid, lhs_irid, position);
@@ -280,7 +280,7 @@ Funid funid_from_astid(Astid astid) {
   fundid_set_return_irid(funid, return_irid);
 }
 
-Funid irgen_from_source(cstr source, cstr path) {
+Funid irgen_from_source(Cstr source, Cstr path) {
   Astid ast   = astid_from_source(source, path);
   Funid funid = funid_from_astid(astid);
   return funid;

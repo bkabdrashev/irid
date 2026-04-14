@@ -1,30 +1,30 @@
 #define false (0)
 #define true (1)
 
-typedef  char     c8;
+typedef  char     C8;
 
-typedef int8_t    s8;
-typedef int16_t   s16;
-typedef int32_t   s32;
-typedef int64_t   s64;
+typedef int8_t    S8;
+typedef int16_t   S16;
+typedef int32_t   S32;
+typedef int64_t   S64;
 
-typedef int8_t    b8;
-typedef int16_t   b16;
-typedef int32_t   b32;
-typedef int64_t   b64;
+typedef int8_t    B8;
+typedef int16_t   B16;
+typedef int32_t   B32;
+typedef int64_t   B64;
 
-typedef uint8_t   u8;
-typedef uint16_t  u16;
-typedef uint32_t  u32;
-typedef uint64_t  u64;
+typedef uint8_t   U8;
+typedef uint16_t  U16;
+typedef uint32_t  U32;
+typedef uint64_t  U64;
 
-typedef float    f32;
-typedef double   f64;
+typedef float    F32;
+typedef double   F64;
 
-typedef size_t    umi; // unsigned memory index
-typedef ssize_t   smi; //   signed memory index
-typedef uintptr_t ump; // unsigned memory pointer
-typedef intptr_t  smp; //   signed memory pointer
+typedef size_t    Umi; // unsigned memory index
+typedef ssize_t   Smi; //   signed memory index
+typedef uintptr_t Ump; // unsigned memory pointer
+typedef intptr_t  Smp; //   signed memory pointer
 
 #define S64_MAX INT64_MAX
 #define S64_MIN INT64_MIN
@@ -37,24 +37,24 @@ typedef intptr_t  smp; //   signed memory pointer
 #define TB(a) (GB(a)*1024llu)
 
 typedef struct {
-  c8* base;
-  c8* top;
-  umi   capacity;
-  s8    alignment;
+  C8* base;
+  C8* top;
+  Umi   capacity;
+  S8    alignment;
 } Arena; 
 
-void arena_init(Arena* arena, umi capacity) {
+void arena_init(Arena* arena, Umi capacity) {
   arena->base = malloc(capacity);
   arena->top = arena->base;
   arena->capacity = capacity;
   arena->alignment = 8;
 }
 
-void* arena_alloc(Arena* arena, umi size) {
+void* arena_alloc(Arena* arena, Umi size) {
   assert(arena->top + size <= arena->base + arena->capacity);
   void* result = arena->top;
-  umi first_bits_off_mask = ~(arena->alignment - 1);
-  umi overshoot_up        = ((umi)arena->top + size + arena->alignment - 1);
+  Umi first_bits_off_mask = ~(arena->alignment - 1);
+  Umi overshoot_up        = ((Umi)arena->top + size + arena->alignment - 1);
   arena->top = (void*)(overshoot_up & first_bits_off_mask);
   return result;
 }
@@ -65,10 +65,10 @@ void arena_free_all(Arena* arena) {
 
 Arena temp_arena = {0};
 
-u64 hash_bytes(const void* ptr, u64 len) {
-  u64 x = 0xcbf29ce484222325;
-  c8* buf = (c8 *)ptr;
-  for (u64 i = 0; i < len; i++) {
+U64 hash_bytes(const void* ptr, U64 len) {
+  U64 x = 0xcbf29ce484222325;
+  C8* buf = (C8 *)ptr;
+  for (U64 i = 0; i < len; i++) {
     x ^= buf[i];
     x *= 0x100000001b3;
     x ^= x >> 32;
@@ -76,7 +76,7 @@ u64 hash_bytes(const void* ptr, u64 len) {
   return x;
 }
 
-void* xmalloc(umi num_bytes) {
+void* xmalloc(Umi num_bytes) {
   void* ptr = malloc(num_bytes);
   if (!ptr) {
     perror("xmalloc failed");
@@ -85,7 +85,7 @@ void* xmalloc(umi num_bytes) {
   return ptr;
 }
 
-void* xcalloc(umi size, umi length) {
+void* xcalloc(Umi size, Umi length) {
   void* ptr = calloc(size, length);
   if (!ptr) {
     perror("xcalloc failed");
@@ -94,7 +94,7 @@ void* xcalloc(umi size, umi length) {
   return ptr;
 }
 
-umi power_of_2_up(umi v) {
+Umi power_of_2_up(Umi v) {
   v--;
   v |= v >> 1;
   v |= v >> 2;
