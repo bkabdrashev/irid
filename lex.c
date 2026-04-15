@@ -19,7 +19,7 @@ typedef enum {
   Token_Kind_star               = 7,
   Token_Kind_at                 = 8,
   Token_Kind_at_prefix          = 8 | Token_Kind_Flag_prefix,
-  Token_Kind_equal              = 10 | Token_Kind_Flag_separates,
+  Token_Kind_equal              = 10,
   Token_Kind_brace_open         = 11,
   Token_Kind_brace_prefix_open  = 12,
   Token_Kind_brace_close        = 13,

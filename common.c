@@ -105,3 +105,23 @@ Umi power_of_2_up(Umi v) {
   v++;
   return v;
 }
+
+typedef struct {
+  S32* base;
+  S32 length;
+} Slice_S32;
+S32 slice_s32_push(Slice_S32* slice, S32 item) {
+  S32 index = slice->length;
+  slice->base[slice->length++] = item;
+  return index;
+}
+S32 slice_s32_pop(Slice_S32* slice) {
+  return slice->base[--slice->length];
+}
+S32 slice_s32_top(Slice_S32* slice) {
+  return slice->base[slice->length-1];
+}
+B8 slice_s32_is_empty(Slice_S32* slice) {
+  return slice->length == 0;
+}
+
