@@ -33,7 +33,7 @@ typedef enum {
   Ast_Kind_tuple_close     = (Token_Kind_comma+1)   | Ast_Flag_list,
   Ast_Kind_call = 123 | Ast_Flag_binary,
   Ast_Kind_block_enter = Token_Kind_curly_open  | Ast_Flag_list,
-  Ast_Kind_block_leave = Token_Kind_curly_close,
+  Ast_Kind_block_leave = Token_Kind_curly_close | Ast_Flag_list,
 
   Ast_Kind_else       = Token_Kind_else,
   Ast_Kind_else_value = Token_Kind_else | Ast_Flag_value,
@@ -616,6 +616,17 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
     } break;
     case Parse_Kind_curly_close: {
       parse_expect_token(Token_Kind_curly_close);
+      while (!parse_ast_stack_is_top(Ast_Kind_block_leave)) {
+        parse_transfer_one();
+      }
+      Ast ast_close = parse_ast_stack_pop();
+      Ast* open = parse_ast_final_at(ast_close.open_at);
+      if (parser.ast_final.length != ast_close.open_at.index) {
+    // BUG: one off bug {a;}
+        open->length++;
+      }
+      Astid astid_close = parse_ast_final_push(ast_close);
+      open->close_at = astid_close;
       parse_state_stack_push(Parse_Kind_infix_or_suffix, 0);
     } break;
     }
@@ -663,7 +674,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("()", "{}");
+  test("(a+b;c*d)", "{}");
 }
 
 #undef test
