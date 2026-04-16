@@ -29,6 +29,7 @@ typedef enum {
   Token_Kind_curly_close        = 22,
   Token_Kind_semicolon          = 24,
   Token_Kind_comma              = 26,
+  Token_Kind_else               = 28,
 } Token_Kind;
 
 typedef struct {
@@ -315,6 +316,9 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
       break;
     case Token_Kind_comma:
       string_builder_push_cstr(&sb, ",");
+      break;
+    case Token_Kind_else:
+      string_builder_push_cstr(&sb, "else");
       break;
     }
     string_builder_push_cstr(&sb, " ");
