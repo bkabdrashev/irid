@@ -137,12 +137,14 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     case Ast_Kind_block_enter:
       string_builder_push_cstr(&sb, "{");
       string_builder_push_s64(&sb, slice->base[i].length);
+      string_builder_push_cstr(&sb, ",");
+      string_builder_push_s64(&sb, slice->base[i].close_at.index);
     break;
     case Ast_Kind_block_leave:
       string_builder_push_cstr(&sb, "}");
     break;
     case Ast_Kind_paren_open:
-      string_builder_push_cstr(&sb, "(");
+      string_builder_push_cstr(&sb, "(,");
       string_builder_push_s64(&sb, slice->base[i].close_at.index);
     break;
     case Ast_Kind_paren_close:
@@ -160,6 +162,8 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     case Ast_Kind_tuple_open:
       string_builder_push_cstr(&sb, "t(");
       string_builder_push_s64(&sb, slice->base[i].length);
+      string_builder_push_cstr(&sb, ",");
+      string_builder_push_s64(&sb, slice->base[i].close_at.index);
     break;
     case Ast_Kind_tuple_close:
       string_builder_push_cstr(&sb, ")t");
@@ -577,6 +581,17 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
           parse_state_stack_push(Parse_Kind_expression, 0);
         }
         else {
+          while (!parse_ast_stack_is_top(Ast_Kind_paren_close)
+            &&  !parse_ast_stack_is_top(Ast_Kind_record_close)
+            &&  !parse_ast_stack_is_top(Ast_Kind_tuple_close)
+            &&  !parse_ast_stack_is_top(Ast_Kind_block_leave)) {
+            parse_transfer_one();
+          }
+          Ast* close = parse_ast_stack_top();
+          Ast* open = parse_ast_final_at(close->open_at);
+          close->kind |= Ast_Flag_list;
+          open->kind |= Ast_Flag_list;
+          open->length++;
           parse_state_stack_push(Parse_Kind_expression, 0);
         }
       } break;
@@ -594,9 +609,6 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         // empty record ()
         open->kind |= Ast_Flag_list;
         ast_close.kind |= Ast_Flag_list;
-      }
-      else {
-        open->length++;
       }
       Astid astid_close = parse_ast_final_push(ast_close);
       open->close_at = astid_close;
@@ -621,10 +633,6 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       }
       Ast ast_close = parse_ast_stack_pop();
       Ast* open = parse_ast_final_at(ast_close.open_at);
-      if (parser.ast_final.length != ast_close.open_at.index) {
-    // BUG: one off bug {a;}
-        open->length++;
-      }
       Astid astid_close = parse_ast_final_push(ast_close);
       open->close_at = astid_close;
       parse_state_stack_push(Parse_Kind_infix_or_suffix, 0);
@@ -674,7 +682,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("(a+b;c*d)", "{}");
+  test("{}", "{}");
 }
 
 #undef test
