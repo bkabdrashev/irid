@@ -534,7 +534,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
     case Ast_Kind_assign_lhs: {
       if (parse_match_token(Token_Kind_equal)) {
         S32 ast_final_mark = ast.assign.index;
-        parse_transfer_one();
+        parse_ast_final_push(ast);
         S32 ast_stack_mark_length = parser.ast_stack.length;
         for (S32 i = ast_final_mark; i < parser.ast_final.length; i++) {
           parse_ast_stack_push(parser.ast_final.base[i]);
@@ -548,7 +548,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
     } break;
     case Ast_Kind_assign_rhs: {
       S32 ast_stack_mark = ast.assign.index;
-      parse_transfer_one();
+      parse_ast_final_push(ast);
       for (S32 i = ast_stack_mark; i < parser.ast_stack.length; i++) {
         parse_ast_final_push(parser.ast_stack.base[i]);
       }
@@ -613,8 +613,6 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_ast_stack_push(infix_or_suffix);
       }
       else {
-        parse_match_token(Token_Kind_semicolon);
-        open->length = 1;
         open->kind |= Ast_Flag_list;
         ast_close.kind |= Ast_Flag_list;
         parse_ast_stack_push(ast_close);
