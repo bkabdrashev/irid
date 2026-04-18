@@ -358,7 +358,7 @@ Token parse_current_token(void) {
   return parser.tokens.base[parser.tok];
 }
 
-Token parse_next_token(void) {
+Token parse_peek_token(void) {
   return parser.tokens.base[parser.tok+1];
 }
 
@@ -690,6 +690,20 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_ast_stack_push(expression);
       }
     } break;
+    case Ast_Kind_array_open: {
+      parse_expect_token(Token_Kind_brace_close);
+      Ast ast = { Ast_Kind_array_close, {0} };
+      parse_ast_stack_push(ast);
+      Ast expression = { Ast_Kind_expression, {0} };
+      parse_ast_stack_push(expression);
+    } break;
+    case Ast_Kind_subscript_open: {
+      parse_expect_token(Token_Kind_brace_close);
+      Ast ast = { Ast_Kind_subscript_close, {0} };
+      parse_ast_stack_push(ast);
+      Ast infix_or_suffix = { Ast_Kind_infix_or_suffix, {0} };
+      parse_ast_stack_push(infix_or_suffix);
+    } break;
     default:
       parse_ast_final_push(ast);
     break;
@@ -734,7 +748,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("{a,b; c,d}", "{}");
+  test("e = a[b] + [c]d", "{}");
 }
 
 #undef test
