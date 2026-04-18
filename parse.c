@@ -52,7 +52,10 @@ typedef struct {
   Ast_Kind kind;
   union {
     U64   value;
-    Astid open_at;
+    struct {
+      Astid open_at;
+      Astid last_at;
+    };
     Astid assign;
     struct {
       Astid close_at;
@@ -460,7 +463,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       case Token_Kind_paren_open: {
         Ast paren_open = { Ast_Kind_paren_open, {0} };
         Astid astid_open = parse_ast_final_push(paren_open);
-        Ast paren_close = { .kind = Ast_Kind_paren_close, .open_at = astid_open };
+        Ast paren_close = { .kind = Ast_Kind_paren_close, .open_at = astid_open, .last_at.index = parser.ast_final.length };
         parse_ast_stack_push(paren_close);
         Ast expression = { Ast_Kind_expression, {0} };
         parse_ast_stack_push(expression);
@@ -518,7 +521,6 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_ast_stack_push(infix_or_suffix);
       } break;
       case Token_Kind_comma: {
-        parse_print();
         Ast ast = { Ast_Kind_tuple_open, {0} };
         while (parse_ast_stack_is_top_higher_precedence(ast.kind)) {
           parse_transfer_one();
@@ -541,6 +543,26 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
           parse_ast_stack_push(tuple_close);
           Ast expression = { Ast_Kind_expression, {0} };
           parse_ast_stack_push(expression);
+        }
+        else if (top->kind == Ast_Kind_paren_close || top->kind == Ast_Kind_record_close) {
+          parse_print();
+          S32 ast_final_mark = top->last_at.index;
+          S32 ast_stack_mark_length = parser.ast_stack.length;
+          for (S32 i = ast_final_mark; i < parser.ast_final.length; i++) {
+            parse_ast_stack_push(parser.ast_final.base[i]);
+          }
+          parser.ast_final.length = ast_final_mark;
+          Ast tuple_open = { Ast_Kind_tuple_open, {.length = 1} };
+          Astid tuple_open_astid = parse_ast_final_push(tuple_open);
+          for (S32 i = ast_stack_mark_length; i < parser.ast_stack.length; i++) {
+            parse_ast_final_push(parser.ast_stack.base[i]);
+          }
+          parser.ast_stack.length = ast_stack_mark_length;
+          Ast tuple_close = { Ast_Kind_tuple_close, .open_at = tuple_open_astid };
+          parse_ast_stack_push(tuple_close);
+          Ast expression = { Ast_Kind_expression, {0} };
+          parse_ast_stack_push(expression);
+          parse_print();
         }
         else {
           Ast* open = parse_ast_final_at(top->open_at);
@@ -634,6 +656,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_ast_stack_push(infix_or_suffix);
       }
       else {
+        ast_close.last_at.index = parser.ast_final.length;
         open->length++;
         parse_ast_stack_push(ast_close);
         Ast expression = { Ast_Kind_expression, {0} };
@@ -657,6 +680,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       else {
         open->kind |= Ast_Flag_list;
         ast_close.kind |= Ast_Flag_list;
+        ast_close.last_at.index = parser.ast_final.length;
         parse_ast_stack_push(ast_close);
         Ast expression = { Ast_Kind_expression, {0} };
         parse_ast_stack_push(expression);
@@ -706,7 +730,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a,b = c,d", "{}");
+  test("(a,b; c,d)", "{}");
 }
 
 #undef test
