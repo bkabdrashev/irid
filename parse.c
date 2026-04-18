@@ -518,12 +518,13 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_ast_stack_push(infix_or_suffix);
       } break;
       case Token_Kind_comma: {
+        parse_print();
         Ast ast = { Ast_Kind_tuple_open, {0} };
         while (parse_ast_stack_is_top_higher_precedence(ast.kind)) {
           parse_transfer_one();
         }
         Ast* top = parse_ast_stack_top();
-        if (top->kind == Ast_Kind_assign_lhs) {
+        if (top->kind == Ast_Kind_assign_lhs || top->kind == Ast_Kind_assign_rhs) {
           S32 ast_final_mark = top->assign.index;
           S32 ast_stack_mark_length = parser.ast_stack.length;
           for (S32 i = ast_final_mark; i < parser.ast_final.length; i++) {
@@ -705,7 +706,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a+b, c*d", "{}");
+  test("a,b = c,d", "{}");
 }
 
 #undef test
