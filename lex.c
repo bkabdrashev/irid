@@ -1,37 +1,6 @@
 typedef enum {
-  Token_Kind_Flag_separates = 1 << 8,
-  Token_Kind_Flag_prefix    = 1 << 9,
-} Token_Kind_Flag;
-
-typedef enum {
-  Token_Flag_call_lhs  = 1 << 0,
-  Token_Flag_call_rhs  = 1 << 1,
+  Token_Flag_wasnewline = 1 << 0,
 } Token_Flag;
-
-typedef enum {
-  Token_Kind_eof                = 0 | Token_Kind_Flag_separates,
-  Token_Kind_name               = 1,
-  Token_Kind_int                = 2,
-  Token_Kind_plus               = 3,
-  Token_Kind_plus_prefix        = 3 | Token_Kind_Flag_prefix,
-  Token_Kind_minus              = 5,
-  Token_Kind_minus_prefix       = 5 | Token_Kind_Flag_prefix,
-  Token_Kind_star               = 7,
-  Token_Kind_at                 = 8,
-  Token_Kind_at_prefix          = 8 | Token_Kind_Flag_prefix,
-  Token_Kind_equal              = 10,
-  Token_Kind_brace_open         = 12,
-  Token_Kind_brace_prefix_open  = 12 | Token_Kind_Flag_prefix,
-  Token_Kind_brace_close        = 14,
-  Token_Kind_paren_open         = 16,
-  Token_Kind_paren_close        = 18,
-  Token_Kind_curly_open         = 20,
-  Token_Kind_curly_close        = 22,
-  Token_Kind_semicolon          = 24,
-  Token_Kind_comma              = 26,
-  Token_Kind_else               = 28,
-} Token_Kind;
-
 typedef struct {
   Token_Kind kind;
   Token_Flag flag;
@@ -47,6 +16,16 @@ typedef struct {
   Umi    length;
 } Slice_Token;
 
+typedef struct {
+  Cstr source;
+  Cstr stream;
+  Cstr file_path;
+  B8   wasnewline;
+  Istr keyword_if;
+  Istr keyword_do;
+  Istr keyword_else;
+} Lexer;
+
 void slice_token_push(Slice_Token* slice, Token item) {
   slice->base[slice->length++] = item;
 }
@@ -59,15 +38,6 @@ Token slice_token_at(Slice_Token* slice, S32 at) {
   return slice->base[at];
 }
 
-
-typedef struct {
-  Cstr source;
-  Cstr stream;
-  Cstr file_path;
-  B8   wasnewline;
-  B8   wasspace;
-} Lexer;
-
 Lexer lexer = {0};
 
 Slice_Token lex_source(Cstr source, Cstr file_path) {
@@ -78,18 +48,18 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
   lexer.stream = source;
   lexer.file_path = file_path;
   lexer.wasnewline = true;
-  lexer.wasspace   = true;
+  lexer.keyword_if   = istr_from_cstr_token_kind("if", Token_Kind_if);
+  lexer.keyword_do   = istr_from_cstr_token_kind("do", Token_Kind_do);
+  lexer.keyword_else = istr_from_cstr_token_kind("else", Token_Kind_else);
 
   while (*lexer.stream) {
     Token token = {0};
     switch (*lexer.stream) {
     case ' ': case '\t': case '\v' :
       lexer.stream++;
-      lexer.wasspace = true;
       continue;
     case '\n': case '\r': 
       lexer.stream++;
-      lexer.wasspace = true;
       lexer.wasnewline = true;
       continue;
     case '0': case '1': case '2': case '3': case '4':
@@ -152,14 +122,11 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': {
       Cstr start = lexer.stream;
       token.kind = Token_Kind_name;
-      token.flag = Token_Flag_call_lhs;
-      if (!lexer.wasnewline) {
-        token.flag |= Token_Flag_call_rhs;
-      }
       while (isalnum(*lexer.stream)) {
         lexer.stream++;
       }
       token.istr = istr_from_range(start, lexer.stream);
+      token.kind = token_kind_from_istr(token.istr);
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
@@ -185,14 +152,10 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     } break;
     case '(': {
       token.kind = Token_Kind_paren_open;
-      if (!lexer.wasnewline) {
-        token.flag = Token_Flag_call_rhs;
-      }
       lexer.stream++;
     } break;
     case ')': {
       token.kind = Token_Kind_paren_close;
-      token.flag = Token_Flag_call_lhs;
       lexer.stream++;
     } break;
     case '[': {
@@ -204,19 +167,14 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     } break;
     case ']': {
       token.kind = Token_Kind_brace_close;
-      token.flag = Token_Flag_call_lhs;
       lexer.stream++;
     } break;
     case '{': {
       token.kind = Token_Kind_curly_open;
-      if (!lexer.wasnewline) {
-        token.flag = Token_Flag_call_rhs;
-      }
       lexer.stream++;
     } break;
     case '}': {
       token.kind = Token_Kind_curly_close;
-      token.flag = Token_Flag_call_lhs;
       lexer.stream++;
     } break;
     case '@': {
@@ -241,10 +199,12 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
       lexer.stream++;
     } break;
     }
+    if (lexer.wasnewline) {
+      token.flag |= Token_Flag_wasnewline;
+    }
 
     // NOTE: checks whether rhs should be disabled
     lexer.wasnewline = false;
-    lexer.wasspace   = false;
     slice_token_push(&slice_token, token);
   }
   Token token = { .kind = Token_Kind_eof };
@@ -316,6 +276,12 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
       break;
     case Token_Kind_comma:
       string_builder_push_cstr(&sb, ",");
+      break;
+    case Token_Kind_if:
+      string_builder_push_cstr(&sb, "if");
+      break;
+    case Token_Kind_do:
+      string_builder_push_cstr(&sb, "do");
       break;
     case Token_Kind_else:
       string_builder_push_cstr(&sb, "else");

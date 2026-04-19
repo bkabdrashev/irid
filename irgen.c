@@ -40,12 +40,44 @@ void irid_assign(Funid funid, Astid astid, Irid irid) {
 Irid irid_gen(Funid funid, Astid astid) {
   Irid result = IridNone;
   switch (astid_kind(astid)) {
-  case AstKind_record_start : {
+  // (1; a = 2+3; b : 4)
+  // stack:
+  // r1 = 1
+  // r2 = 2
+  // r3 = 3
+  // r4 = r2 + r3
+  // r5 = 4
+  // r6 = record r1 r4 r5
+  //      {   0: r1,   1: r4,   2: r5 }
+  //      { nil: r1, "a": r4, "b": r5 }
+  //      {   value,  assign, declare }
+  // 
+  case Ast_Kind_record_enter : {
     S32 record_length = astid_record_length(astid);
-    irid_record_start(funid, record_length);
+    irid_record_enter(record_length);
+  //      {   ?: ?,   ?: ?,   ?: ? }
+  //      {   ?: ?,   ?: ?,   ?: ? }
+  //      {   ?,  ?, ? }
   } break;
-  case AstKind_record_end : {
-    result = irid_record_end(funid);
+  case Ast_Kind_record_assign  : {
+  // r( 1 (2 3 +) = a
+    Istr name = astid_name(irgen_consume_astid());
+    irid_record_push_name(name, irgen_pop_irid());
+  //      {   0: r1;   1: r4;   ?: ? }
+  //      { "a":  1;     ?:?;    ?:? }
+  //      { nil: r1; "a": r4;   ?: ? }
+  //      {   value;  assign;      ? }
+  } break;
+  case Ast_Kind_record_declare : {
+    Istr name = astid_name(astid);
+    irid_record_push_name(name, irgen_top_irid());
+  //      {   0: r1;   1: r4;   ?: ? }
+  //      { "a":  1;     ?:?;    ?:? }
+  //      { nil: r1; "a": r4;   ?: ? }
+  //      {   value;  assign;      ? }
+  } break;
+  case Ast_Kind_record_leave : {
+    result = irid_record_leave();
   } break;
   case AstKind_return : {
     Irid irid = irid_gen_unary(funid, astid);
@@ -168,41 +200,40 @@ Irid irid_gen(Funid funid, Astid astid) {
       irgen_error("not found");
     }
   } break;
-  case AstKind_if: {
-    Ast_Binary cond_then = astid_binary(astid);
-    Irid cond_irid       = irid_gen(funid, cond_then.one);
+  case Ast_Kind_if_enter: {
+  // cond if_enter statement if_leave
+    Irid cond_irid       = irid_top(funid);
     Branchid branchid    = blockid_set_branch(funid, cond_irid);
     Blockid nez_blockid  = blockid_new(funid);
     branchid_nez_link_to_blockid(funid, branchid);
-                         blockid_seal(funid, nez_blockid);
-                         irid_gen(funid, cond_then.two, funid);
+  } break;
+  case Ast_Kind_if_leave: {
     Jumpid jumpid        = blockid_set_jump(funid);
     Blockid eqz_blockid  = blockid_new(funid);
     branchid_eqz_link_to_blockid(funid, branchid);
     jumpid_link_to_blockid(funid, jumpid);
-    blockid_seal(funid, blockid);
   } break;
-  case AstKind_else: {
-    Ast_Binary else_cond_then = astid_binary(astid);
-    Ast_Binary cond_then      = astid_binary(binary.one);
-
-    Irid cond_irid      = irid_gen(funid, cond_then.one);
-    Branchid branchid   = blockid_set_branch(funid, cond_irid);
-    Blockid nez_blockid = blockid_new(funid);
-    branchid_nez_link_to_blockid(funid, branchid);
-                         blockid_seal(funid, nez_blockid);
-                         irid_gen(funid, cond_then.two, funid);
+  case Ast_Kind_if_leave_else_enter: {
+  // cond if_enter statement if_leave_else_enter statement else_leave
     Jumpid jumpid_nez   = blockid_set_jump(funid);
     Blockid eqz_blockid = blockid_new(funid);
     branchid_eqz_link_to_blockid(funid, branchid);
-                          blockid_seal(funid, eqz_blockid);
-                          irid_gen(funid, else_cond_then.one, funid);
-
+  } break;
+  case AstKind_else_leave: {
     Jumpid jumpid_eqz   = blockid_set_jump(funid);
     Blockid end_blockid = blockid_new(funid);
     jumpid_link_to_blockid(funid, jumpid_nez);
     jumpid_link_to_blockid(funid, jumpid_eqz);
-    blockid_seal(end_bb);
+  } break;
+  case AstKind_else_value_leave: {
+  // cond if_enter expression if_leave_else expression else_value_leave
+    Irid top1_irid      = irid_top1(funid);
+    Irid top2_irid      = irid_top2(funid);
+    Jumpid jumpid_eqz   = blockid_set_jump(funid);
+    Blockid end_blockid = blockid_new(funid);
+    jumpid_link_to_blockid(funid, jumpid_nez);
+    jumpid_link_to_blockid(funid, jumpid_eqz);
+    result = irid_join(top1_irid, top2_irid);
   } break;
   case AstKind_while: {
     Ast_Binary cond_then            = astid_binary(astid);
