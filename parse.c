@@ -15,19 +15,19 @@ typedef enum {
   Ast_Kind_pos  = Token_Kind_plus  | Ast_Flag_unary,
   Ast_Kind_ptr  = Token_Kind_at    | Ast_Flag_unary,
   Ast_Kind_load            = 128 | Ast_Flag_unary,
-  Ast_Kind_subscript_open  = 129 | Ast_Flag_binary,
-  Ast_Kind_subscript_close = 130 | Ast_Flag_binary,
-  Ast_Kind_array_open      = 131 | Ast_Flag_binary,
-  Ast_Kind_array_close     = 132 | Ast_Flag_binary,
+  Ast_Kind_subscript_close = 129,
+  Ast_Kind_subscript       = 130 | Ast_Flag_binary,
+  Ast_Kind_array_close     = 131,
+  Ast_Kind_array           = 132 | Ast_Flag_binary,
   Ast_Kind_assign_lhs      = 133,
   Ast_Kind_assign_rhs      = 134,
   Ast_Kind_record_assign   = 135,
-  Ast_Kind_paren_open      = 136,
-  Ast_Kind_paren_close     = 137,
-  Ast_Kind_record_open     = 136 | Ast_Flag_list,
-  Ast_Kind_record_close    = 137 | Ast_Flag_list,
-  Ast_Kind_tuple_open      = 140 | Ast_Flag_list,
-  Ast_Kind_tuple_close     = 141 | Ast_Flag_list,
+  Ast_Kind_paren_enter     = 136,
+  Ast_Kind_paren_leave     = 137,
+  Ast_Kind_record_enter    = 136 | Ast_Flag_list,
+  Ast_Kind_record_leave    = 137 | Ast_Flag_list,
+  Ast_Kind_tuple_enter     = 140 | Ast_Flag_list,
+  Ast_Kind_tuple_leave     = 141 | Ast_Flag_list,
   Ast_Kind_source_enter    = 142 | Ast_Flag_list,
   Ast_Kind_source_leave    = 143 | Ast_Flag_list,
   Ast_Kind_block_enter     = 144 | Ast_Flag_list,
@@ -56,11 +56,11 @@ typedef struct {
   union {
     U64   value;
     struct {
-      Astid open_at;
+      Astid enter_at;
       Astid last_at;
     };
     struct {
-      Astid close_at;
+      Astid leave_at;
       S32 length;
     };
     S64   s64;
@@ -140,17 +140,17 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     case Ast_Kind_eof:
       string_builder_push_cstr(&sb, "eof");
     break;
-    case Ast_Kind_array_open:
-      string_builder_push_cstr(&sb, "a[");
-    break;
     case Ast_Kind_array_close:
       string_builder_push_cstr(&sb, "]a");
     break;
-    case Ast_Kind_subscript_open:
-      string_builder_push_cstr(&sb, "s[");
+    case Ast_Kind_array:
+      string_builder_push_cstr(&sb, "a[]");
     break;
     case Ast_Kind_subscript_close:
       string_builder_push_cstr(&sb, "]s");
+    break;
+    case Ast_Kind_subscript:
+      string_builder_push_cstr(&sb, "s[]");
     break;
     case Ast_Kind_ptr:
       string_builder_push_cstr(&sb, "ptr");
@@ -179,24 +179,24 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     case Ast_Kind_source_leave:
       string_builder_push_cstr(&sb, "}s");
     break;
-    case Ast_Kind_paren_open:
+    case Ast_Kind_paren_enter:
       string_builder_push_cstr(&sb, "(");
     break;
-    case Ast_Kind_paren_close:
+    case Ast_Kind_paren_leave:
       string_builder_push_cstr(&sb, ")");
     break;
-    case Ast_Kind_record_open:
+    case Ast_Kind_record_enter:
       string_builder_push_cstr(&sb, "r(");
       string_builder_push_s64(&sb, slice->base[i].length);
     break;
-    case Ast_Kind_record_close:
+    case Ast_Kind_record_leave:
       string_builder_push_cstr(&sb, ")r");
     break;
-    case Ast_Kind_tuple_open:
+    case Ast_Kind_tuple_enter:
       string_builder_push_cstr(&sb, "t(");
       string_builder_push_s64(&sb, slice->base[i].length);
     break;
-    case Ast_Kind_tuple_close:
+    case Ast_Kind_tuple_leave:
       string_builder_push_cstr(&sb, ")t");
     break;
     case Ast_Kind_call:
@@ -283,11 +283,11 @@ void parse_transfer_one(void) {
 
 S32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
-  case Ast_Kind_array_open:
-  case Ast_Kind_subscript_open:
+  case Ast_Kind_array_close:
+  case Ast_Kind_subscript_close:
                        return 0;
-  case Ast_Kind_tuple_open:
-  case Ast_Kind_tuple_close:
+  case Ast_Kind_tuple_enter:
+  case Ast_Kind_tuple_leave:
                        return 3;
   case Ast_Kind_sub:
   case Ast_Kind_add: return 11;
@@ -295,9 +295,9 @@ S32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:  return 15;
-  case Ast_Kind_array_close:
+  case Ast_Kind_array:
   case Ast_Kind_load: return 17;
-  case Ast_Kind_subscript_close:
+  case Ast_Kind_subscript:
   case Ast_Kind_call: return 19;
   default :          return -1;
   }
@@ -305,8 +305,8 @@ S32 parse_left_precedence(Ast_Kind kind) {
 
 S32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
-  case Ast_Kind_tuple_open:
-  case Ast_Kind_tuple_close:
+  case Ast_Kind_tuple_enter:
+  case Ast_Kind_tuple_leave:
                        return 4;
   case Ast_Kind_sub:
   case Ast_Kind_add: return 12;
@@ -314,9 +314,9 @@ S32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:  return 16;
-  case Ast_Kind_array_open:
+  case Ast_Kind_array_close:
   case Ast_Kind_load: return 18;
-  case Ast_Kind_subscript_open:
+  case Ast_Kind_subscript_close:
   case Ast_Kind_call: return 20;
   default :          return -1;
   }
@@ -375,6 +375,7 @@ B8 parse_expect_token(Token_Kind kind) {
     return true;
   }
   else {
+    printf("expected\n");
   }
   return false;
 }
@@ -424,7 +425,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       Token token = parse_consume_token();
       switch (token.kind) {
       case Token_Kind_if: {
-        Ast if_do = { Ast_Kind_if_do, {0} };
+        Ast if_do = { Ast_Kind_if_do, { .last_at.index = parser.final.length } };
         parse_stack_push(if_do);
       } goto label_expression;
       // case Token_Kind_for:
@@ -468,7 +469,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       parse_expect_token(Token_Kind_else);
       Ast if_leave_else_enter = { Ast_Kind_if_leave_else_enter, {0} };
       parse_final_push(if_leave_else_enter);
-      Ast else_leave = { Ast_Kind_else_value_leave, {0} };
+      Ast else_leave = { Ast_Kind_else_value_leave, { .last_at.index = parser.final.length } };
       parse_stack_push(else_leave);
     } goto label_expression;
     case Ast_Kind_expression: { label_expression:;
@@ -486,13 +487,13 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_final_push(ast);
       } goto label_infix_or_suffix;
       case Token_Kind_if: {
-        Ast if_do = { Ast_Kind_if_value_do, {0} };
+        Ast if_do = { Ast_Kind_if_value_do, { .last_at.index = parser.final.length } };
         parse_stack_push(if_do);
       } goto label_expression;
       case Token_Kind_paren_open: {
-        Ast paren_open = { Ast_Kind_paren_open, {0} };
+        Ast paren_open = { Ast_Kind_paren_enter, {0} };
         Astid astid_open = parse_final_push(paren_open);
-        Ast paren_close = { .kind = Ast_Kind_paren_close, .open_at = astid_open, .last_at.index = parser.final.length };
+        Ast paren_close = { .kind = Ast_Kind_paren_leave, .enter_at = astid_open, .last_at.index = parser.final.length };
         parse_stack_push(paren_close);
         Ast assign = { Ast_Kind_assign_lhs, { .last_at.index = parser.final.length } };
         parse_stack_push(assign);
@@ -500,12 +501,12 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       case Token_Kind_curly_open: {
         Ast   enter = { Ast_Kind_block_enter, {0} };
         Astid astid_enter = parse_final_push(enter);
-        Ast   leave = { Ast_Kind_block_leave, .open_at = astid_enter };
+        Ast   leave = { Ast_Kind_block_leave, .enter_at = astid_enter };
         parse_stack_push(leave);
       } goto label_statement;
       case Token_Kind_brace_open:
       case Token_Kind_brace_prefix_open: {
-        Ast ast = { Ast_Kind_array_open, { .last_at.index = parser.final.length } };
+        Ast ast = { Ast_Kind_array_close, { .last_at.index = parser.final.length } };
         parse_stack_push(ast);
       } goto label_expression;
       default:
@@ -525,7 +526,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_stack_push(ast);
       } goto label_expression;
       case Token_Kind_brace_open: {
-        Ast ast = { Ast_Kind_subscript_open, { .last_at.index = parser.final.length } };
+        Ast ast = { Ast_Kind_subscript_close, { .last_at.index = parser.final.length } };
         while (parse_stack_is_top_higher_precedence(ast.kind)) {
           parse_transfer_one();
         }
@@ -539,24 +540,26 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_final_push(ast);
       } goto label_infix_or_suffix;
       case Token_Kind_comma: {
-        Ast ast = { Ast_Kind_tuple_open, {0} };
+        Ast ast = { Ast_Kind_tuple_enter, {0} };
         while (parse_stack_is_top_higher_precedence(ast.kind)) {
           parse_transfer_one();
         }
         Ast* top = parse_stack_top();
-        if (top->kind == Ast_Kind_assign_lhs || top->kind == Ast_Kind_assign_rhs ||
-            top->kind == Ast_Kind_paren_close || top->kind == Ast_Kind_record_close ||
-            top->kind == Ast_Kind_array_open || top->kind == Ast_Kind_subscript_open) {
+        if (top->kind == Ast_Kind_assign_lhs  || top->kind == Ast_Kind_assign_rhs ||
+            top->kind == Ast_Kind_paren_leave || top->kind == Ast_Kind_record_leave ||
+            top->kind == Ast_Kind_array_close || top->kind == Ast_Kind_subscript_close ||
+            top->kind == Ast_Kind_if_do       || top->kind == Ast_Kind_if_value_do ||
+            top->kind == Ast_Kind_else_value_leave) {
           S32 stack_mark_length = parse_transfer_final_to_stack_from(top->last_at.index);
-          Ast tuple_open = { Ast_Kind_tuple_open, {.length = 1} };
+          Ast tuple_open = { Ast_Kind_tuple_enter, {.length = 1} };
           Astid tuple_open_astid = parse_final_push(tuple_open);
           parse_transfer_stack_to_final_from(stack_mark_length);
-          Ast tuple_close = { Ast_Kind_tuple_close, .open_at = tuple_open_astid };
+          Ast tuple_close = { Ast_Kind_tuple_leave, .enter_at = tuple_open_astid };
           parse_stack_push(tuple_close);
         }
         else {
-          Ast* open = parse_final_at(top->open_at);
-          open->close_at.index = parser.final.length;
+          Ast* open = parse_final_at(top->enter_at);
+          open->leave_at.index = parser.final.length;
           open->length++;
         }
       } goto label_expression;
@@ -577,8 +580,8 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       if (parse_match_token(Token_Kind_equal)) {
         Ast* top = parse_stack_top();
         Ast assign = { Ast_Kind_assign_rhs, {0} };
-        if (top->kind == Ast_Kind_record_close ||
-            top->kind == Ast_Kind_paren_close) {
+        if (top->kind == Ast_Kind_record_leave ||
+            top->kind == Ast_Kind_paren_leave) {
           assign.kind = Ast_Kind_record_assign;
         }
         S32 final_mark = ast.last_at.index;
@@ -596,9 +599,9 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
     case Ast_Kind_block_leave: {
       Ast ast_close = ast;
       if (parse_match_token(Token_Kind_curly_close)) {
-        Ast* open = parse_final_at(ast_close.open_at);
+        Ast* open = parse_final_at(ast_close.enter_at);
         Astid astid_close = parse_final_push(ast_close);
-        open->close_at = astid_close;
+        open->leave_at = astid_close;
         goto label_infix_or_suffix;
       }
       else {
@@ -610,9 +613,9 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
     case Ast_Kind_source_leave: {
       Ast ast_close = ast;
       if (parse_match_token(Token_Kind_eof)) {
-        Ast* open = parse_final_at(ast_close.open_at);
+        Ast* open = parse_final_at(ast_close.enter_at);
         Astid astid_close = parse_final_push(ast_close);
-        open->close_at = astid_close;
+        open->leave_at = astid_close;
       }
       else {
         parse_match_token(Token_Kind_semicolon);
@@ -620,23 +623,23 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         goto label_statement;
       }
     } break;
-    case Ast_Kind_tuple_close: {
+    case Ast_Kind_tuple_leave: {
       Ast ast_close = ast;
-      Ast* open = parse_final_at(ast_close.open_at);
+      Ast* open = parse_final_at(ast_close.enter_at);
       Astid astid_close = parse_final_push(ast_close);
-      if (astid_close.index != open->close_at.index) {
+      if (astid_close.index != open->leave_at.index) {
         open->length++;
       }
-      open->close_at = astid_close;
+      open->leave_at = astid_close;
     } break;
-    case Ast_Kind_record_close: {
+    case Ast_Kind_record_leave: {
       parse_match_token(Token_Kind_semicolon);
       Ast ast_close = ast;
-      Ast* open = parse_final_at(ast_close.open_at);
+      Ast* open = parse_final_at(ast_close.enter_at);
       if (parse_match_token(Token_Kind_paren_close)) {
         open->length++;
         Astid astid_close = parse_final_push(ast_close);
-        open->close_at = astid_close;
+        open->leave_at = astid_close;
         goto label_infix_or_suffix;
       }
       else {
@@ -648,22 +651,22 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         goto label_expression;
       }
     } break;
-    case Ast_Kind_paren_close: {
+    case Ast_Kind_paren_leave: {
       Ast ast_close = ast;
-      Ast* open = parse_final_at(ast_close.open_at);
+      Ast* open = parse_final_at(ast_close.enter_at);
       if (parse_match_token(Token_Kind_paren_close)) {
-        if (parser.final.length == ast_close.open_at.index) {
+        if (parser.final.length == ast_close.enter_at.index) {
           // empty record ()
-          open->kind = Ast_Kind_record_open;
-          ast_close.kind = Ast_Kind_record_close;
+          open->kind = Ast_Kind_record_enter;
+          ast_close.kind = Ast_Kind_record_leave;
         }
         Astid astid_close = parse_final_push(ast_close);
-        open->close_at = astid_close;
+        open->leave_at = astid_close;
         goto label_infix_or_suffix;
       }
       else {
-        open->kind = Ast_Kind_record_open;
-        ast_close.kind = Ast_Kind_record_close;
+        open->kind = Ast_Kind_record_enter;
+        ast_close.kind = Ast_Kind_record_leave;
         ast_close.last_at.index = parser.final.length;
         parse_stack_push(ast_close);
         Ast assign = { Ast_Kind_assign_lhs, { .last_at.index = parser.final.length } };
@@ -671,15 +674,15 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         goto label_expression;
       }
     } break;
-    case Ast_Kind_array_open: {
+    case Ast_Kind_array_close: {
       parse_expect_token(Token_Kind_brace_close);
-      Ast ast = { Ast_Kind_array_close, {0} };
-      parse_stack_push(ast);
+      Ast array = { Ast_Kind_array, {0} };
+      parse_stack_push(array);
     } goto label_expression;
-    case Ast_Kind_subscript_open: {
+    case Ast_Kind_subscript_close: {
       parse_expect_token(Token_Kind_brace_close);
-      Ast ast = { Ast_Kind_subscript_close, {0} };
-      parse_stack_push(ast);
+      Ast subscript = { Ast_Kind_subscript, {0} };
+      parse_stack_push(subscript);
     } goto label_infix_or_suffix;
     default:
       parse_final_push(ast);
@@ -726,7 +729,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("k = if a do b else {c} * d", "{}");
+  test("(if a,b do c,d else e,f)", "{}");
 }
 
 #undef test
