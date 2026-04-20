@@ -93,7 +93,8 @@ B8 slice_ast_is_empty(Slice_Ast* slice) {
 Cstr cstr_from_slice_ast(Slice_Ast* slice) {
   String_Builder sb = string_builder_begin(&temp_arena, 10 * slice->length * sizeof(C8));
   for (S32 i = 0; i < slice->length; i++) {
-    switch (slice->base[i].kind) {
+    Ast ast = slice->base[i];
+    switch (ast.kind) {
     case Ast_Kind_statement:
       string_builder_push_cstr(&sb, "stm");
     break;
@@ -195,14 +196,14 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     break;
     case Ast_Kind_record_enter:
       string_builder_push_cstr(&sb, "r(");
-      string_builder_push_s64(&sb, slice->base[i].length);
+      string_builder_push_s64(&sb, ast.length);
     break;
     case Ast_Kind_record_leave:
       string_builder_push_cstr(&sb, ")r");
     break;
     case Ast_Kind_tuple_enter:
       string_builder_push_cstr(&sb, "t(");
-      string_builder_push_s64(&sb, slice->base[i].length);
+      string_builder_push_s64(&sb, ast.length);
     break;
     case Ast_Kind_tuple_leave:
       string_builder_push_cstr(&sb, ")t");
@@ -211,10 +212,10 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
       string_builder_push_cstr(&sb, "call");
     break;
     case Ast_Kind_int:
-      string_builder_push_s64(&sb, slice->base[i].s64);
+      string_builder_push_s64(&sb, ast.s64);
     break;
     case Ast_Kind_name:
-      string_builder_push_cstr(&sb, cstr_from_istr(slice->base[i].istr));
+      string_builder_push_cstr(&sb, cstr_from_istr(ast.istr));
     break;
     case Ast_Kind_neg:
       string_builder_push_cstr(&sb, "neg");
@@ -594,7 +595,6 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         }
         else {
           Ast tuple_enter = { Ast_Kind_tuple_enter, {.length = 1} };
-          parse_print("tuple");
           Astid tuple_enter_astid = parse_final_insert(top->last_at, tuple_enter);
           Ast tuple_leave = { Ast_Kind_tuple_leave, .enter_at = tuple_enter_astid };
           parse_stack_push(tuple_leave);
@@ -766,7 +766,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a -> b", "{}");
+  test("a,b", "{}");
 }
 
 #undef test

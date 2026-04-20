@@ -1,7 +1,7 @@
 # Irid Programming Language
 
 ## Ideas
-- [x] System programming language
+- [ ] System programming language
 
 - [ ] When element sizes in a record are equal then this record is an array:
 ```irid
@@ -21,7 +21,7 @@ a = ((u32, u32), u64) // implicit [2]([2]u32 or u64)
 
 - [ ] Ranges `..`
 
-- [x] For loop
+- [ ] For loop
 
 - [ ] Bits, bytes, align specifiers:
 ```irid
@@ -30,7 +30,7 @@ bitsof, bits
 bytesof, bytes
 ```
 
-- [x] Remove char \' syntax, instead:
+- [ ] Remove char \' syntax, instead:
 ```irid
 char : (str = string) -> {
   str:len is 1
@@ -44,7 +44,7 @@ char "a"
 Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
 ```
 
-- [x] Pointer types can incorporate pointer location:
+- [ ] Pointer types can incorporate pointer location:
   ```irid
   a = 10
   b = 20
@@ -65,10 +65,10 @@ foo : (a = @u32 $ T, b = T, c = @u32) -> a@ + b@ + c@
 ```
 
 - [ ] Implicit casting:
-  ```irid
-  a = 12 implicit f32
-  sqrt.f32(a) // auto casts a to f32
-  ```
+```irid
+a = 12 implicit f32
+sqrt.f32(a) // auto casts a to f32
+```
 
 - [ ] implicit function call:
 ```irid
@@ -82,9 +82,17 @@ entity:(
   udpate : (e = object) -> {}
 )
 
-e = entity'new((1,1,1), 100)
-entity'update(e) // update(get(e))
-entity'get(e)    // doesn't implicit call since expected type is handle
+e = entity.new((1,1,1), 100)
+entity.update(e) // update(get(e))
+entity.get(e)    // doesn't implicit call since expected type is handle
+```
+
+- [ ] static maps based on ad-hoc polymorphism of functions:
+```irid
+foo : (1 -> 2) and (3 -> 4)
+foo(1) // 2
+foo(3) // 4
+foo(1 or 3) // 2 or 4
 ```
 
 - [ ] Implicit function parameter. This could be confusing, but some langauges provide implicit context or rely on globals. This could be a nice feature that create thead locals on the stack and passes implicitly to functions. This achieves global-like convinience but is also thread safe.
@@ -115,6 +123,7 @@ main:() -> {
   parse_exp()
 }
 ```
+Maybe instead of this feature closures should be considered.
 
 - [ ] Narrow a name for that scope
 ```irid
@@ -123,11 +132,4 @@ sum : Vec2 -> Vec2.x + Vec2.y
 sum(1, 2) // 3
 Vec2 = 3, 4
 Vec2.x + Vec.y // 7
-```
-
-- [ ] Comma operator that creates tuple or composes in case of records
-```irid
-a : (x:S32), (y:S32)
-a.x = 1
-a.y = 2
 ```
