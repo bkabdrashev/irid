@@ -6,7 +6,7 @@ typedef struct {
   Token_Kind kind;
   Token_Flag flag;
   union {
-    S64  s64;
+    I64  s64;
     U64  value;
     Istr istr;
   };
@@ -32,7 +32,7 @@ Token slice_token_pop(Slice_Token* slice) {
   return slice->base[slice->length--];
 }
 
-Token* slice_token_at(Slice_Token* slice, S32 at) {
+Token* slice_token_at(Slice_Token* slice, I32 at) {
   return &slice->base[at];
 }
 
@@ -56,6 +56,8 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
   istr_from_cstr_token_kind("do", Token_Kind_do);
   istr_from_cstr_token_kind("else", Token_Kind_else);
   istr_from_cstr_token_kind("return", Token_Kind_return);
+  istr_from_cstr_token_kind("while", Token_Kind_while);
+  istr_from_cstr_token_kind("break", Token_Kind_break);
 
   while (*lexer.stream) {
     Token token = {0};
@@ -70,7 +72,7 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     case '0': case '1': case '2': case '3': case '4':
     case '5': case '6': case '7': case '8': case '9': {
       token.kind = Token_Kind_int;
-      S32 base = 10;
+      I32 base = 10;
       if (*lexer.stream == '0') {
         lexer.stream++;
         if (tolower(*lexer.stream) == 'x') {
@@ -91,7 +93,7 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
           lexer.stream++;
           continue;
         }
-        S32 digit = 0;
+        I32 digit = 0;
         switch (*lexer.stream) {
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
           digit = *lexer.stream - '0';
@@ -305,6 +307,12 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
     break;
     case Token_Kind_return:
       string_builder_push_cstr(&sb, "return");
+    break;
+    case Token_Kind_while:
+      string_builder_push_cstr(&sb, "while");
+    break;
+    case Token_Kind_break:
+      string_builder_push_cstr(&sb, "break");
     break;
     }
     string_builder_push_cstr(&sb, " ");

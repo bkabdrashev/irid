@@ -3,10 +3,10 @@
 
 typedef  char     C8;
 
-typedef int8_t    S8;
-typedef int16_t   S16;
-typedef int32_t   S32;
-typedef int64_t   S64;
+typedef int8_t    I8;
+typedef int16_t   I16;
+typedef int32_t   I32;
+typedef int64_t   I64;
 
 typedef int8_t    B8;
 typedef int16_t   B16;
@@ -40,7 +40,7 @@ typedef struct {
   C8* base;
   C8* top;
   Umi   capacity;
-  S8    alignment;
+  I8    alignment;
 } Arena; 
 
 void arena_init(Arena* arena, Umi capacity) {
@@ -107,18 +107,18 @@ Umi power_of_2_up(Umi v) {
 }
 
 typedef struct {
-  S32* base;
-  S32 length;
+  I32* base;
+  I32 length;
 } Slice_S32;
-S32 slice_s32_push(Slice_S32* slice, S32 item) {
-  S32 index = slice->length;
+I32 slice_s32_push(Slice_S32* slice, I32 item) {
+  I32 index = slice->length;
   slice->base[slice->length++] = item;
   return index;
 }
-S32 slice_s32_pop(Slice_S32* slice) {
+I32 slice_s32_pop(Slice_S32* slice) {
   return slice->base[--slice->length];
 }
-S32 slice_s32_top(Slice_S32* slice) {
+I32 slice_s32_top(Slice_S32* slice) {
   return slice->base[slice->length-1];
 }
 B8 slice_s32_is_empty(Slice_S32* slice) {

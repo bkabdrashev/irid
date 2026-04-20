@@ -30,10 +30,12 @@ typedef enum {
   Token_Kind_else               = 22,
   Token_Kind_arrow              = 23,
   Token_Kind_return             = 24,
+  Token_Kind_while              = 25,
+  Token_Kind_break              = 26,
 } Token_Kind;
 
 typedef const char* Cstr;
-typedef struct { S32 index; } Istr;
+typedef struct { I32 index; } Istr;
 
 typedef struct {
   C8* base;
@@ -141,7 +143,7 @@ void string_builder_push_cstr(String_Builder* sb, Cstr str) {
   }
 }
 
-void string_builder_push_s64(String_Builder* sb, S64 val) {
+void string_builder_push_s64(String_Builder* sb, I64 val) {
   C8 line_str[20];
   sprintf(line_str, "%li", val);
   string_builder_push_cstr(sb, line_str);
@@ -178,7 +180,7 @@ B8 test_str(Cstr one, Cstr two) {
   return true;
 }
 
-B8 test_at_source(Cstr testee, Cstr expected, Cstr file_name, S32 line, Cstr source) {
+B8 test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr source) {
   if (test_str(testee, expected)) {
     return true;
   }

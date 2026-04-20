@@ -5,19 +5,19 @@
 
 - [ ] When element sizes in a record are equal then this record is an array:
 ```irid
-a = ((u32, u32), u64) // implicit [2]([2]u32 or u64)
+a = ((U32, U32), U64) // implicit [2]([2]U32 or U64)
 ```
 
 - [ ] Values that could be assign only to certain type. Example: type bool, values: false/true. Need to think syntax/semantics of it.
 
-- [ ] `a = [2]s32` is implicitly `a = s32< and (len : 2)`
+- [ ] `a = [2]I32` is implicitly `a = I32< and (len : 2)`
 ```irid
-(s32, s32) implicit this -> (this< as s32<) and (len : 2)
+(I32, I32) implicit this -> (this< as I32<) and (len : 2)
 ```
 
 - [ ] `foo : (a=1) -> a; foo(a:1)`
 
-- [ ] `@s32` defines pointer type to `s32`; `s32@` dereferences pointer
+- [ ] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
 
 - [ ] Ranges `..`
 
@@ -27,7 +27,7 @@ a = ((u32, u32), u64) // implicit [2]([2]u32 or u64)
 ```irid
 alignof, align
 bitsof, bits
-bytesof, bytes
+sizeof, bytes
 ```
 
 - [ ] Remove char \' syntax, instead:
@@ -51,33 +51,42 @@ Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
   c = @a or @b // can only points to a or b
   ```
 
-- [ ] Define constants and use them at the same time `[$n]s32 (1,2,3,4)` // n=4
-- [ ] Type variables:
+- [ ] Define constants and use them at the same time `[$n]I32 (1,2,3,4)` // n=4
+
+- [ ] $ syntax for defining templates/variables based on pattern
 ```irid
-// here a and b are the same type T that is subtype of u32
-(a = u32 $ T, b = T, c = S) -> (a+b, c)
+foo : (a: $T; b: T) -> {
+  return a+b
+}
+size : [$N]$T -> N * sizeof T
+length : [$N]$ -> N;
+length(1, 2) // 2
+$foo(1, 2)
 ```
 
-- [ ] Type variables can specify alias:
+- [ ] Subtypes $:
 ```irid
-// here a and b can alias, but c cannot
-foo : (a = @u32 $ T, b = T, c = @u32) -> a@ + b@ + c@
+// here a and b are the same type T that is subtype of U32
+(a = U32 $ T, b = T, c = I32) -> (a+b, c)
+a:$T = I32 1
+b:T = 2
+
 ```
 
 - [ ] Implicit casting:
 ```irid
-a = 12 implicit f32
-sqrt.f32(a) // auto casts a to f32
+a = 12 implicit F32
+sqrt.F32(a) // auto casts a to F32
 ```
 
 - [ ] implicit function call:
 ```irid
 entity:(
-  object : (position = vec3, health = u32)
+  object : (position = Vec3; health = U32)
   length : 1024
   pool   : [length]object
-  get    : (id = handle) -> pool[id]<
-  handle : u32 implicit get
+  get    : (id = handle) -> pool[id]@
+  handle : U32 implicit get
   new    : object -> handle
   udpate : (e = object) -> {}
 )
@@ -127,7 +136,7 @@ Maybe instead of this feature closures should be considered.
 
 - [ ] Narrow a name for that scope
 ```irid
-Vec2 : (x:S32; y:S32)
+Vec2 : (x:I32; y:I32)
 sum : Vec2 -> Vec2.x + Vec2.y
 sum(1, 2) // 3
 Vec2 = 3, 4

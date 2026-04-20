@@ -14,7 +14,7 @@ void irid_assign(Funid funid, Astid astid, Irid irid) {
   } break;
   case AstKind_record : {
     Astid_Record astid_record = astid_record(astid);
-    for (S32 i = 0; i < slice_ast_field_length(astid_record.fields); i++) {
+    for (I32 i = 0; i < slice_ast_field_length(astid_record.fields); i++) {
       Ast_Field field = slice_ast_field_at(astid_record.fields, i);
       Irid at = irid_new_binary(funid, IrKind_position_access, irid, i);
       if (field.name) {
@@ -53,7 +53,7 @@ Irid irid_gen(Funid funid, Astid astid) {
   //      {   value,  assign, declare }
   // 
   case Ast_Kind_record_enter : {
-    S32 record_length = astid_record_length(astid);
+    I32 record_length = astid_record_length(astid);
     irid_record_enter(record_length);
   //      {   ?: ?,   ?: ?,   ?: ? }
   //      {   ?: ?,   ?: ?,   ?: ? }
@@ -177,7 +177,7 @@ Irid irid_gen(Funid funid, Astid astid) {
     result = irid_addr_of(funid, of);
   } break;
   case AstKind_inr : {
-    S64 s64_val = astid_int(astid);
+    I64 s64_val = astid_int(astid);
     result = irid_new_int(funid, s64_val);
   } break;
   case AstKind_name : {
@@ -235,26 +235,22 @@ Irid irid_gen(Funid funid, Astid astid) {
     jumpid_link_to_blockid(funid, jumpid_eqz);
     result = irid_join(top1_irid, top2_irid);
   } break;
-  case AstKind_while: {
+  case AstKind_while_enter: {
     Ast_Binary cond_then            = astid_binary(astid);
     Blockid while_entry             = blockid;
     Jumpid jumpid_from_entry        = blockid_set_jump(blockid);
     Blockid while_header            = blockid_new(funid);
     jumpid_link_to_blockid(jumpid);
-    Irid cond_irid                  = irid_gen(funid, cond_then.one);
     Branchid branchid               = irid_set_branchid(funid, cond_irid);
 
     Blockid body_entry              = blockid_new(funid); // not equal zero
     branchid_nez_link_to_blockid(branch_from_header);
-                                      blockid_seal(funid, body_entry);
-                                      irid_gen(funid, cond_then.two, blockid);
+  } break;
+  case Ast_Kind_while_leave: {
     Jumpid jump_from_body_to_header = blockid_set_jump(body_entry);
     jumpid_link_to_blockid(jump_from_body_to_header);
-                                      blockid_seal(while_header);
-
     Blockid while_exit              = blockid_new(funid); // equal zero
     branchid_eqz_link_to_blockid(branch_from_header);
-                                      blockid_seal(while_exit);
   } break;
   case AstKind_field_access : {
     Ast_Binary field_access = astid_binary(astid);
@@ -270,7 +266,7 @@ Irid irid_gen(Funid funid, Astid astid) {
       }
     }
     else if (astid_kind(field_access.two) == AstKind_int) {
-      S64 position = astid_int(field_access.two)
+      I64 position = astid_int(field_access.two)
       if (irid_kind(funid, lhs_irid) == AstKind_load) {
         irid_set_kind(funid, lhs_irid, IrKind_position_offset)
         irid_set_position_offset_position(funid, lhs_irid, position);
