@@ -1,5 +1,6 @@
 typedef enum {
-  Token_Flag_wasnewline = 1 << 0,
+  Token_Flag_wasnewline  = 1 << 0,
+  Token_Flag_willnewline = 1 << 1,
 } Token_Flag;
 typedef struct {
   Token_Kind kind;
@@ -21,9 +22,6 @@ typedef struct {
   Cstr stream;
   Cstr file_path;
   B8   wasnewline;
-  Istr keyword_if;
-  Istr keyword_do;
-  Istr keyword_else;
 } Lexer;
 
 void slice_token_push(Slice_Token* slice, Token item) {
@@ -34,8 +32,12 @@ Token slice_token_pop(Slice_Token* slice) {
   return slice->base[slice->length--];
 }
 
-Token slice_token_at(Slice_Token* slice, S32 at) {
-  return slice->base[at];
+Token* slice_token_at(Slice_Token* slice, S32 at) {
+  return &slice->base[at];
+}
+
+Token* slice_token_top(Slice_Token* slice) {
+  return &slice->base[slice->length-1];
 }
 
 Lexer lexer = {0};
@@ -43,14 +45,17 @@ Lexer lexer = {0};
 Slice_Token lex_source(Cstr source, Cstr file_path) {
   Umi source_len = strlen(source);
   Slice_Token slice_token = {0};
-  slice_token.base = xmalloc(sizeof(Token) * (source_len+1));
+  slice_token.base = xmalloc(sizeof(Token) * (source_len+2));
   lexer.source = source;
   lexer.stream = source;
   lexer.file_path = file_path;
   lexer.wasnewline = true;
-  lexer.keyword_if   = istr_from_cstr_token_kind("if", Token_Kind_if);
-  lexer.keyword_do   = istr_from_cstr_token_kind("do", Token_Kind_do);
-  lexer.keyword_else = istr_from_cstr_token_kind("else", Token_Kind_else);
+  slice_token_push(&slice_token, (Token){Token_Kind_none, 0, {0}});
+
+  istr_from_cstr_token_kind("if", Token_Kind_if);
+  istr_from_cstr_token_kind("do", Token_Kind_do);
+  istr_from_cstr_token_kind("else", Token_Kind_else);
+  istr_from_cstr_token_kind("return", Token_Kind_return);
 
   while (*lexer.stream) {
     Token token = {0};
@@ -205,6 +210,8 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     }
     if (lexer.wasnewline) {
       token.flag |= Token_Flag_wasnewline;
+      Token* top = slice_token_top(&slice_token);
+      top->flag |= Token_Flag_willnewline;
     }
 
     // NOTE: checks whether rhs should be disabled
@@ -222,6 +229,9 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
     switch (token->kind) {
     case Token_Kind_eof:
       string_builder_push_cstr(&sb, "eof");
+    break;
+    case Token_Kind_none:
+      string_builder_push_cstr(&sb, "none");
     break;
     case Token_Kind_name: {
       Cstr str =  cstr_from_istr(token->istr);
@@ -292,6 +302,9 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
     break;
     case Token_Kind_else:
       string_builder_push_cstr(&sb, "else");
+    break;
+    case Token_Kind_return:
+      string_builder_push_cstr(&sb, "return");
     break;
     }
     string_builder_push_cstr(&sb, " ");

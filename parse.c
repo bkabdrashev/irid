@@ -47,6 +47,7 @@ typedef enum {
   Ast_Kind_else_value_leave    = 160,
   Ast_Kind_fun_enter           = 161,
   Ast_Kind_fun_leave           = 162,
+  Ast_Kind_return              = 163,
 } Ast_Kind;
 
 typedef struct {
@@ -103,6 +104,9 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     break;
     case Ast_Kind_infix_or_suffix:
       string_builder_push_cstr(&sb, "infix");
+    break;
+    case Ast_Kind_return:
+      string_builder_push_cstr(&sb, "return");
     break;
     case Ast_Kind_if_enter:
       string_builder_push_cstr(&sb, "if");
@@ -457,12 +461,23 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
     case Ast_Kind_statement: { label_statement:;
       Token token = parse_consume_token();
       switch (token.kind) {
+      case Token_Kind_none: {
+      } goto label_statement;
       case Token_Kind_if: {
         Ast if_do = { Ast_Kind_if_do, { .last_at.index = parser.final.length } };
         parse_stack_push(if_do);
       } goto label_expression;
       // case Token_Kind_for:
-      // case Token_Kind_return:
+      case Token_Kind_return: {
+        Ast ret = { Ast_Kind_return, { .last_at.index = parser.final.length } };
+        if (token.flag & Token_Flag_willnewline) {
+          parse_final_push(ret);
+        }
+        else {
+          parse_stack_push(ret);
+          goto label_expression;
+        }
+      } break;
       default: {
         parse_unconsume_token();
         Ast assign = { Ast_Kind_assign_lhs, { .last_at.index = parser.final.length } };
@@ -602,7 +617,7 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
       } goto label_expression;
       default: {
         parse_unconsume_token();
-        if ((token.kind & Token_Kind_Flag_call_rhs) && (token.flag & Token_Flag_wasnewline)) {
+        if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
           Ast ast = { Ast_Kind_call, {0} };
           while (parse_stack_is_top_higher_precedence(ast.kind)) {
             parse_transfer_one();
@@ -766,7 +781,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("a,b", "{}");
+  test("() -> { if a do return b+c }", "{}");
 }
 
 #undef test
