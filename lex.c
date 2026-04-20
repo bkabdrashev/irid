@@ -161,6 +161,14 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
       token.kind = Token_Kind_equal;
       lexer.stream++;
     } break;
+    case ':': {
+      token.kind = Token_Kind_colon;
+      lexer.stream++;
+    } break;
+    case '.': {
+      token.kind = Token_Kind_dot;
+      lexer.stream++;
+    } break;
     case '(': {
       token.kind = Token_Kind_paren_open;
       lexer.stream++;
@@ -259,6 +267,12 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
     break;
     case Token_Kind_equal:
       string_builder_push_cstr(&sb, "=");
+    break;
+    case Token_Kind_colon:
+      string_builder_push_cstr(&sb, ":");
+    break;
+    case Token_Kind_dot:
+      string_builder_push_cstr(&sb, ".");
     break;
     case Token_Kind_at:
       string_builder_push_cstr(&sb, "@");

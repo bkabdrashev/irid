@@ -13,6 +13,7 @@ typedef enum {
   Ast_Kind_neg  = Token_Kind_minus | Ast_Flag_unary,
   Ast_Kind_pos  = Token_Kind_plus  | Ast_Flag_unary,
   Ast_Kind_ptr  = Token_Kind_at    | Ast_Flag_unary,
+  Ast_Kind_access = Token_Kind_dot | Ast_Flag_binary,
   Ast_Kind_load            = 128 | Ast_Flag_unary,
   Ast_Kind_subscript_close = 129,
   Ast_Kind_subscript       = 130 | Ast_Flag_binary,
@@ -21,38 +22,41 @@ typedef enum {
   Ast_Kind_assign_lhs      = 133,
   Ast_Kind_assign_rhs      = 134,
   Ast_Kind_record_assign   = 135,
-  Ast_Kind_paren_enter     = 136,
-  Ast_Kind_paren_leave     = 137,
-  Ast_Kind_record_enter    = 138,
-  Ast_Kind_record_leave    = 139,
-  Ast_Kind_tuple_enter     = 140,
-  Ast_Kind_tuple_leave     = 141,
-  Ast_Kind_source_enter    = 142,
-  Ast_Kind_source_leave    = 143,
-  Ast_Kind_block_enter     = 144,
-  Ast_Kind_block_leave     = 145,
-  Ast_Kind_block_value_enter = 146,
-  Ast_Kind_block_value_leave = 147,
-  Ast_Kind_statement       = 148,
-  Ast_Kind_expression      = 149,
-  Ast_Kind_infix_or_suffix = 150,
-  Ast_Kind_call            = 151 | Ast_Flag_binary,
-  Ast_Kind_if_enter            = 152,
-  Ast_Kind_if_leave            = 153,
-  Ast_Kind_if_do               = 154,
-  Ast_Kind_if_else             = 155,
-  Ast_Kind_if_leave_else_enter = 156,
-  Ast_Kind_else_leave          = 157,
-  Ast_Kind_if_value_do         = 158,
-  Ast_Kind_if_value_else       = 159,
-  Ast_Kind_else_value_leave    = 160,
-  Ast_Kind_fun_enter           = 161,
-  Ast_Kind_fun_leave           = 162,
-  Ast_Kind_return              = 163,
-  Ast_Kind_while_enter         = 164,
-  Ast_Kind_while_leave         = 165,
-  Ast_Kind_while_do            = 166,
-  Ast_Kind_break               = 169,
+  Ast_Kind_declare_lhs     = 136,
+  Ast_Kind_declare_rhs     = 137,
+  Ast_Kind_record_declare  = 138,
+  Ast_Kind_paren_enter     = 139,
+  Ast_Kind_paren_leave     = 140,
+  Ast_Kind_record_enter    = 141,
+  Ast_Kind_record_leave    = 142,
+  Ast_Kind_tuple_enter     = 143,
+  Ast_Kind_tuple_leave     = 144,
+  Ast_Kind_source_enter    = 145,
+  Ast_Kind_source_leave    = 146,
+  Ast_Kind_block_enter     = 147,
+  Ast_Kind_block_leave     = 148,
+  Ast_Kind_block_value_enter = 149,
+  Ast_Kind_block_value_leave = 150,
+  Ast_Kind_statement       = 151,
+  Ast_Kind_expression      = 152,
+  Ast_Kind_infix_or_suffix = 153,
+  Ast_Kind_call            = 154 | Ast_Flag_binary,
+  Ast_Kind_if_enter            = 155,
+  Ast_Kind_if_leave            = 156,
+  Ast_Kind_if_do               = 157,
+  Ast_Kind_if_else             = 158,
+  Ast_Kind_if_leave_else_enter = 159,
+  Ast_Kind_else_leave          = 160,
+  Ast_Kind_if_value_do         = 161,
+  Ast_Kind_if_value_else       = 162,
+  Ast_Kind_else_value_leave    = 163,
+  Ast_Kind_fun_enter           = 164,
+  Ast_Kind_fun_leave           = 165,
+  Ast_Kind_return              = 166,
+  Ast_Kind_while_enter         = 167,
+  Ast_Kind_while_leave         = 168,
+  Ast_Kind_while_do            = 169,
+  Ast_Kind_break               = 172,
 } Ast_Kind;
 
 typedef struct {
@@ -161,6 +165,9 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     case Ast_Kind_mul:
       string_builder_push_cstr(&sb, "mul");
     break;
+    case Ast_Kind_access:
+      string_builder_push_cstr(&sb, "access");
+    break;
     case Ast_Kind_fun_enter:
       string_builder_push_cstr(&sb, "fun(");
     break;
@@ -196,6 +203,15 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     break;
     case Ast_Kind_record_assign:
       string_builder_push_cstr(&sb, "r=");
+    break;
+    case Ast_Kind_declare_lhs:
+      string_builder_push_cstr(&sb, "l:");
+    break;
+    case Ast_Kind_declare_rhs:
+      string_builder_push_cstr(&sb, ":");
+    break;
+    case Ast_Kind_record_declare:
+      string_builder_push_cstr(&sb, "r:");
     break;
     case Ast_Kind_block_enter:
       string_builder_push_cstr(&sb, "{");
@@ -326,7 +342,7 @@ void parse_transfer_one(void) {
   parse_final_push(ast);
 }
 
-I32 parse_left_precedence(Ast_Kind kind) {
+I32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_fun_enter:
   case Ast_Kind_fun_leave:
@@ -348,13 +364,14 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return 17;
   case Ast_Kind_subscript:
   case Ast_Kind_call:
+  case Ast_Kind_access:
     return 19;
   default :
     return -1;
   }
 }
 
-I32 parse_right_precedence(Ast_Kind kind) {
+I32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_fun_enter:
   case Ast_Kind_fun_leave:
@@ -375,6 +392,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
     return 18;
   case Ast_Kind_subscript_close:
   case Ast_Kind_call:
+  case Ast_Kind_access:
     return 20;
   default :
     return -1;
@@ -621,6 +639,13 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         }
         parse_stack_push(ast);
       } goto label_expression;
+      case Token_Kind_dot: {
+        Ast ast = { Ast_Kind_access, {0} };
+        while (parse_stack_is_top_higher_precedence(ast.kind)) {
+          parse_transfer_one();
+        }
+        parse_final_push(ast);
+      } goto label_expression;
       case Token_Kind_arrow: {
         Ast fun_enter = { Ast_Kind_fun_enter, {0} };
         while (parse_stack_is_top_higher_precedence(fun_enter.kind)) {
@@ -691,6 +716,19 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         parse_stack_push(assign);
         goto label_expression;
       }
+      else if (parse_match_token(Token_Kind_colon)) {
+        Ast* top = parse_stack_top();
+        Ast declare = { Ast_Kind_declare_rhs, {0} };
+        if (top->kind == Ast_Kind_record_leave ||
+            top->kind == Ast_Kind_paren_leave) {
+          declare.kind = Ast_Kind_record_declare;
+        }
+        I32 final_mark = ast.last_at.index;
+        I32 stack_mark_length = parse_transfer_final_to_stack_from(final_mark);
+        declare.last_at.index = stack_mark_length;
+        parse_stack_push(declare);
+        goto label_expression;
+      }
       else if (top->kind == Ast_Kind_block_value_leave) {
         parse_print("");
         Ast* enter = parse_final_at(top->enter_at);
@@ -698,6 +736,8 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         top->kind = Ast_Kind_block_leave;
       }
     } break;
+    case Ast_Kind_record_declare:
+    case Ast_Kind_declare_rhs:
     case Ast_Kind_record_assign:
     case Ast_Kind_assign_rhs: {
       parse_final_push(ast);
@@ -836,7 +876,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, I32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("while a do if b do a = {}", "{}");
+  test("a: b = c", "{}");
 }
 
 #undef test

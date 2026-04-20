@@ -253,15 +253,17 @@ Irid irid_gen(Funid funid, Astid astid) {
     branchid_eqz_link_to_blockid(branch_from_header);
   } break;
   case AstKind_field_access : {
+    lhs  = top_ir
+    rhs = next_ast
     Ast_Binary field_access = astid_binary(astid);
     Irid lhs_irid = irid_gen(funid, field_access.one, blockid);
-    if (astid_kind(field_access.two) == AstKind_name) {
+    if (rhs.kind == Ast_Kind_name) {
       istr name = astid_name(field_access.two)
-      if (irid_kind(funid, lhs_irid) == AstKind_load) {
+      if (lhs.kind == Ir_Kind_load) {
         irid_set_kind(funid, lhs_irid, IrKind_name_offset)
         irid_set_name_offset_name(funid, lhs_irid, name);
       }
-      else (irid_kind(funid, lhs_irid) == AstKind_load_var) {
+      else (irid_kind(funid, lhs_irid) == Ir_Kind_load_var) {
         lhs_irid = irid_new_name_offset(funid, lhs_irid, name);
       }
     }
