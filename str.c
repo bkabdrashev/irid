@@ -27,6 +27,7 @@ typedef enum {
   Token_Kind_if                 = 28 | Token_Kind_Flag_call_rhs,
   Token_Kind_do                 = 30,
   Token_Kind_else               = 32,
+  Token_Kind_arrow              = 34,
 } Token_Kind;
 
 typedef const char* Cstr;

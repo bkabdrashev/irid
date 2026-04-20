@@ -303,6 +303,8 @@ Funid funid_from_astid(Astid astid) {
     Funid funid = funid_get(astid);
     if (funid_is_valid(funid)) return funid;
   }
+  // foo = (a = A; b = B) -> a + b, a-b
+  // ( 2 A = a B = b ) t(2 a b add a b sub )t = foo
   Funid funid = funid_new(astid);
   Astid param = astid_fun_param(astid);
   Irid arg_irid = irid_new_arg(funid);

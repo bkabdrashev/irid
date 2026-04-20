@@ -45,6 +45,8 @@ typedef enum {
   Ast_Kind_if_value_do         = 158,
   Ast_Kind_if_value_else       = 159,
   Ast_Kind_else_value_leave    = 160,
+  Ast_Kind_fun_enter           = 161,
+  Ast_Kind_fun_leave           = 162,
 } Ast_Kind;
 
 typedef struct {
@@ -136,6 +138,12 @@ Cstr cstr_from_slice_ast(Slice_Ast* slice) {
     break;
     case Ast_Kind_mul:
       string_builder_push_cstr(&sb, "mul");
+    break;
+    case Ast_Kind_fun_enter:
+      string_builder_push_cstr(&sb, "fun(");
+    break;
+    case Ast_Kind_fun_leave:
+      string_builder_push_cstr(&sb, ")fun");
     break;
     case Ast_Kind_eof:
       string_builder_push_cstr(&sb, "eof");
@@ -264,6 +272,15 @@ Astid parse_final_push(Ast ast) {
   return astid;
 }
 
+Astid parse_final_insert(Astid astid, Ast ast) {
+  for (S32 i = parser.final.length; i >= astid.index; i--) {
+    parser.final.base[i] = parser.final.base[i-1];
+  }
+  parser.final.base[astid.index] = ast;
+  parser.final.length++;
+  return astid;
+}
+
 Ast parse_final_pop(void) {
   return slice_ast_pop(&parser.final);
 }
@@ -283,42 +300,56 @@ void parse_transfer_one(void) {
 
 S32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
-  case Ast_Kind_array_close:
-  case Ast_Kind_subscript_close:
-                       return 0;
+  case Ast_Kind_fun_enter:
+  case Ast_Kind_fun_leave:
+    return 1;
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
-                       return 3;
+    return 3;
   case Ast_Kind_sub:
-  case Ast_Kind_add: return 11;
-  case Ast_Kind_mul: return 13;
+  case Ast_Kind_add:
+    return 11;
+  case Ast_Kind_mul:
+    return 13;
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
-  case Ast_Kind_pos:  return 15;
+  case Ast_Kind_pos:
+    return 15;
   case Ast_Kind_array:
-  case Ast_Kind_load: return 17;
+  case Ast_Kind_load:
+    return 17;
   case Ast_Kind_subscript:
-  case Ast_Kind_call: return 19;
-  default :          return -1;
+  case Ast_Kind_call:
+    return 19;
+  default :
+    return -1;
   }
 }
 
 S32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
+  case Ast_Kind_fun_enter:
+  case Ast_Kind_fun_leave:
+    return 1;
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
-                       return 4;
+    return 4;
   case Ast_Kind_sub:
-  case Ast_Kind_add: return 12;
+  case Ast_Kind_add:
+    return 12;
   case Ast_Kind_mul: return 14;
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
-  case Ast_Kind_pos:  return 16;
+  case Ast_Kind_pos:
+    return 16;
   case Ast_Kind_array_close:
-  case Ast_Kind_load: return 18;
+  case Ast_Kind_load:
+    return 18;
   case Ast_Kind_subscript_close:
-  case Ast_Kind_call: return 20;
-  default :          return -1;
+  case Ast_Kind_call:
+    return 20;
+  default :
+    return -1;
   }
 }
 
@@ -380,8 +411,9 @@ B8 parse_expect_token(Token_Kind kind) {
   return false;
 }
 
-void parse_print(void) {
-  printf("\nast final: ");
+void parse_print(Cstr cstr) {
+  printf("%s\n", cstr);
+  printf("ast final: ");
   slice_ast_print(&parser.final);
   printf("ast stack: ");
   slice_ast_print(&parser.stack);
@@ -525,6 +557,16 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
         }
         parse_stack_push(ast);
       } goto label_expression;
+      case Token_Kind_arrow: {
+        Ast fun_enter = { Ast_Kind_fun_enter, {0} };
+        while (parse_stack_is_top_higher_precedence(fun_enter.kind)) {
+          parse_transfer_one();
+        }
+        Ast* top = parse_stack_top();
+        parse_final_insert(top->last_at, fun_enter);
+        Ast fun_leave = { Ast_Kind_fun_leave, { .last_at.index = parser.final.length } };
+        parse_stack_push(fun_leave);
+      } goto label_expression;
       case Token_Kind_brace_open: {
         Ast ast = { Ast_Kind_subscript_close, { .last_at.index = parser.final.length } };
         while (parse_stack_is_top_higher_precedence(ast.kind)) {
@@ -545,22 +587,17 @@ void parse_tokens(Slice_Token tokens, Umi source_length) {
           parse_transfer_one();
         }
         Ast* top = parse_stack_top();
-        if (top->kind == Ast_Kind_assign_lhs  || top->kind == Ast_Kind_assign_rhs ||
-            top->kind == Ast_Kind_paren_leave || top->kind == Ast_Kind_record_leave ||
-            top->kind == Ast_Kind_array_close || top->kind == Ast_Kind_subscript_close ||
-            top->kind == Ast_Kind_if_do       || top->kind == Ast_Kind_if_value_do ||
-            top->kind == Ast_Kind_else_value_leave) {
-          S32 stack_mark_length = parse_transfer_final_to_stack_from(top->last_at.index);
-          Ast tuple_open = { Ast_Kind_tuple_enter, {.length = 1} };
-          Astid tuple_open_astid = parse_final_push(tuple_open);
-          parse_transfer_stack_to_final_from(stack_mark_length);
-          Ast tuple_close = { Ast_Kind_tuple_leave, .enter_at = tuple_open_astid };
-          parse_stack_push(tuple_close);
-        }
-        else {
+        if (top->kind == Ast_Kind_tuple_leave) {
           Ast* open = parse_final_at(top->enter_at);
           open->leave_at.index = parser.final.length;
           open->length++;
+        }
+        else {
+          Ast tuple_enter = { Ast_Kind_tuple_enter, {.length = 1} };
+          parse_print("tuple");
+          Astid tuple_enter_astid = parse_final_insert(top->last_at, tuple_enter);
+          Ast tuple_leave = { Ast_Kind_tuple_leave, .enter_at = tuple_enter_astid };
+          parse_stack_push(tuple_leave);
         }
       } goto label_expression;
       default: {
@@ -729,7 +766,7 @@ B8 _test_ast(Cstr expected, Cstr file_name, S32 line, Cstr source) {
 #define test(source, expected) _test_ast(expected, __FILE__, __LINE__, source)
 
 void parse_test(void) {
-  test("(if a,b do c,d else e,f)", "{}");
+  test("a -> b", "{}");
 }
 
 #undef test

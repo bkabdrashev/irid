@@ -57,11 +57,11 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     switch (*lexer.stream) {
     case ' ': case '\t': case '\v' :
       lexer.stream++;
-      continue;
+    continue;
     case '\n': case '\r': 
       lexer.stream++;
       lexer.wasnewline = true;
-      continue;
+    continue;
     case '0': case '1': case '2': case '3': case '4':
     case '5': case '6': case '7': case '8': case '9': {
       token.kind = Token_Kind_int;
@@ -137,10 +137,14 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     } break;
     case '-': {
       token.kind = Token_Kind_minus;
-      if (lexer.wasnewline && !isspace(lexer.stream[1])) {
-       token.kind = Token_Kind_minus_prefix;
-      }
       lexer.stream++;
+      if (lexer.wasnewline && !isspace(lexer.stream[1])) {
+        token.kind = Token_Kind_minus_prefix;
+      }
+      else if (*lexer.stream == '>') {
+        token.kind = Token_Kind_arrow;
+        lexer.stream++;
+      }
     } break;
     case '*': {
       token.kind = Token_Kind_star;
@@ -218,74 +222,77 @@ Cstr cstr_from_slice_token(Slice_Token slice) {
     switch (token->kind) {
     case Token_Kind_eof:
       string_builder_push_cstr(&sb, "eof");
-      break;
+    break;
     case Token_Kind_name: {
       Cstr str =  cstr_from_istr(token->istr);
       string_builder_push_cstr(&sb, str);
     } break;
     case Token_Kind_int:
       string_builder_push_s64(&sb, token->s64);
-      break;
+    break;
     case Token_Kind_plus:
       string_builder_push_cstr(&sb, "+");
-      break;
+    break;
     case Token_Kind_plus_prefix:
       string_builder_push_cstr(&sb, "p+");
-      break;
+    break;
     case Token_Kind_minus:
       string_builder_push_cstr(&sb, "-");
-      break;
+    break;
     case Token_Kind_minus_prefix:
       string_builder_push_cstr(&sb, "p-");
-      break;
+    break;
     case Token_Kind_star:
       string_builder_push_cstr(&sb, "*");
-      break;
+    break;
     case Token_Kind_equal:
       string_builder_push_cstr(&sb, "=");
-      break;
+    break;
     case Token_Kind_at:
       string_builder_push_cstr(&sb, "@");
-      break;
+    break;
     case Token_Kind_at_prefix:
       string_builder_push_cstr(&sb, "p@");
-      break;
+    break;
+    case Token_Kind_arrow:
+      string_builder_push_cstr(&sb, "->");
+    break;
     case Token_Kind_brace_open:
       string_builder_push_cstr(&sb, "[");
-      break;
+    break;
     case Token_Kind_brace_prefix_open:
       string_builder_push_cstr(&sb, "p[");
-      break;
+    break;
     case Token_Kind_brace_close:
       string_builder_push_cstr(&sb, "]");
-      break;
+    break;
     case Token_Kind_paren_open:
       string_builder_push_cstr(&sb, "(");
-      break;
+    break;
     case Token_Kind_paren_close:
       string_builder_push_cstr(&sb, ")");
-      break;
+    break;
     case Token_Kind_curly_open:
       string_builder_push_cstr(&sb, "{");
-      break;
+    break;
     case Token_Kind_curly_close:
       string_builder_push_cstr(&sb, "}");
-      break;
+    break;
     case Token_Kind_semicolon:
       string_builder_push_cstr(&sb, ";");
-      break;
+    break;
     case Token_Kind_comma:
       string_builder_push_cstr(&sb, ",");
-      break;
+    break;
     case Token_Kind_if:
       string_builder_push_cstr(&sb, "if");
-      break;
+    break;
     case Token_Kind_do:
       string_builder_push_cstr(&sb, "do");
-      break;
+    break;
     case Token_Kind_else:
       string_builder_push_cstr(&sb, "else");
-      break;
+    break;
     }
     string_builder_push_cstr(&sb, " ");
   }
