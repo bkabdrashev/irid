@@ -4,8 +4,8 @@ typedef enum {
 } Token_Kind_Flag;
 
 typedef enum {
-  Token_Kind_eof                = 0,
-  Token_Kind_none               = 1,
+  Token_Kind_source_leave       = 0,
+  Token_Kind_source_enter       = 1,
   Token_Kind_name               = 2 | Token_Kind_Flag_call_rhs,
   Token_Kind_int                = 3 | Token_Kind_Flag_call_rhs,
   Token_Kind_plus               = 4,
@@ -49,7 +49,6 @@ typedef struct {
   C8* buffer_bot;
   Str* strings;
   Token_Kind* token_kinds;
-  Umi len;
   Umi cap;
 } Internal_Strings;
 
@@ -61,12 +60,11 @@ typedef struct {
 Internal_Strings internal_strings = {0};
 void istr_init(Umi capacity) {
   capacity = power_of_2_up(capacity);
-  internal_strings.buffer_bot = xmalloc(capacity);
-  internal_strings.buffer_top = internal_strings.buffer_bot;
-  internal_strings.strings = xcalloc(sizeof(Str), capacity);
+  internal_strings.buffer_bot  = xmalloc(capacity);
+  internal_strings.buffer_top  = internal_strings.buffer_bot;
+  internal_strings.strings     = xcalloc(sizeof(Str), capacity);
   internal_strings.token_kinds = xcalloc(sizeof(Token_Kind), capacity);
-  internal_strings.len     = 0;
-  internal_strings.cap     = capacity;
+  internal_strings.cap = capacity;
 }
 
 Token_Kind token_kind_from_istr(Istr istr) {
@@ -127,9 +125,9 @@ Istr istr_from_range(Cstr begin, Cstr end) {
   }
 }
 
-String_Builder string_builder_begin(Arena* arena, Umi capacity) {
+String_Builder string_builder_begin(C8* buffer) {
   String_Builder sb;
-  sb.base = arena_alloc(arena, capacity);
+  sb.base = buffer;
   sb.size = 0;
   return sb;
 }
@@ -191,4 +189,3 @@ B8 test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr sou
     return false;
   }
 }
-

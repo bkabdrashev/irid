@@ -2,6 +2,7 @@ typedef enum {
   Token_Flag_wasnewline  = 1 << 0,
   Token_Flag_willnewline = 1 << 1,
 } Token_Flag;
+
 typedef struct {
   Token_Kind kind;
   Token_Flag flag;
@@ -20,7 +21,6 @@ typedef struct {
 typedef struct {
   Cstr source;
   Cstr stream;
-  Cstr file_path;
   B8   wasnewline;
 } Lexer;
 
@@ -42,22 +42,13 @@ Token* slice_token_top(Slice_Token* slice) {
 
 Lexer lexer = {0};
 
-Slice_Token lex_source(Cstr source, Cstr file_path) {
-  Umi source_len = strlen(source);
+Slice_Token lex_source(Cstr source, Token* buffer) {
   Slice_Token slice_token = {0};
-  slice_token.base = xmalloc(sizeof(Token) * (source_len+2));
+  slice_token.base = buffer;;
   lexer.source = source;
   lexer.stream = source;
-  lexer.file_path = file_path;
   lexer.wasnewline = true;
-  slice_token_push(&slice_token, (Token){Token_Kind_none, 0, {0}});
-
-  istr_from_cstr_token_kind("if", Token_Kind_if);
-  istr_from_cstr_token_kind("do", Token_Kind_do);
-  istr_from_cstr_token_kind("else", Token_Kind_else);
-  istr_from_cstr_token_kind("return", Token_Kind_return);
-  istr_from_cstr_token_kind("while", Token_Kind_while);
-  istr_from_cstr_token_kind("break", Token_Kind_break);
+  slice_token_push(&slice_token, (Token){Token_Kind_source_enter, 0, {0}});
 
   while (*lexer.stream) {
     Token token = {0};
@@ -211,9 +202,6 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
       token.kind = Token_Kind_comma;
       lexer.stream++;
     } break;
-    case '\0': {
-      token.kind = Token_Kind_eof;
-    } break;
     default: {
       lexer.stream++;
     } break;
@@ -228,20 +216,20 @@ Slice_Token lex_source(Cstr source, Cstr file_path) {
     lexer.wasnewline = false;
     slice_token_push(&slice_token, token);
   }
-  Token token = { .kind = Token_Kind_eof };
+  Token token = { .kind = Token_Kind_source_leave };
   slice_token_push(&slice_token, token);
   return slice_token;
 }
 
-Cstr cstr_from_slice_token(Slice_Token slice) {
-  String_Builder sb = string_builder_begin(&temp_arena, slice.length * 3 + 1);
+Cstr cstr_from_slice_token(Slice_Token slice, C8* buffer) {
+  String_Builder sb = string_builder_begin(buffer);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {
-    case Token_Kind_eof:
-      string_builder_push_cstr(&sb, "eof");
+    case Token_Kind_source_leave:
+      string_builder_push_cstr(&sb, "leave");
     break;
-    case Token_Kind_none:
-      string_builder_push_cstr(&sb, "none");
+    case Token_Kind_source_enter:
+      string_builder_push_cstr(&sb, "enter");
     break;
     case Token_Kind_name: {
       Cstr str =  cstr_from_istr(token->istr);

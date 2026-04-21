@@ -142,3 +142,15 @@ sum(1, 2) // 3
 Vec2 = 3, 4
 Vec2.x + Vec.y // 7
 ```
+
+- [ ] {} syntax for creating records with matching field names. This conflicts with expressoin block syntax.
+```irid
+x = 1;
+y = 2
+vec = { x, y } // (x = x; y = y)
+```
+
+- [ ] {} pattern syntax for extracting members from a record
+```irid
+{ y, x } = vec
+```

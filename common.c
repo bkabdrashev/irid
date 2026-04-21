@@ -124,4 +124,3 @@ I32 slice_s32_top(Slice_S32* slice) {
 B8 slice_s32_is_empty(Slice_S32* slice) {
   return slice->length == 0;
 }
-
