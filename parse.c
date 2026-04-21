@@ -80,13 +80,13 @@ typedef struct {
 } Ast_Node; 
 
 typedef struct {
-  Ast_Node* base;
+  Ast_Node* nodes;
   I32  length;
 } Ast;
 
 Astid ast_push(Ast* ast, Ast_Node node) {
   I32 index = ast->length;
-  ast->base[ast->length++] = node;
+  ast->nodes[ast->length++] = node;
   Astid astid = { index };
   return astid;
 }
@@ -95,13 +95,13 @@ Astid ast_push_kind(Ast* ast, Ast_Kind kind) {
   return ast_push(ast, node);
 }
 Ast_Node ast_pop(Ast* ast) {
-  return ast->base[--ast->length];
+  return ast->nodes[--ast->length];
 }
 Ast_Node* ast_top(Ast ast) {
-  return &ast.base[ast.length-1];
+  return &ast.nodes[ast.length-1];
 }
 Ast_Node* ast_at(Ast ast, Astid astid) {
-  return &ast.base[astid.index];
+  return &ast.nodes[astid.index];
 }
 B8 ast_is_empty(Ast ast) {
   return ast.length == 0;
@@ -110,7 +110,7 @@ B8 ast_is_empty(Ast ast) {
 Cstr cstr_from_ast(Ast ast, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 i = 0; i < ast.length; i++) {
-    Ast_Node node = ast.base[i];
+    Ast_Node node = ast.nodes[i];
     switch (node.kind) {
     case Ast_Kind_statement:
       string_builder_push_cstr(&sb, "stm");
@@ -285,9 +285,9 @@ void ast_print(Ast ast) {
 
 Astid slice_ast_insert(Ast* slice, Astid astid, Ast_Node ast) {
   for (I32 i = slice->length; i >= astid.index; i--) {
-    slice->base[i] = slice->base[i-1];
+    slice->nodes[i] = slice->nodes[i-1];
   }
-  slice->base[astid.index] = ast;
+  slice->nodes[astid.index] = ast;
   slice->length++;
   return astid;
 }
@@ -404,7 +404,7 @@ void parse_print(Parser parser, Cstr cstr) {
 I32 parse_transfer_final_to_stack_from(Parser* parser, I32 mark) {
   I32 result = parser->stack.length;
   for (I32 i = mark; i < parser->final.length; i++) {
-    ast_push(&parser->stack, parser->final.base[i]);
+    ast_push(&parser->stack, parser->final.nodes[i]);
   }
   parser->final.length = mark;
   return result;
@@ -413,7 +413,7 @@ I32 parse_transfer_final_to_stack_from(Parser* parser, I32 mark) {
 I32 parse_transfer_stack_to_final_from(Parser* parser, I32 mark) {
   I32 result = parser->final.length;
   for (I32 i = mark; i < parser->stack.length; i++) {
-    ast_push(&parser->final, parser->stack.base[i]);
+    ast_push(&parser->final, parser->stack.nodes[i]);
   }
   parser->stack.length = mark;
   return result;
@@ -427,8 +427,8 @@ Astid parse_stack_push_kind_with_final_length(Parser* parser, Ast_Kind kind) {
 
 Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
   Parser parser = {0};
-  parser.stack.base = xmalloc(sizeof(Ast_Node) * 2*tokens.length);
-  parser.final.base = final_buffer;
+  parser.stack.nodes = xmalloc(sizeof(Ast_Node) * 2*tokens.length);
+  parser.final.nodes = final_buffer;
   parser.tokens     = tokens;
   parser.tok        = 0;
   ast_push_kind(&parser.stack, Ast_Kind_source_leave);
@@ -728,7 +728,7 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
     break;
     }
   }
-  free(parser.stack.base);
+  free(parser.stack.nodes);
   return parser.final;
 }
 
@@ -752,9 +752,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Ast_Node* ast_buffer = xmalloc(sizeof(Ast_Node) * 2*max_ast_length);
   Ast ast = ast_from_source(source, ast_buffer);
   C8* buffer = xmalloc(10 * (source_length+2));
-  cstr_from_ast(ast, buffer);
-  free(ast.base);
-  test_at_source(buffer, expected, file_name, line, source);
+  Cstr result = cstr_from_ast(ast, buffer);
+  free(ast.nodes);
+  test_at_source(result, expected, file_name, line, source);
   free(buffer);
 }
 
