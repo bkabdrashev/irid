@@ -16,7 +16,7 @@ typedef struct {
 typedef struct {
   Token* base;
   Umi    length;
-} Slice_Token;
+} Tokens;
 
 typedef struct {
   Cstr source;
@@ -24,31 +24,31 @@ typedef struct {
   B8   wasnewline;
 } Lexer;
 
-void slice_token_push(Slice_Token* slice, Token item) {
-  slice->base[slice->length++] = item;
+void tokens_push(Tokens* tokens, Token item) {
+  tokens->base[tokens->length++] = item;
 }
 
-Token slice_token_pop(Slice_Token* slice) {
-  return slice->base[slice->length--];
+Token tokens_pop(Tokens* token) {
+  return token->base[token->length--];
 }
 
-Token* slice_token_at(Slice_Token* slice, I32 at) {
-  return &slice->base[at];
+Token* tokens_at(Tokens* token, I32 at) {
+  return &token->base[at];
 }
 
-Token* slice_token_top(Slice_Token* slice) {
-  return &slice->base[slice->length-1];
+Token* tokens_top(Tokens* token) {
+  return &token->base[token->length-1];
 }
 
 Lexer lexer = {0};
 
-Slice_Token lex_source(Cstr source, Token* buffer) {
-  Slice_Token slice_token = {0};
+Tokens lex_source(Cstr source, Token* buffer) {
+  Tokens slice_token = {0};
   slice_token.base = buffer;;
   lexer.source = source;
   lexer.stream = source;
   lexer.wasnewline = true;
-  slice_token_push(&slice_token, (Token){Token_Kind_source_enter, 0, {0}});
+  tokens_push(&slice_token, (Token){Token_Kind_source_enter, 0, {0}});
 
   while (*lexer.stream) {
     Token token = {0};
@@ -208,20 +208,20 @@ Slice_Token lex_source(Cstr source, Token* buffer) {
     }
     if (lexer.wasnewline) {
       token.flag |= Token_Flag_wasnewline;
-      Token* top = slice_token_top(&slice_token);
+      Token* top = tokens_top(&slice_token);
       top->flag |= Token_Flag_willnewline;
     }
 
     // NOTE: checks whether rhs should be disabled
     lexer.wasnewline = false;
-    slice_token_push(&slice_token, token);
+    tokens_push(&slice_token, token);
   }
   Token token = { .kind = Token_Kind_source_leave };
-  slice_token_push(&slice_token, token);
+  tokens_push(&slice_token, token);
   return slice_token;
 }
 
-Cstr cstr_from_slice_token(Slice_Token slice, C8* buffer) {
+Cstr cstr_from_slice_token(Tokens slice, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {

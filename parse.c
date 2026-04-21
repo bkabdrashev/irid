@@ -94,21 +94,20 @@ Astid ast_push_kind(Ast* ast, Ast_Kind kind) {
   Ast_Node node = { kind, {0} };
   return ast_push(ast, node);
 }
+Ast_Node ast_pop(Ast* ast) {
+  return ast->base[--ast->length];
+}
+Ast_Node* ast_top(Ast ast) {
+  return &ast.base[ast.length-1];
+}
+Ast_Node* ast_at(Ast ast, Astid astid) {
+  return &ast.base[astid.index];
+}
+B8 ast_is_empty(Ast ast) {
+  return ast.length == 0;
+}
 
-Ast_Node ast_pop(Ast* slice) {
-  return slice->base[--slice->length];
-}
-Ast_Node* ast_top(Ast slice) {
-  return &slice.base[slice.length-1];
-}
-Ast_Node* ast_at(Ast slice, Astid astid) {
-  return &slice.base[astid.index];
-}
-B8 ast_is_empty(Ast slice) {
-  return slice.length == 0;
-}
-
-Cstr cstr_from_slice_ast(Ast ast, C8* buffer) {
+Cstr cstr_from_ast(Ast ast, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 i = 0; i < ast.length; i++) {
     Ast_Node node = ast.base[i];
@@ -278,9 +277,9 @@ Cstr cstr_from_slice_ast(Ast ast, C8* buffer) {
   return result;
 }
 
-void slice_ast_print(Ast ast) {
+void ast_print(Ast ast) {
   C8* buffer = xmalloc(10*ast.length);
-  printf("%s\n", cstr_from_slice_ast(ast, buffer));
+  printf("%s\n", cstr_from_ast(ast, buffer));
   free(buffer);
 }
 
@@ -296,7 +295,7 @@ Astid slice_ast_insert(Ast* slice, Astid astid, Ast_Node ast) {
 typedef struct {
   Ast stack;
   Ast final;
-  Slice_Token tokens;
+  Tokens tokens;
   I32  tok;
 } Parser;
 
@@ -393,12 +392,12 @@ B8 parse_expect_token(Parser* parser, Token_Kind kind) {
   return false;
 }
 
-void print(Parser parser, Cstr cstr) {
+void parse_print(Parser parser, Cstr cstr) {
   printf("%s\n", cstr);
   printf("ast final: ");
-  slice_ast_print(parser.final);
+  ast_print(parser.final);
   printf("ast stack: ");
-  slice_ast_print(parser.stack);
+  ast_print(parser.stack);
   printf("\n");
 }
 
@@ -426,7 +425,7 @@ Astid parse_stack_push_kind_with_final_length(Parser* parser, Ast_Kind kind) {
   return astid;
 }
 
-Ast parse_tokens(Slice_Token tokens, Ast_Node* final_buffer) {
+Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
   Parser parser = {0};
   parser.stack.base = xmalloc(sizeof(Ast_Node) * 2*tokens.length);
   parser.final.base = final_buffer;
@@ -733,11 +732,11 @@ Ast parse_tokens(Slice_Token tokens, Ast_Node* final_buffer) {
   return parser.final;
 }
 
-Ast astid_from_source(Cstr source, Ast_Node* final) {
+Ast ast_from_source(Cstr source, Ast_Node* final) {
   Umi source_length   = strlen(source);
   I32 max_length      = source_length + 2;
   Token* token_buffer = xmalloc(sizeof(Token) * max_length);
-  Slice_Token tokens  = lex_source(source, token_buffer);
+  Tokens tokens  = lex_source(source, token_buffer);
   // C8* tokens_string   = xmalloc(tokens.length * 6 + 1);
   // cstr_from_slice_token(tokens, tokens_string);
   // printf("%s\n", tokens_string);
@@ -747,22 +746,16 @@ Ast astid_from_source(Cstr source, Ast_Node* final) {
   return ast;
 }
 
-void source_to_cstr_from_ast(Cstr source, C8* buffer) {
-  Umi source_length   = strlen(source);
-  I32 max_ast_length  = source_length + 2;
+void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
+  Umi source_length    = strlen(source);
+  I32 max_ast_length   = source_length + 2;
   Ast_Node* ast_buffer = xmalloc(sizeof(Ast_Node) * 2*max_ast_length);
-  Ast ast = astid_from_source(source, ast_buffer);
-  cstr_from_slice_ast(ast, buffer);
-  free(ast.base);
-}
-
-B8 _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Umi source_length = strlen(source);
+  Ast ast = ast_from_source(source, ast_buffer);
   C8* buffer = xmalloc(10 * (source_length+2));
-  source_to_cstr_from_ast(source, buffer);
-  B8 result = test_at_source(buffer, expected, file_name, line, source);
+  cstr_from_ast(ast, buffer);
+  free(ast.base);
+  test_at_source(buffer, expected, file_name, line, source);
   free(buffer);
-  return result;
 }
 
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)

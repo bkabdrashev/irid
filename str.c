@@ -180,12 +180,8 @@ B8 test_str(Cstr one, Cstr two) {
   return true;
 }
 
-B8 test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr source) {
-  if (test_str(testee, expected)) {
-    return true;
-  }
-  else {
+void test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr source) {
+  if (!test_str(testee, expected)) {
     printf("%s(%i): at test source: %s\n", file_name, line, source);
-    return false;
   }
 }
