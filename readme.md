@@ -161,6 +161,16 @@ b = 10
 a = i32'b
 ```
 
+- [ ] methods syntax
+```irid
+Vec : (x: i32; y: i32).{
+  dot : (vec: Vec) -> x*vec.x + y*vec.y
+}
+a = Vec(1,2)
+b = Vec(3,4)
+c = a.dot b // 3 + 8
+```
+
 - [ ] function return value type checking
 ```irid
 foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions

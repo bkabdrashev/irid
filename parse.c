@@ -762,6 +762,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a = 1; a+a",          "s{ 1 2 add }s ");
+
   test("1 + 2",          "s{ 1 2 add }s ");
   test("1 + -2",         "s{ 1 2 neg add }s ");
   test("1 + 2*3",        "s{ 1 2 3 mul add }s ");

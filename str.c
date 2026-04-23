@@ -58,6 +58,7 @@ typedef struct {
 } String_Builder;
 
 Internal_Strings internal_strings = {0};
+const Istr istr_nil = {0};
 void istr_init(Umi capacity) {
   capacity = power_of_2_up(capacity);
   internal_strings.buffer_bot  = xmalloc(capacity);

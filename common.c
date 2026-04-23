@@ -43,14 +43,16 @@ typedef struct {
   I8    alignment;
 } Arena; 
 
-void arena_init(Arena* arena, Umi capacity) {
-  arena->base = malloc(capacity);
-  arena->top = arena->base;
-  arena->capacity = capacity;
-  arena->alignment = 8;
+Arena arena_init(Umi capacity) {
+  Arena arena = {};
+  arena.base = malloc(capacity);
+  arena.top = arena.base;
+  arena.capacity = capacity;
+  arena.alignment = 8;
+  return arena;
 }
 
-void* arena_alloc(Arena* arena, Umi size) {
+void* arena_push(Arena* arena, Umi size) {
   assert(arena->top + size <= arena->base + arena->capacity);
   void* result = arena->top;
   Umi first_bits_off_mask = ~(arena->alignment - 1);
@@ -59,11 +61,15 @@ void* arena_alloc(Arena* arena, Umi size) {
   return result;
 }
 
+void* arena_push_zero(Arena* arena, Umi size) {
+  void* mem = arena_push(arena, size);
+  memset(mem, 0, size);
+  return mem;
+}
+
 void arena_free_all(Arena* arena) {
   arena->top = arena->base;
 }
-
-Arena temp_arena = {0};
 
 U64 hash_bytes(const void* ptr, U64 len) {
   U64 x = 0xcbf29ce484222325;
@@ -132,3 +138,4 @@ I32 slice_s32_top(Slice_S32* slice) {
 B8 slice_s32_is_empty(Slice_S32* slice) {
   return slice->length == 0;
 }
+
