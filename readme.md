@@ -154,3 +154,21 @@ vec = { x, y } // (x = x; y = y)
 ```irid
 { y, x } = vec
 ```
+
+- [ ] type assertion
+```irid
+b = 10
+a = i32'b
+```
+
+- [ ] function return value type checking
+```irid
+foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
+  if () return 1
+  if () return 2.0
+}
+bar : () -> I32 { // not error since both values are converted via the same I32 
+  if () return 1.0
+  if () return 2.0
+}
+```

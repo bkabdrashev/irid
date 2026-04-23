@@ -26,10 +26,10 @@ typedef ssize_t   Smi; //   signed memory index
 typedef uintptr_t Ump; // unsigned memory pointer
 typedef intptr_t  Smp; //   signed memory pointer
 
-#define S64_MAX INT64_MAX
-#define S64_MIN INT64_MIN
-#define S32_MAX INT32_MAX
-#define S32_MIN INT32_MIN
+#define I64_MAX INT64_MAX
+#define I64_MIN INT64_MIN
+#define I32_MAX INT32_MAX
+#define I32_MIN INT32_MIN
 
 #define KB(a) ((a)*1024llu)
 #define MB(a) (KB(a)*1024llu)
@@ -110,6 +110,14 @@ typedef struct {
   I32* base;
   I32 length;
 } Slice_S32;
+
+#define push(slice, item) (slice.base[slice.length++] = item, (slice.length)-1)
+#define add(slice, item) do {slice.base[slice.length++] = item;} while(0);
+#define new(slice) (slice.base[slice.length++])
+#define pop(slice) (slice.base[--slice.length])
+#define top(slice) (slice.base[slice.length-1])
+#define get(slice, index) (slice.base[index])
+
 I32 slice_s32_push(Slice_S32* slice, I32 item) {
   I32 index = slice->length;
   slice->base[slice->length++] = item;

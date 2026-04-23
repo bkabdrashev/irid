@@ -74,7 +74,7 @@ typedef struct {
       Astid leave_at;
       I32 length;
     };
-    I64   s64;
+    I64   i64;
     Istr  istr;
   };
 } Ast_Node; 
@@ -243,14 +243,14 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     break;
     case Ast_Kind_record_enter:
       string_builder_push_cstr(&sb, "r(");
-      string_builder_push_s64(&sb, node.length);
+      string_builder_push_i64(&sb, node.length);
     break;
     case Ast_Kind_record_leave:
       string_builder_push_cstr(&sb, ")r");
     break;
     case Ast_Kind_tuple_enter:
       string_builder_push_cstr(&sb, "t(");
-      string_builder_push_s64(&sb, node.length);
+      string_builder_push_i64(&sb, node.length);
     break;
     case Ast_Kind_tuple_leave:
       string_builder_push_cstr(&sb, ")t");
@@ -259,7 +259,7 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_cstr(&sb, "call");
     break;
     case Ast_Kind_int:
-      string_builder_push_s64(&sb, node.s64);
+      string_builder_push_i64(&sb, node.i64);
     break;
     case Ast_Kind_name:
       string_builder_push_cstr(&sb, cstr_from_istr(node.istr));
@@ -358,12 +358,12 @@ I32 parse_left_precedence(Ast_Kind kind) {
 
 void parse_stack_transfer_higher_precedence(Parser* parser, Ast_Kind kind) {
   while (!ast_is_empty(parser->stack)) {
-    Ast_Node* top = ast_top(parser->stack);
-    I32 on_stack_precedence  = parse_left_precedence(top->kind);
+    Ast_Node* top_node = ast_top(parser->stack);
+    I32 on_stack_precedence  = parse_left_precedence(top_node->kind);
     I32 on_stream_precedence = parse_right_precedence(kind);
     if (on_stack_precedence > on_stream_precedence) {
-      Ast_Node ast = ast_pop(&parser->stack);
-      ast_push(&parser->final, ast);
+      Ast_Node transfer = ast_pop(&parser->stack);
+      ast_push(&parser->final, transfer);
     }
     else {
       break;

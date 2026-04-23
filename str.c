@@ -143,7 +143,7 @@ void string_builder_push_cstr(String_Builder* sb, Cstr str) {
   }
 }
 
-void string_builder_push_s64(String_Builder* sb, I64 val) {
+void string_builder_push_i64(String_Builder* sb, I64 val) {
   C8 line_str[20];
   sprintf(line_str, "%li", val);
   string_builder_push_cstr(sb, line_str);

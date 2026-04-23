@@ -7,7 +7,7 @@ typedef struct {
   Token_Kind kind;
   Token_Flag flag;
   union {
-    I64  s64;
+    I64  i64;
     U64  value;
     Istr istr;
   };
@@ -110,7 +110,7 @@ Tokens lex_source(Cstr source, Token* buffer) {
         val = val*base + digit;
         lexer.stream++;
       }
-      token.s64 = val;
+      token.i64 = val;
     } break;
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
     case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
@@ -236,7 +236,7 @@ Cstr cstr_from_slice_token(Tokens slice, C8* buffer) {
       string_builder_push_cstr(&sb, str);
     } break;
     case Token_Kind_int:
-      string_builder_push_s64(&sb, token->s64);
+      string_builder_push_i64(&sb, token->i64);
     break;
     case Token_Kind_plus:
       string_builder_push_cstr(&sb, "+");
