@@ -3,30 +3,34 @@ typedef I32 Blockid;
 typedef I32 Funid;
 
 typedef enum {
+  Ir_Flag_unary  = 1 << 8,
+  Ir_Flag_binary = 1 << 9,
+} Ir_Flag;
+
+typedef enum {
   Ir_Kind_nop = 0,
 
-  Ir_Kind_int = 5,
+  Ir_Kind_int = Ast_Kind_int,
 
-  Ir_Kind_add = 32,
-  Ir_Kind_sub = 33,
-  Ir_Kind_mul = 34,
+  Ir_Kind_add = Ast_Kind_add,
+  Ir_Kind_sub = Ast_Kind_sub,
+  Ir_Kind_mul = Ast_Kind_mul,
+  Ir_Kind_neg = Ast_Kind_neg,
 
-  Ir_Kind_neg = 64,
+  Ir_Kind_load      = Ast_Kind_load,
+  Ir_Kind_ptr       = Ast_Kind_ptr,
+  Ir_Kind_store     = 128,
+  Ir_Kind_load_var  = 129,
+  Ir_Kind_store_var = 130,
 
-  Ir_Kind_load      = 65,
-  Ir_Kind_load_var  = 66,
-  Ir_Kind_store     = 67,
-  Ir_Kind_store_var = 68,
-  Ir_Kind_ptr       = 69,
+  Ir_Kind_record          = 131,
+  Ir_Kind_position_offset = 132,
+  Ir_Kind_position_update = 133,
+  Ir_Kind_name_offset     = 134,
+  Ir_Kind_name_update     = 135,
 
-  Ir_Kind_record          = 80,
-  Ir_Kind_position_offset = 81,
-  Ir_Kind_position_update = 82,
-  Ir_Kind_name_offset     = 83,
-  Ir_Kind_name_update     = 84,
-
-  Ir_Kind_fun  = 85,
-  Ir_Kind_call = 86,
+  Ir_Kind_fun  = 136,
+  Ir_Kind_call = 137,
 
 } Ir_Kind;
 
@@ -128,6 +132,12 @@ Irid irid_push_int(I64 i64) {
   return irid;
 }
 
+Irid irid_push_binary(Ir_Kind kind, Irid one, Irid two) {
+  Ir ir = { kind, .binary= { .one = one, .two = two } };
+  Irid irid = push(irgen.ir_stack, ir);
+  return irid;
+}
+
 Block* blockid_get(Blockid blockid) {
   return &irgen.blocks.base[blockid];
 }
@@ -192,23 +202,36 @@ Funs cfg_from_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer) 
   irgen.block_stack.base = xmalloc(ast.length * sizeof(Block));
   irgen.ir_stack.base    = xmalloc(ast.length * sizeof(Ir));
   irgen.irid_stack.base  = xmalloc(ast.length * sizeof(Irid));
+  irgen.fun_stack.length   = 0;
+  irgen.block_stack.length = 0;
+  irgen.ir_stack.length    = 0;
+  irgen.irid_stack.length  = 0;
   irgen.irid_nil = (Irid){ 0 };
   Ir nil = {0, {0}};
+  add(irgen.ir_stack, nil);
   add(irgen.irs, nil);
   for (Astid astid = {0}; astid.index < ast.length; astid.index++) {
     Ast_Node node = ast.nodes[astid.index];
+    Irid irid = irgen.irid_nil;
     switch (node.kind) {
     case Ast_Kind_source_enter: {
       fun_enter(astid);
     } break;
     case Ast_Kind_int: {
-      irid_push_int(node.i64);
+      irid = irid_push_int(node.i64);
+    } break;
+    case Ast_Kind_mul: 
+    case Ast_Kind_add: {
+      Irid two = pop(irgen.irid_stack);
+      Irid one = pop(irgen.irid_stack);
+      irid = irid_push_binary((Ir_Kind)node.kind, one, two);
     } break;
     case Ast_Kind_source_leave: {
       fun_leave();
     } break;
     default: assert(0);
     }
+    add(irgen.irid_stack, irid);
   }
   free(irgen.irid_stack.base);
   free(irgen.ir_stack.base);
@@ -240,7 +263,17 @@ Cstr cstr_from_cfg(Funs funs, C8* buffer) {
           string_builder_push_cstr(&sb, "int ");
           string_builder_push_i64(&sb, ir.i64);
         break;
-        default: assert(0);
+        case Ir_Kind_add: string_builder_push_cstr(&sb, "add "); break;
+        case Ir_Kind_mul: string_builder_push_cstr(&sb, "mul "); break;
+        default: {
+          assert(0);
+        } break;
+        }
+        if (ir.kind & Ir_Flag_binary) {
+          string_builder_push_cstr(&sb, "r");
+          string_builder_push_i64(&sb, ir.binary.one);
+          string_builder_push_cstr(&sb, " r");
+          string_builder_push_i64(&sb, ir.binary.two);
         }
       }
       switch (block.kind) {
@@ -291,7 +324,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1", "");
+  test("1 + 2*3", "");
 }
 
 #undef test

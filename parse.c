@@ -4,8 +4,8 @@ typedef enum {
 } Ast_Flag;
 
 typedef enum {
-  Ast_Kind_name = Token_Kind_name,
-  Ast_Kind_int  = Token_Kind_int,
+  Ast_Kind_name = Token_Kind_name & 0xff,
+  Ast_Kind_int  = Token_Kind_int & 0xff,
   Ast_Kind_add  = Token_Kind_plus  | Ast_Flag_binary,
   Ast_Kind_sub  = Token_Kind_minus | Ast_Flag_binary,
   Ast_Kind_mul  = Token_Kind_star  | Ast_Flag_binary,
@@ -514,7 +514,8 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
         ast_push_kind(&parser.stack, kind);
       } goto label_expression;
       case Token_Kind_int: case Token_Kind_name: {
-        Ast_Node ast = { .kind = (Ast_Kind)token.kind, .value = token.value };
+        Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
+        Ast_Node ast = { .kind = kind, .value = token.value };
         ast_push(&parser.final, ast);
       } goto label_infix_or_suffix;
       case Token_Kind_if: {
