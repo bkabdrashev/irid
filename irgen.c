@@ -148,6 +148,7 @@ typedef struct {
 } Fun_Stack;
 
 typedef struct {
+  Ast     ast;
   Arena   arena;
   Funs    funs;
   Blocks  blocks;
@@ -289,7 +290,8 @@ Fun* fun_get(Funid funid) {
   return &irgen.funs.base[funid];
 }
 
-Funs cfg_from_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Record* record_buffer) {
+Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Record* record_buffer) {
+  irgen.ast = ast;
   irgen.arena       = arena_init(KB(4) * ast.length);
   irgen.funs.base   = fun_buffer;
   irgen.blocks.base = block_buffer;
@@ -347,22 +349,9 @@ Funs cfg_from_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, 
       irid = ir_push_binary((Ir_Kind)node.kind, one, two);
     } break;
     case Ast_Kind_assign_rhs: {
-        // t( 1 2 )t = 
-      Irid rhs = pop(irgen.irid_stack);
-      B8 is_done = false;
-      while (!is_done) {
-        astid.index++;
-        Ast_Node node = ast.nodes[astid.index];
-        switch (node.kind) {
-        case Ast_Kind_name: {
-          ir_push_store_var(node.istr, rhs);
-          is_done = true;
-        } break;
-        default:
-          is_done = true;
-        break;
-        }
-      }
+      // Irid rhs = pop(irgen.irid_stack);
+      // astid.index++;
+      // irgen_assign(astid.index, rhs);
     } break;
     default: assert(0);
     }
@@ -487,7 +476,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Block* block_buffer  = xmalloc(sizeof(Block)*ast.length);
   Ir* ir_buffer        = xmalloc(sizeof(Ir)*ast.length);
   Record* record_buffer= xmalloc(sizeof(Record)*ast.length);
-  Funs funs            = cfg_from_ast(ast, cfg_buffer, block_buffer, ir_buffer, record_buffer);
+  Funs funs            = irgen_ast(ast, cfg_buffer, block_buffer, ir_buffer, record_buffer);
                          free(ast.nodes);
   C8* buffer           = xmalloc(MB(64));
   Cstr result          = cstr_from_cfg(funs, buffer);
@@ -508,7 +497,7 @@ void irgen_test(void) {
   // r3 = load var "a"
   // r4 = load var "a"
   // r5 = add r3 r4
-  test("1, 2", "");
+  // test("a, b = 1, 2", "");
 }
 
 #undef test

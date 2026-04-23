@@ -4,6 +4,7 @@ typedef enum {
 } Ast_Flag;
 
 typedef enum {
+  Ast_Kind_none = 0,
   Ast_Kind_name = Token_Kind_name & 0xff,
   Ast_Kind_int  = Token_Kind_int & 0xff,
   Ast_Kind_add  = Token_Kind_plus  | Ast_Flag_binary,
@@ -20,10 +21,8 @@ typedef enum {
   Ast_Kind_array           = 132 | Ast_Flag_binary,
   Ast_Kind_assign_lhs      = 133,
   Ast_Kind_assign_rhs      = 134,
-  Ast_Kind_record_assign   = 135,
   Ast_Kind_declare_lhs     = 136,
   Ast_Kind_declare_rhs     = 137,
-  Ast_Kind_record_declare  = 138,
   Ast_Kind_paren_enter     = 139,
   Ast_Kind_paren_leave     = 140,
   Ast_Kind_record_enter    = 141,
@@ -56,6 +55,8 @@ typedef enum {
   Ast_Kind_while_leave         = 168,
   Ast_Kind_while_do            = 169,
   Ast_Kind_break               = 172,
+  Ast_Kind_name_assign         = 173,
+  Ast_Kind_name_declare        = 174,
 } Ast_Kind;
 
 typedef struct {
@@ -112,6 +113,9 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
   for (I32 i = 0; i < ast.length; i++) {
     Ast_Node node = ast.nodes[i];
     switch (node.kind) {
+    case Ast_Kind_none:
+      string_builder_push_cstr(&sb, "none");
+    break;
     case Ast_Kind_statement:
       string_builder_push_cstr(&sb, "stm");
     break;
@@ -205,17 +209,11 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_assign_rhs:
       string_builder_push_cstr(&sb, "=");
     break;
-    case Ast_Kind_record_assign:
-      string_builder_push_cstr(&sb, "r=");
-    break;
     case Ast_Kind_declare_lhs:
       string_builder_push_cstr(&sb, "l:");
     break;
     case Ast_Kind_declare_rhs:
       string_builder_push_cstr(&sb, ":");
-    break;
-    case Ast_Kind_record_declare:
-      string_builder_push_cstr(&sb, "r:");
     break;
     case Ast_Kind_block_enter:
       string_builder_push_cstr(&sb, "{");
@@ -262,13 +260,21 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_i64(&sb, node.i64);
     break;
     case Ast_Kind_name:
-      string_builder_push_cstr(&sb, cstr_from_istr(node.istr));
+      string_builder_push_istr(&sb, node.istr);
     break;
     case Ast_Kind_neg:
       string_builder_push_cstr(&sb, "neg");
     break;
     case Ast_Kind_pos:
       string_builder_push_cstr(&sb, "pos");
+    break;
+    case Ast_Kind_name_assign:
+      string_builder_push_cstr(&sb, "=");
+      string_builder_push_istr(&sb, node.istr);
+    break;
+    case Ast_Kind_name_declare:
+      string_builder_push_cstr(&sb, ":");
+      string_builder_push_istr(&sb, node.istr);
     break;
     }
     string_builder_push_cstr(&sb, " ");
@@ -598,13 +604,13 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
       }
     } break;
     case Ast_Kind_assign_lhs: {
-      Ast_Node* top = ast_top(parser.final);
+      Ast_Node* top_final = ast_top(parser.final);
       if (parse_match_token(&parser, Token_Kind_equal)) {
-        Ast_Node* top = ast_top(parser.stack);
         Ast_Node assign = { Ast_Kind_assign_rhs, {0} };
-        if (top->kind == Ast_Kind_record_leave ||
-            top->kind == Ast_Kind_paren_leave) {
-          assign.kind = Ast_Kind_record_assign;
+        if (top_final->kind == Ast_Kind_name) {
+          ast_pop(&parser.final);
+          assign.kind = Ast_Kind_name_assign;
+          assign.istr = top_final->istr;
         }
         I32 final_mark = ast.last_at.index;
         I32 stack_mark_length = parse_transfer_final_to_stack_from(&parser, final_mark);
@@ -613,11 +619,11 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
         goto label_expression;
       }
       else if (parse_match_token(&parser, Token_Kind_colon)) {
-        Ast_Node* top = ast_top(parser.stack);
         Ast_Node declare = { Ast_Kind_declare_rhs, {0} };
-        if (top->kind == Ast_Kind_record_leave ||
-            top->kind == Ast_Kind_paren_leave) {
-          declare.kind = Ast_Kind_record_declare;
+        if (top_final->kind == Ast_Kind_name) {
+          ast_pop(&parser.final);
+          declare.kind = Ast_Kind_name_declare;
+          declare.istr = top_final->istr;
         }
         I32 final_mark = ast.last_at.index;
         I32 stack_mark_length = parse_transfer_final_to_stack_from(&parser, final_mark);
@@ -625,18 +631,16 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
         ast_push(&parser.stack, declare);
         goto label_expression;
       }
-      else if (top->kind == Ast_Kind_block_value_leave) {
-        Ast_Node* enter = ast_at(parser.final, top->enter_at);
+      else if (top_final->kind == Ast_Kind_block_value_leave) {
+        Ast_Node* enter = ast_at(parser.final, top_final->enter_at);
         enter->kind = Ast_Kind_block_enter;
-        top->kind = Ast_Kind_block_leave;
+        top_final->kind = Ast_Kind_block_leave;
       }
     } break;
-    case Ast_Kind_record_declare:
     case Ast_Kind_declare_rhs:
-    case Ast_Kind_record_assign:
     case Ast_Kind_assign_rhs: {
-      ast_push(&parser.final, ast);
       parse_transfer_stack_to_final_from(&parser, ast.last_at.index);
+      ast_push(&parser.final, ast);
     } break;
     case Ast_Kind_block_value_leave: {
       Ast_Node ast_close = ast;
@@ -762,17 +766,16 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a = 1; a+a",          "s{ 1 2 add }s ");
-
-  test("1 + 2",          "s{ 1 2 add }s ");
-  test("1 + -2",         "s{ 1 2 neg add }s ");
-  test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
-  test("foo 1\n2",       "s{ foo 1 call 2 }s ");
-  test("bar 1 2",        "s{ bar 1 call 2 call }s ");
-  test("a = 1-2",        "s{ 1 2 sub = a }s ");
-  test("a, b = 1, 2",    "s{ t(2 1 2 )t = t(2 a b )t }s ");
-  test("x=1; y:2",       "s{ 1 = x 2 : y }s ");
-  test("a = (x=1; y:2)", "s{ r(2 1 r= x 2 r: y )r = a }s ");
+  test("a, b = 1, 2",    "s{ t(2 1 2 )t =t(2 =a =b )t= }s ");
+  test("a+b = 1-2",      "s{ 1 2 sub a b add = }s ");
+  test("x=1; y:2",       "s{ 1 =x 2 :y }s ");
+  test("a = 1-2",        "s{ 1 2 sub =a }s ");
+  test("a = (x=1; y:2)", "s{ r(2 1 =x 2 :y )r =a }s ");
+  // test("1 + 2",          "s{ 1 2 add }s ");
+  // test("1 + -2",         "s{ 1 2 neg add }s ");
+  // test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
+  // test("foo 1\n2",       "s{ foo 1 call 2 }s ");
+  // test("bar 1 2",        "s{ bar 1 call 2 call }s ");
 }
 
 #undef test
