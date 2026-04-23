@@ -28,35 +28,38 @@ typedef enum {
   Ast_Kind_record_enter    = 141,
   Ast_Kind_record_leave    = 142,
   Ast_Kind_tuple_enter     = 143,
-  Ast_Kind_tuple_leave     = 144,
-  Ast_Kind_source_enter    = 145,
-  Ast_Kind_source_leave    = 146,
-  Ast_Kind_block_enter     = 147,
-  Ast_Kind_block_leave     = 148,
-  Ast_Kind_block_value_enter = 149,
-  Ast_Kind_block_value_leave = 150,
-  Ast_Kind_statement       = 151,
-  Ast_Kind_expression      = 152,
-  Ast_Kind_infix_or_suffix = 153,
-  Ast_Kind_call            = 154 | Ast_Flag_binary,
-  Ast_Kind_if_enter            = 155,
-  Ast_Kind_if_leave            = 156,
-  Ast_Kind_if_do               = 157,
-  Ast_Kind_if_else             = 158,
-  Ast_Kind_if_leave_else_enter = 159,
-  Ast_Kind_else_leave          = 160,
-  Ast_Kind_if_value_do         = 161,
-  Ast_Kind_if_value_else       = 162,
-  Ast_Kind_else_value_leave    = 163,
-  Ast_Kind_fun_enter           = 164,
-  Ast_Kind_fun_leave           = 165,
-  Ast_Kind_return              = 166,
-  Ast_Kind_while_enter         = 167,
-  Ast_Kind_while_leave         = 168,
-  Ast_Kind_while_do            = 169,
-  Ast_Kind_break               = 172,
-  Ast_Kind_name_assign         = 173,
-  Ast_Kind_name_declare        = 174,
+  Ast_Kind_tuple_split     = 144,
+  Ast_Kind_tuple_leave     = 145,
+  Ast_Kind_source_enter    = 146,
+  Ast_Kind_source_leave    = 147,
+  Ast_Kind_block_enter     = 148,
+  Ast_Kind_block_leave     = 149,
+  Ast_Kind_block_value_enter = 150,
+  Ast_Kind_block_value_leave = 151,
+  Ast_Kind_statement       = 152,
+  Ast_Kind_expression      = 153,
+  Ast_Kind_infix_or_suffix = 154,
+  Ast_Kind_call            = 155 | Ast_Flag_binary,
+  Ast_Kind_if_enter            = 156,
+  Ast_Kind_if_leave            = 157,
+  Ast_Kind_if_do               = 158,
+  Ast_Kind_if_else             = 159,
+  Ast_Kind_if_leave_else_enter = 160,
+  Ast_Kind_else_leave          = 161,
+  Ast_Kind_if_value_do         = 162,
+  Ast_Kind_if_value_else       = 163,
+  Ast_Kind_else_value_leave    = 164,
+  Ast_Kind_fun_enter           = 165,
+  Ast_Kind_fun_leave           = 166,
+  Ast_Kind_return              = 167,
+  Ast_Kind_while_enter         = 168,
+  Ast_Kind_while_leave         = 169,
+  Ast_Kind_while_do            = 170,
+  Ast_Kind_break               = 173,
+  Ast_Kind_name_assign         = 174,
+  Ast_Kind_name_declare        = 175,
+  Ast_Kind_tuple_assign_enter  = 176,
+  Ast_Kind_tuple_assign_leave  = 177,
 } Ast_Kind;
 
 typedef struct {
@@ -67,6 +70,10 @@ typedef struct {
   Ast_Kind kind;
   union {
     U64   value;
+    struct {
+      I32   position;
+      Astid next;
+    };
     struct {
       Astid enter_at;
       Astid last_at;
@@ -250,6 +257,9 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_cstr(&sb, "t(");
       string_builder_push_i64(&sb, node.length);
     break;
+    case Ast_Kind_tuple_split:
+      string_builder_push_cstr(&sb, ",");
+    break;
     case Ast_Kind_tuple_leave:
       string_builder_push_cstr(&sb, ")t");
     break;
@@ -275,6 +285,13 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_name_declare:
       string_builder_push_cstr(&sb, ":");
       string_builder_push_istr(&sb, node.istr);
+    break;
+    case Ast_Kind_tuple_assign_enter:
+      string_builder_push_cstr(&sb, "=t(");
+      string_builder_push_i64(&sb, node.length);
+    break;
+    case Ast_Kind_tuple_assign_leave:
+      string_builder_push_cstr(&sb, ")t=");
     break;
     }
     string_builder_push_cstr(&sb, " ");
@@ -584,6 +601,8 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
         Ast_Node* top = ast_top(parser.stack);
         if (top->kind == Ast_Kind_tuple_leave) {
           Ast_Node* open = ast_at(parser.final, top->enter_at);
+          Ast_Node split = { Ast_Kind_tuple_split, .position = open->length };
+          ast_push(&parser.final, split);
           open->length++;
         }
         else {

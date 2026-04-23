@@ -348,10 +348,16 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Irid one = pop(irgen.irid_stack);
       irid = ir_push_binary((Ir_Kind)node.kind, one, two);
     } break;
-    case Ast_Kind_assign_rhs: {
-      // Irid rhs = pop(irgen.irid_stack);
-      // astid.index++;
-      // irgen_assign(astid.index, rhs);
+    case Ast_Kind_name_assign: {
+      Irid one = pop(irgen.irid_stack);
+      irid = ir_push_store_var(node.istr, one);
+    } break;
+    case Ast_Kind_tuple_assign_enter: {
+      Irid one = pop(irgen.irid_stack);
+      irid = ir_push_position(one, 0);
+    } break;
+    case Ast_Kind_tuple_assign_leave: {
+      pop(irgen.irid_stack);
     } break;
     default: assert(0);
     }
@@ -497,7 +503,8 @@ void irgen_test(void) {
   // r3 = load var "a"
   // r4 = load var "a"
   // r5 = add r3 r4
-  // test("a, b = 1, 2", "");
+  // s{ t(2 1 2 )t =t(2 =a =b )t= }s 
+  test("a, b = 1, 2", "");
 }
 
 #undef test
