@@ -15,6 +15,7 @@ typedef enum {
   Ir_Kind_add = Ast_Kind_add,
   Ir_Kind_sub = Ast_Kind_sub,
   Ir_Kind_mul = Ast_Kind_mul,
+
   Ir_Kind_neg = Ast_Kind_neg,
 
   Ir_Kind_load      = Ast_Kind_load,
@@ -132,8 +133,14 @@ Irid irid_push_int(I64 i64) {
   return irid;
 }
 
+Irid irid_push_unary(Ir_Kind kind, Irid one) {
+  Ir ir = { kind, .unary = { .one = one } };
+  Irid irid = push(irgen.ir_stack, ir);
+  return irid;
+}
+
 Irid irid_push_binary(Ir_Kind kind, Irid one, Irid two) {
-  Ir ir = { kind, .binary= { .one = one, .two = two } };
+  Ir ir = { kind, .binary = { .one = one, .two = two } };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -220,6 +227,10 @@ Funs cfg_from_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer) 
     case Ast_Kind_int: {
       irid = irid_push_int(node.i64);
     } break;
+    case Ast_Kind_neg: {
+      Irid one = pop(irgen.irid_stack);
+      irid = irid_push_unary((Ir_Kind)node.kind, one);
+    } break;
     case Ast_Kind_mul: 
     case Ast_Kind_add: {
       Irid two = pop(irgen.irid_stack);
@@ -265,6 +276,8 @@ Cstr cstr_from_cfg(Funs funs, C8* buffer) {
         break;
         case Ir_Kind_add: string_builder_push_cstr(&sb, "add "); break;
         case Ir_Kind_mul: string_builder_push_cstr(&sb, "mul "); break;
+        case Ir_Kind_sub: string_builder_push_cstr(&sb, "sub "); break;
+        case Ir_Kind_neg: string_builder_push_cstr(&sb, "neg "); break;
         default: {
           assert(0);
         } break;
@@ -275,16 +288,20 @@ Cstr cstr_from_cfg(Funs funs, C8* buffer) {
           string_builder_push_cstr(&sb, " r");
           string_builder_push_i64(&sb, ir.binary.two);
         }
+        else if (ir.kind & Ir_Flag_unary) {
+          string_builder_push_cstr(&sb, "r");
+          string_builder_push_i64(&sb, ir.unary.one);
+        }
       }
       switch (block.kind) {
       case Block_Kind_none:
       break;
       case Block_Kind_jump:
-        string_builder_push_cstr(&sb, "\n  jump .");
+        string_builder_push_cstr(&sb, "\n    jump .");
         string_builder_push_i64(&sb, block.jump.blockid);
       break;
       case Block_Kind_branch:
-        string_builder_push_cstr(&sb, "\n  if r");
+        string_builder_push_cstr(&sb, "\n    if r");
         string_builder_push_i64(&sb, block.branch.cond);
         string_builder_push_cstr(&sb, " then .");
         string_builder_push_i64(&sb, block.branch.nez.blockid);
@@ -324,7 +341,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1 + 2*3", "");
+  test("1 + -2*3", "");
 }
 
 #undef test
