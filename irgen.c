@@ -46,7 +46,7 @@ struct Ir {
 };
 
 typedef struct {
-  Irid  first;
+  Irid* base;
   I32   length;
 } Irids;
 
@@ -70,7 +70,8 @@ typedef struct Block Block;
 struct Block {
   Block_Kind kind;
   I32 pred_count;
-  Irids irids;
+  Irid entryid;
+  Irid leaveid;
   union {
     Jump   jump;
     Branch branch;
@@ -110,11 +111,13 @@ typedef struct {
 
 typedef struct {
   Funs    funs;
-  Fun_Stack fun_stack;
   Blocks  blocks;
   Irs     irs;
-  Irs     ir_stack;
   Irid    irid_nil;
+  Fun_Stack fun_stack;
+  Irs       ir_stack;
+  Irids     irid_stack;
+  Blocks    block_stack;
 } Irgen;
 
 Irgen irgen = {};
@@ -131,11 +134,11 @@ Block* blockid_get(Blockid blockid) {
 
 Blockid block_new() {
   Fun* fun = top(irgen.fun_stack);
-  Blockid blockid = irgen.blocks.length;
-  Block* block = &new(irgen.blocks);
+  Blockid blockid = irgen.block_stack.length;
+  Block* block = &new(irgen.block_stack);
   fun->leaveid = blockid;
   memset(block, 0, sizeof(Block));
-  block->irids.first = irgen.ir_stack.length;
+  block->entryid = irgen.ir_stack.length;
   return blockid;
 }
 
@@ -150,17 +153,31 @@ Funid fun_enter(Astid astid) {
 
 void fun_leave() {
   Fun* fun = pop(irgen.fun_stack);
-  Block* block = &get(irgen.blocks, fun->leaveid);
-  Irid first = irgen.irs.length;
-  for (Irid i = block->irids.first; i < irgen.ir_stack.length; i++) {
-    Ir ir = get(irgen.ir_stack, i);
-    add(irgen.irs, ir);
+
+  {
+    Blockid first = irgen.blocks.length;
+    for (Blockid i = fun->entryid; i <= fun->leaveid; i++) {
+      Block block = get(irgen.block_stack, i);
+      add(irgen.blocks, block);
+    }
+    fun->entryid = first;
+    fun->leaveid = irgen.blocks.length;
   }
-  block->kind = Block_Kind_jump;
-  block->irids.first  = first;
-  block->irids.length = irgen.irs.length - first;
-  Block last = { Block_Kind_none, .pred_count = 0, .irids = {0, 0}, .jump = {0} };
-  block->jump.blockid = push(irgen.blocks, last);
+
+  {
+    Block* block = &get(irgen.blocks, fun->leaveid-1);
+    Irid first = irgen.irs.length;
+    for (Irid i = block->entryid; i < irgen.ir_stack.length; i++) {
+      Ir ir = get(irgen.ir_stack, i);
+      add(irgen.irs, ir);
+    }
+    block->kind = Block_Kind_jump;
+    block->entryid = first;
+    block->leaveid = irgen.irs.length;
+    Block last = { Block_Kind_none, .pred_count = 0, .entryid = 0, .leaveid = 0, .jump = {0} };
+    block->jump.blockid = push(irgen.blocks, last);
+    fun->leaveid = irgen.blocks.length;
+  }
 }
 
 Fun* fun_get(Funid funid) {
@@ -171,9 +188,11 @@ Funs cfg_from_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer) 
   irgen.funs.base   = fun_buffer;
   irgen.blocks.base = block_buffer;
   irgen.irs.base    = ir_buffer;
-  irgen.ir_stack.base  = xmalloc(ast.length * sizeof(Ir));
-  irgen.fun_stack.base = xmalloc(ast.length * sizeof(Fun*));
-  irgen.irid_nil    = (Irid){ 0 };
+  irgen.fun_stack.base   = xmalloc(ast.length * sizeof(Fun*));
+  irgen.block_stack.base = xmalloc(ast.length * sizeof(Block));
+  irgen.ir_stack.base    = xmalloc(ast.length * sizeof(Ir));
+  irgen.irid_stack.base  = xmalloc(ast.length * sizeof(Irid));
+  irgen.irid_nil = (Irid){ 0 };
   Ir nil = {0, {0}};
   add(irgen.irs, nil);
   for (Astid astid = {0}; astid.index < ast.length; astid.index++) {
@@ -191,7 +210,9 @@ Funs cfg_from_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer) 
     default: assert(0);
     }
   }
+  free(irgen.irid_stack.base);
   free(irgen.ir_stack.base);
+  free(irgen.block_stack.base);
   free(irgen.fun_stack.base);
   return irgen.funs;
 }
@@ -204,39 +225,40 @@ Cstr cstr_from_cfg(Funs funs, C8* buffer) {
     string_builder_push_i64(&sb,   f);
     string_builder_push_cstr(&sb, " {");
 
-    Block block = irgen.blocks.base[fun.entryid];
-    string_builder_push_cstr(&sb, "\n  .");
-    string_builder_push_i64(&sb, fun.entryid);
-    string_builder_push_cstr(&sb, ":");
-    for (Irid irid = block.irids.first; irid < block.irids.first + block.irids.length; irid++) {
-      Ir ir = irgen.irs.base[irid];
-      string_builder_push_cstr(&sb, "\n    r");
-      string_builder_push_i64(&sb, irid);
-      string_builder_push_cstr(&sb, " = ");
-      switch (ir.kind) {
-      case Ir_Kind_int:
-        string_builder_push_cstr(&sb, "int ");
-        string_builder_push_i64(&sb, ir.i64);
-      break;
-      default: assert(0);
+    for (Blockid b = fun.entryid; b < fun.leaveid; b++) {
+      Block block = get(irgen.blocks, b);
+      string_builder_push_cstr(&sb, "\n  .");
+      string_builder_push_i64(&sb, b);
+      string_builder_push_cstr(&sb, ":");
+      for (Irid irid = block.entryid; irid < block.leaveid; irid++) {
+        Ir ir = irgen.irs.base[irid];
+        string_builder_push_cstr(&sb, "\n    r");
+        string_builder_push_i64(&sb, irid);
+        string_builder_push_cstr(&sb, " = ");
+        switch (ir.kind) {
+        case Ir_Kind_int:
+          string_builder_push_cstr(&sb, "int ");
+          string_builder_push_i64(&sb, ir.i64);
+        break;
+        default: assert(0);
+        }
       }
-    }
-    switch (block.kind) {
-    case Block_Kind_none:
-      string_builder_push_cstr(&sb, "\n  end");
-    break;
-    case Block_Kind_jump:
-      string_builder_push_cstr(&sb, "\n  jump .");
-      string_builder_push_i64(&sb, block.jump.blockid);
-    break;
-    case Block_Kind_branch:
-      string_builder_push_cstr(&sb, "\n  if r");
-      string_builder_push_i64(&sb, block.branch.cond);
-      string_builder_push_cstr(&sb, " then .");
-      string_builder_push_i64(&sb, block.branch.nez.blockid);
-      string_builder_push_cstr(&sb, " else .");
-      string_builder_push_i64(&sb, block.branch.eqz.blockid);
-    break;
+      switch (block.kind) {
+      case Block_Kind_none:
+      break;
+      case Block_Kind_jump:
+        string_builder_push_cstr(&sb, "\n  jump .");
+        string_builder_push_i64(&sb, block.jump.blockid);
+      break;
+      case Block_Kind_branch:
+        string_builder_push_cstr(&sb, "\n  if r");
+        string_builder_push_i64(&sb, block.branch.cond);
+        string_builder_push_cstr(&sb, " then .");
+        string_builder_push_i64(&sb, block.branch.nez.blockid);
+        string_builder_push_cstr(&sb, " else .");
+        string_builder_push_i64(&sb, block.branch.eqz.blockid);
+      break;
+      }
     }
 
     string_builder_push_cstr(&sb, "\n  ret r");
