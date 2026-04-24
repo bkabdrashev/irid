@@ -21,7 +21,7 @@ typedef enum {
 
   Ir_Kind_load      = Ast_Kind_load,
   Ir_Kind_ptr       = Ast_Kind_ptr,
-  Ir_Kind_store     = 128,
+  Ir_Kind_store     = (Ast_Kind_load & 0xff) | Ir_Flag_binary,
   Ir_Kind_load_var  = 129,
   Ir_Kind_store_var = 130,
 
@@ -300,6 +300,100 @@ Fun* fun_get(Funid funid) {
   return &irgen.funs.base[funid];
 }
 
+void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
+  string_builder_push_cstr(sb, "\n    r");
+  string_builder_push_i64(sb, irid);
+  string_builder_push_cstr(sb, " = ");
+  switch (ir.kind) {
+  case Ir_Kind_nop:
+    string_builder_push_cstr(sb, "nop");
+  break;
+  case Ir_Kind_int:
+    string_builder_push_cstr(sb, "int ");
+    string_builder_push_i64(sb, ir.i64);
+  break;
+  case Ir_Kind_load_var:
+    string_builder_push_cstr(sb, "load var ");
+    string_builder_push_istr(sb, ir.istr);
+  break;
+  case Ir_Kind_store_var:
+    string_builder_push_cstr(sb, "store var ");
+    string_builder_push_istr(sb, ir.istr);
+    string_builder_push_cstr(sb, " = ");
+    string_builder_push_cstr(sb, "r");
+    string_builder_push_i64(sb, ir.store_var.irid);
+  break;
+  case Ir_Kind_position_offset:
+    string_builder_push_cstr(sb, "position offset ");
+    string_builder_push_cstr(sb, "r");
+    string_builder_push_i64(sb, ir.position.of);
+    string_builder_push_cstr(sb, ".");
+    string_builder_push_i64(sb, ir.position.at);
+  break;
+  case Ir_Kind_record:
+    string_builder_push_cstr(sb, "record");
+    for (I32 i = 0; i < recordid_length(ir.recordid); i++) {
+      Field field = recordid_get_by_position(ir.recordid, i);
+      if (field.name.index) {
+        string_builder_push_istr(sb, field.name);
+        if (field.declared != irgen.irid_nil) {
+          string_builder_push_cstr(sb, " : ");
+          string_builder_push_cstr(sb, "r");
+          string_builder_push_i64(sb, field.declared);
+        }
+        if (field.assigned != irgen.irid_nil) {
+          string_builder_push_cstr(sb, " = ");
+          string_builder_push_cstr(sb, "r");
+          string_builder_push_i64(sb, field.assigned);
+        }
+      }
+      else {
+        string_builder_push_cstr(sb, " r");
+        string_builder_push_i64(sb, field.assigned);
+      }
+    }
+  break;
+  case Ir_Kind_add: string_builder_push_cstr(sb, "add "); break;
+  case Ir_Kind_mul: string_builder_push_cstr(sb, "mul "); break;
+  case Ir_Kind_sub: string_builder_push_cstr(sb, "sub "); break;
+  case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
+  case Ir_Kind_load: string_builder_push_cstr(sb, "load "); break;
+  case Ir_Kind_ptr:  string_builder_push_cstr(sb, "ptr "); break;
+  case Ir_Kind_store: string_builder_push_cstr(sb, "store "); break;
+  default: {
+    assert(0);
+  } break;
+  }
+  if (ir.kind & Ir_Flag_binary) {
+    string_builder_push_cstr(sb, "r");
+    string_builder_push_i64(sb, ir.binary.one);
+    string_builder_push_cstr(sb, " r");
+    string_builder_push_i64(sb, ir.binary.two);
+  }
+  else if (ir.kind & Ir_Flag_unary) {
+    string_builder_push_cstr(sb, "r");
+    string_builder_push_i64(sb, ir.unary.one);
+  }
+}
+
+void irgen_print() {
+  C8 buf[1024];
+  String_Builder sb = string_builder_begin(buf);
+  printf("ir_stack:");
+  for (I32 i = 0; i < irgen.ir_stack.length; i++) {
+    Ir ir = get(irgen.ir_stack, i);
+    string_builder_push_ir(&sb, i, ir);
+  }
+  Cstr cstr = string_builder_end(&sb);
+  printf("%s\n", cstr);
+  printf("irid_stack:");
+  for (I32 i = 0; i < irgen.irid_stack.length; i++) {
+    Irid irid = get(irgen.irid_stack, i);
+    printf(" r%d", irid);
+  }
+  printf("\n");
+}
+
 Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Record* record_buffer) {
   irgen.ast = ast;
   irgen.arena       = arena_init(KB(4) * ast.length);
@@ -320,8 +414,8 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
   Ir nil = {0, {0}};
   add(irgen.ir_stack, nil);
   add(irgen.irs, nil);
-  for (Astid astid = {0}; astid.index < ast.length; astid.index++) {
-    Ast_Node node = ast.nodes[astid.index];
+  for (Astid astid = {0}; astid < ast.length; astid++) {
+    Ast_Node node = get(ast, astid);
     Irid irid = irgen.irid_nil;
     switch (node.kind) {
     case Ast_Kind_source_enter: {
@@ -334,44 +428,55 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Recordid tuple = recordid_new(node.length);
       add(irgen.recordid_stack, tuple);
     } break;
+    case Ast_Kind_tuple_split: {
+      Recordid tuple = top(irgen.recordid_stack);
+      Irid val = pop(irgen.irid_stack);
+      recordid_push_position(tuple, node.position, val);
+    } break;
     case Ast_Kind_tuple_leave: {
       Recordid tuple = pop(irgen.recordid_stack);
-      for (I32 i = recordid_length(tuple)-1; i >= 0; i--) {
-        Irid val = pop(irgen.irid_stack);
-        recordid_push_position(tuple, i, val);
-      }
       irid = ir_push_record(tuple);
+      add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_int: {
       irid = ir_push_int(node.i64);
+      add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_name: {
       irid = ir_push_load_var(node.istr);
+      add(irgen.irid_stack, irid);
     } break;
+    case Ast_Kind_ptr: 
+    case Ast_Kind_load: 
     case Ast_Kind_neg: {
       Irid one = pop(irgen.irid_stack);
       irid = ir_push_unary((Ir_Kind)node.kind, one);
+      add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_mul: 
     case Ast_Kind_add: {
       Irid two = pop(irgen.irid_stack);
       Irid one = pop(irgen.irid_stack);
       irid = ir_push_binary((Ir_Kind)node.kind, one, two);
+      add(irgen.irid_stack, irid);
     } break;
-    case Ast_Kind_name_assign: {
-      Irid one = pop(irgen.irid_stack);
-      irid = ir_push_store_var(node.istr, one);
+    case Ast_Kind_assign_leave: {
+      Irid lhs = pop(irgen.irid_stack);
+      Irid rhs = pop(irgen.irid_stack);
+      Ir* ir = &get(irgen.ir_stack, lhs);
+      if (ir->kind == Ir_Kind_load_var) {
+        ir->kind = Ir_Kind_store_var;
+        ir->store_var.irid = rhs;
+      }
+      else if (ir->kind == Ir_Kind_load) {
+        ir->kind = Ir_Kind_store;
+        ir->binary.two = rhs;
+      }
     } break;
-    case Ast_Kind_tuple_assign_enter: {
-      Irid one = pop(irgen.irid_stack);
-      irid = ir_push_position_offset(one, 0);
-    } break;
-    case Ast_Kind_tuple_assign_leave: {
-      del(irgen.irid_stack);
-    } break;
+    case Ast_Kind_paren_leave: break;
+    case Ast_Kind_paren_enter: break;
     default: assert(0);
     }
-    add(irgen.irid_stack, irid);
   }
   free(irgen.recordid_stack.base);
   free(irgen.irid_stack.base);
@@ -396,66 +501,7 @@ Cstr cstr_from_cfg(Funs funs, C8* buffer) {
       string_builder_push_cstr(&sb, ":");
       for (Irid irid = block.entryid; irid < block.leaveid; irid++) {
         Ir ir = irgen.irs.base[irid];
-        string_builder_push_cstr(&sb, "\n    r");
-        string_builder_push_i64(&sb, irid);
-        string_builder_push_cstr(&sb, " = ");
-        switch (ir.kind) {
-        case Ir_Kind_int:
-          string_builder_push_cstr(&sb, "int ");
-          string_builder_push_i64(&sb, ir.i64);
-        break;
-        case Ir_Kind_load_var:
-          string_builder_push_cstr(&sb, "load var ");
-          string_builder_push_istr(&sb, ir.istr);
-        break;
-        case Ir_Kind_store_var:
-          string_builder_push_cstr(&sb, "store var ");
-          string_builder_push_istr(&sb, ir.istr);
-          string_builder_push_cstr(&sb, " = ");
-          string_builder_push_cstr(&sb, "r");
-          string_builder_push_i64(&sb, ir.store_var.irid);
-        break;
-        case Ir_Kind_record:
-          string_builder_push_cstr(&sb, "record");
-          for (I32 i = 0; i < recordid_length(ir.recordid); i++) {
-            Field field = recordid_get_by_position(ir.recordid, i);
-            if (field.name.index) {
-              string_builder_push_istr(&sb, field.name);
-              if (field.declared != irgen.irid_nil) {
-                string_builder_push_cstr(&sb, " : ");
-                string_builder_push_cstr(&sb, "r");
-                string_builder_push_i64(&sb, field.declared);
-              }
-              if (field.assigned != irgen.irid_nil) {
-                string_builder_push_cstr(&sb, " = ");
-                string_builder_push_cstr(&sb, "r");
-                string_builder_push_i64(&sb, field.assigned);
-              }
-            }
-            else {
-              string_builder_push_cstr(&sb, " r");
-              string_builder_push_i64(&sb, field.assigned);
-            }
-          }
-        break;
-        case Ir_Kind_add: string_builder_push_cstr(&sb, "add "); break;
-        case Ir_Kind_mul: string_builder_push_cstr(&sb, "mul "); break;
-        case Ir_Kind_sub: string_builder_push_cstr(&sb, "sub "); break;
-        case Ir_Kind_neg: string_builder_push_cstr(&sb, "neg "); break;
-        default: {
-          assert(0);
-        } break;
-        }
-        if (ir.kind & Ir_Flag_binary) {
-          string_builder_push_cstr(&sb, "r");
-          string_builder_push_i64(&sb, ir.binary.one);
-          string_builder_push_cstr(&sb, " r");
-          string_builder_push_i64(&sb, ir.binary.two);
-        }
-        else if (ir.kind & Ir_Flag_unary) {
-          string_builder_push_cstr(&sb, "r");
-          string_builder_push_i64(&sb, ir.unary.one);
-        }
+        string_builder_push_ir(&sb, irid, ir);
       }
       switch (block.kind) {
       case Block_Kind_none:
@@ -493,7 +539,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Ir* ir_buffer        = xmalloc(sizeof(Ir)*ast.length);
   Record* record_buffer= xmalloc(sizeof(Record)*ast.length);
   Funs funs            = irgen_ast(ast, cfg_buffer, block_buffer, ir_buffer, record_buffer);
-                         free(ast.nodes);
+                         free(ast.base);
   C8* buffer           = xmalloc(MB(64));
   Cstr result          = cstr_from_cfg(funs, buffer);
   free(cfg_buffer);
@@ -514,7 +560,7 @@ void irgen_test(void) {
   // r4 = load var "a"
   // r5 = add r3 r4
   // s{ t(2 1 2 )t =t(2 =a =b )t= }s 
-  test("a, b = 1, 2", "");
+  // test("a@ = 1, 2", "");
 }
 
 #undef test

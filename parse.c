@@ -1,7 +1,6 @@
 typedef enum {
   Ast_Flag_unary  = 1 << 8,
   Ast_Flag_binary = 1 << 9,
-  Ast_Flag_no_assign = 1 << 10,
 } Ast_Flag;
 
 typedef enum {
@@ -18,22 +17,20 @@ typedef enum {
   Ast_Kind_load            = 128 | Ast_Flag_unary,
   Ast_Kind_subscript_close = 129,
   Ast_Kind_subscript       = 130 | Ast_Flag_binary,
-  Ast_Kind_array_close     = 131,
-  Ast_Kind_array           = 132 | Ast_Flag_binary,
-  Ast_Kind_assign_enter      = 133,
-  Ast_Kind_assign_leave      = 134,
-  Ast_Kind_declare_lhs     = 136,
+  Ast_Kind_position        = 131,
+  Ast_Kind_array_close     = 132,
+  Ast_Kind_array           = 133 | Ast_Flag_binary,
+  Ast_Kind_assign_enter      = 134,
+  Ast_Kind_assign_leave      = 135,
+  Ast_Kind_declare_enter     = 136,
   Ast_Kind_declare_leave     = 137,
   Ast_Kind_paren_enter     = 139,
   Ast_Kind_paren_leave     = 140,
   Ast_Kind_record_enter    = 141,
   Ast_Kind_record_leave    = 142,
-  Ast_Kind_tuple_assign_enter = 143,
-  Ast_Kind_tuple_assign_split = 144,
-  Ast_Kind_tuple_assign_leave = 145,
-  Ast_Kind_tuple_enter        = Ast_Kind_tuple_assign_enter | Ast_Flag_no_assign,
-  Ast_Kind_tuple_split        = Ast_Kind_tuple_assign_split | Ast_Flag_no_assign,
-  Ast_Kind_tuple_leave        = Ast_Kind_tuple_assign_leave | Ast_Flag_no_assign,
+  Ast_Kind_tuple_enter = 143,
+  Ast_Kind_tuple_split = 144,
+  Ast_Kind_tuple_leave = 145,
   Ast_Kind_source_enter    = 146,
   Ast_Kind_source_leave    = 147,
   Ast_Kind_block_enter     = 148,
@@ -60,6 +57,7 @@ typedef enum {
   Ast_Kind_while_leave         = 169,
   Ast_Kind_while_do            = 170,
   Ast_Kind_break               = 173,
+  Ast_Kind_pop                 = 174,
 } Ast_Kind;
 
 typedef I32 Astid;
@@ -68,10 +66,7 @@ typedef struct {
   Ast_Kind kind;
   union {
     U64   value;
-    struct {
-      I32   position;
-      Astid next;
-    };
+   I32   position;
     struct {
       Astid enter_at;
       Astid last_at;
@@ -188,6 +183,13 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_subscript:
       string_builder_push_cstr(&sb, "s[]");
     break;
+    case Ast_Kind_pop:
+      string_builder_push_cstr(&sb, "pop");
+    break;
+    case Ast_Kind_position:
+      string_builder_push_cstr(&sb, "pos");
+      string_builder_push_i64(&sb, node.position);
+    break;
     case Ast_Kind_ptr:
       string_builder_push_cstr(&sb, "ptr");
     break;
@@ -200,7 +202,7 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_assign_leave:
       string_builder_push_cstr(&sb, "=");
     break;
-    case Ast_Kind_declare_lhs:
+    case Ast_Kind_declare_enter:
       string_builder_push_cstr(&sb, "l:");
     break;
     case Ast_Kind_declare_leave:
@@ -242,7 +244,7 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_i64(&sb, node.length);
     break;
     case Ast_Kind_tuple_split:
-      string_builder_push_cstr(&sb, ",");
+      string_builder_push_cstr(&sb, ";");
     break;
     case Ast_Kind_tuple_leave:
       string_builder_push_cstr(&sb, ")t");
@@ -262,16 +264,6 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_pos:
       string_builder_push_cstr(&sb, "pos");
     break;
-    case Ast_Kind_tuple_assign_enter:
-      string_builder_push_cstr(&sb, "=t(");
-      string_builder_push_i64(&sb, node.length);
-    break;
-    case Ast_Kind_tuple_assign_split:
-      string_builder_push_cstr(&sb, "=,");
-    break;
-    case Ast_Kind_tuple_assign_leave:
-      string_builder_push_cstr(&sb, ")t=");
-    break;
     }
     string_builder_push_cstr(&sb, " ");
   }
@@ -288,17 +280,11 @@ void ast_print(Ast ast) {
 typedef struct {
   Ast stack;
   Ast final;
-  Ast_Kind* kinds;
   Tokens tokens;
   I32  tok;
 } Parser;
 
 Astid parse_final_push(Parser* parser, Ast_Node node) {
-  Ast_Kind kind = node.kind;
-  if (!empty(parser->stack) && top(parser->stack).kind == Ast_Kind_assign_enter) {
-    kind &= ~Ast_Flag_no_assign;
-  }
-  parser->kinds[parser->final.length] = kind;
   Astid astid = push(parser->final, node);
   return astid;
 }
@@ -314,14 +300,6 @@ Astid parse_final_insert(Parser* parser, Astid astid, Ast_Node node) {
   }
   parser->final.base[astid] = node;
 
-  for (I32 i = parser->final.length; i >= astid; i--) {
-    parser->kinds[i] = parser->kinds[i-1];
-  }
-  parser->kinds[astid] = node.kind;
-  if (!empty(parser->stack) && top(parser->stack).kind == Ast_Kind_assign_enter) {
-    parser->kinds[astid] = node.kind & ~Ast_Flag_no_assign;
-  }
-
   parser->final.length++;
 
   return astid;
@@ -334,8 +312,6 @@ I32 parse_right_precedence(Ast_Kind kind) {
     return 1;
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
-  case Ast_Kind_tuple_assign_enter:
-  case Ast_Kind_tuple_assign_leave:
     return 3;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -365,8 +341,6 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return 1;
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
-  case Ast_Kind_tuple_assign_enter:
-  case Ast_Kind_tuple_assign_leave:
     return 4;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -438,15 +412,12 @@ void parse_print(Parser parser, Cstr cstr) {
 }
 
 I32 parse_assign_from_final_to_stack(Parser* parser, I32 mark) {
-  parse_print(*parser, "");
   I32 result = parser->stack.length;
   for (I32 i = mark; i < parser->final.length; i++) {
     Ast_Node node = get(parser->final, i);
-    node.kind = parser->kinds[i];
     add(parser->stack, node);
   }
   parser->final.length = mark;
-  parse_print(*parser, "");
   return result;
 }
 
@@ -469,7 +440,6 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
   Parser parser = {0};
   parser.stack.base = xmalloc(sizeof(Ast_Node) * 2*tokens.length);
   parser.final.base = final_buffer;
-  parser.kinds      = xmalloc(sizeof(Ast_Kind) * 2*tokens.length);
   parser.tokens     = tokens;
   parser.tok        = 0;
   ast_push_kind(&parser.stack, Ast_Kind_source_leave);
@@ -617,7 +587,7 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
       case Token_Kind_comma: {
         parse_stack_transfer_higher_precedence(&parser, Ast_Kind_tuple_enter);
         Ast_Node* top = &top(parser.stack);
-        if (top->kind == Ast_Kind_tuple_leave || top->kind == Ast_Kind_tuple_assign_leave) {
+        if (top->kind == Ast_Kind_tuple_leave) {
           Ast_Node* open = &get(parser.final, top->enter_at);
           Ast_Node split = { Ast_Kind_tuple_split, .position = open->length };
           parse_final_push(&parser, split);
@@ -668,8 +638,29 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
     } break;
     case Ast_Kind_declare_leave:
     case Ast_Kind_assign_leave: {
-      parse_transfer_stack_to_final_from(&parser, ast.last_at);
-      parse_final_push(&parser, ast);
+      for (I32 i = ast.last_at; i < parser.stack.length; i++) {
+        /* 
+          I need to transfer from stack for final via parse_final_push().
+          Technically I can transfer directly and then push assignment but
+          it would make it harder to process in next stages (it would require recursion/stack).
+          I need to convert so that the whole pattern is desugurated. There are several trivial cases:
+          a -> a =
+          a b add -> a b add =
+          a neg -> a neg =
+
+          Right now the problem is tuples which are represented by a flat list such as:
+          t( a ; b ; c ; )t.
+          (tou can see at cstr_from_ast to know what each string mean (a, b, c are names))
+          The difficulty with tuples is that nested tuples are possible.
+
+          t( a ; b ; )t -> pos0 a = pos1 b = 
+          t( a ; b c add ; )t -> pos0 a = pos1 b c add =
+          t( a ; t( b ; c ; )t; d )t -> pos0 a = pos1 pos0 b = pos1 c = pop pos2 d =
+
+          You can see how irgen handles variuos ast kinds for reference.
+        */ 
+      }
+      parser.stack.length = ast.last_at;
     } break;
     case Ast_Kind_block_value_leave: {
       Ast_Node ast_close = ast;
@@ -698,14 +689,15 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
         goto label_statement;
       }
     } break;
-    case Ast_Kind_tuple_assign_leave:
     case Ast_Kind_tuple_leave: {
       Ast_Node ast_close = ast;
       Ast_Node* open = &get(parser.final, ast_close.enter_at);
-      Astid astid_close = parse_final_push(&parser, ast_close);
-      if (astid_close != open->leave_at) {
+      if (parser.final.length != open->leave_at) {
+        Ast_Node split = { Ast_Kind_tuple_split, .position = open->length };
+        parse_final_push(&parser, split);
         parse_final_increment_length(&parser, ast_close.enter_at);
       }
+      Astid astid_close = parse_final_push(&parser, ast_close);
       open->leave_at = astid_close;
     } break;
     case Ast_Kind_record_leave: {
@@ -764,7 +756,6 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
     }
   }
   free(parser.stack.base);
-  free(parser.kinds);
   return parser.final;
 }
 
@@ -797,16 +788,16 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("(a, b) + 1 = 2",    "");
-  // test("a+b = 1-2",      "s{ 1 2 sub a b add = }s ");
-  // test("x=1; y:2",       "s{ 1 x = 2 y : }s ");
-  // test("a = 1-2",        "s{ 1 2 sub a = }s ");
-  // test("a = (x=1; y:2)", "s{ r(2 1 x = 2 y : )r a = }s ");
-  // test("1 + 2",          "s{ 1 2 add }s ");
-  // test("1 + -2",         "s{ 1 2 neg add }s ");
-  // test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
-  // test("foo 1\n2",       "s{ foo 1 call 2 }s ");
-  // test("bar 1 2",        "s{ bar 1 call 2 call }s ");
+  test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t pos0 a = pos1 b pop }s ");
+  test("a+b = 1-2",      "s{ 1 2 sub a b add = }s ");
+  test("x=1; y:2",       "s{ 1 x = 2 y : }s ");
+  test("a = 1-2",        "s{ 1 2 sub a = }s ");
+  test("a = (x=1; y:2)", "s{ r(2 1 x = 2 y : )r a = }s ");
+  test("1 + 2",          "s{ 1 2 add }s ");
+  test("1 + -2",         "s{ 1 2 neg add }s ");
+  test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
+  test("foo 1\n2",       "s{ foo 1 call 2 }s ");
+  test("bar 1 2",        "s{ bar 1 call 2 call }s ");
 }
 
 #undef test
