@@ -54,6 +54,10 @@ struct Ir {
       Istr istr;
       Irid irid;
     } store_var;
+    struct {
+      Irid of;
+      I32  at;
+    } position;
   };
 };
 
@@ -190,6 +194,12 @@ Irid ir_push_binary(Ir_Kind kind, Irid one, Irid two) {
 
 Irid ir_push_record(Recordid recordid) {
   Ir ir = { Ir_Kind_record, .recordid = recordid };
+  Irid irid = push(irgen.ir_stack, ir);
+  return irid;
+}
+
+Irid ir_push_position_offset(Irid record, I32 position) {
+  Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -354,10 +364,10 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     } break;
     case Ast_Kind_tuple_assign_enter: {
       Irid one = pop(irgen.irid_stack);
-      irid = ir_push_position(one, 0);
+      irid = ir_push_position_offset(one, 0);
     } break;
     case Ast_Kind_tuple_assign_leave: {
-      pop(irgen.irid_stack);
+      del(irgen.irid_stack);
     } break;
     default: assert(0);
     }

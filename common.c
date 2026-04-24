@@ -117,12 +117,14 @@ typedef struct {
   I32 length;
 } Slice_S32;
 
-#define push(slice, item) (slice.base[slice.length++] = item, (slice.length)-1)
-#define add(slice, item) do {slice.base[slice.length++] = item;} while(0);
-#define new(slice) (slice.base[slice.length++])
-#define pop(slice) (slice.base[--slice.length])
-#define top(slice) (slice.base[slice.length-1])
-#define get(slice, index) (slice.base[index])
+#define empty(slice) ((slice).length == 0)
+#define push(slice, item) ((slice).base[(slice).length++] = (item), ((slice).length)-1)
+#define add(slice, item) do {(slice).base[(slice).length++] = (item);} while(0);
+#define new(slice) ((slice).base[(slice).length++])
+#define pop(slice) ((slice).base[--(slice).length])
+#define del(slice) (--(slice).length)
+#define top(slice) ((slice).base[(slice).length-1])
+#define get(slice, index) ((slice).base[(index)])
 
 I32 slice_s32_push(Slice_S32* slice, I32 item) {
   I32 index = slice->length;
