@@ -16,8 +16,10 @@ typedef enum {
   Ast_Kind_access = Token_Kind_dot | Ast_Flag_binary,
   Ast_Kind_load            = 128 | Ast_Flag_unary,
   Ast_Kind_subscript       = 130 | Ast_Flag_binary,
+  Ast_Kind_subscript_open  = 130,
   Ast_Kind_position        = 131,
   Ast_Kind_array           = 133 | Ast_Flag_binary,
+  Ast_Kind_array_open      = 133,
   Ast_Kind_assign_enter      = 134,
   Ast_Kind_assign_leave      = 135,
   Ast_Kind_declare_enter     = 136,
@@ -177,8 +179,14 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_array:
       string_builder_push_cstr(&sb, "a[]");
     break;
+    case Ast_Kind_array_open:
+      string_builder_push_cstr(&sb, "a[");
+    break;
     case Ast_Kind_subscript:
       string_builder_push_cstr(&sb, "s[]");
+    break;
+    case Ast_Kind_subscript_open:
+      string_builder_push_cstr(&sb, "s[");
     break;
     case Ast_Kind_pop:
       string_builder_push_cstr(&sb, "pop");
@@ -321,10 +329,9 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_neg:
   case Ast_Kind_pos:
     return 15;
-  case Ast_Kind_array:
   case Ast_Kind_load:
     return 17;
-  case Ast_Kind_subscript:
+  case Ast_Kind_subscript_open:
   case Ast_Kind_call:
   case Ast_Kind_access:
     return 19;
@@ -349,10 +356,10 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_neg:
   case Ast_Kind_pos:
     return 16;
-  case Ast_Kind_array:
+  case Ast_Kind_array_open:
   case Ast_Kind_load:
     return 18;
-  case Ast_Kind_subscript:
+  case Ast_Kind_subscript_open:
   case Ast_Kind_call:
   case Ast_Kind_access:
     return 20;
@@ -470,13 +477,11 @@ void parse_infix_or_suffix(Parser* parser) {
     assert(0);
   } break;
   case Token_Kind_brace_open: {
-    parse_print(*parser, "");
-    parse_stack_transfer_higher_precedence(parser, Ast_Kind_subscript);
+    parse_stack_transfer_higher_precedence(parser, Ast_Kind_subscript_open);
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_subscript_open);
     parse_expression_enter(parser);
-    parse_print(*parser, "");
     parse_expect_token(parser, Token_Kind_brace_close);
-    parse_stack_push_kind_with_final_length(parser, Ast_Kind_subscript);
-    parse_print(*parser, "");
+    parse_infix_or_suffix(parser);
   } break;
   case Token_Kind_at: {
     parse_stack_transfer_higher_precedence(parser, Ast_Kind_load);
@@ -588,9 +593,10 @@ void parse_expression_enter(Parser* parser) {
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array);
     parse_expression_enter(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
-    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array);
+    parse_stack_transfer_higher_precedence(parser, Ast_Kind_array);
     parse_expression_enter(parser);
   } break;
   default:
@@ -707,13 +713,15 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("c+b[1]",         "s{ c b 1 s[] add }s ");
-  test("b[1+2]",         "s{ b 1 2 add s[] }s ");
-  return;
-  test("b[1]",           "s{ b 1 s[] }s ");
-  test("[1]b",           "s{ 1 b a[] }s ");
+  test("b[1+2]*c",           "s{ b 1 s[] }s ");
+  test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul }s ");
   test("[1+2]b",         "s{ 1 2 add b a[] }s ");
   test("[1]b+c",         "s{ 1 b a[] c add }s ");
+  test("[1]b",           "s{ 1 b a[] }s ");
+  test("c+b[1]",         "s{ c b 1 s[] add }s ");
+  test("b[1+2]",         "s{ b 1 2 add s[] }s ");
+  test("b[1+2]*c",       "s{ b 1 2 add s[] c mul }s ");
+  test("b[1]",           "s{ b 1 s[] }s ");
   test("1 + 2",          "s{ 1 2 add }s ");
   test("1 + -2",         "s{ 1 2 neg add }s ");
   test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
