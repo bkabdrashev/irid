@@ -435,8 +435,20 @@ Astid parse_stack_push_kind_with_final_length(Parser* parser, Ast_Kind kind) {
   return astid;
 }
 
-void parse_expression(Parser* parser);
+void parse_expression_enter(Parser* parser);
 void parse_statement(Parser* parser);
+
+void parse_expression_leave(Parser* parser) {
+  while (parser->stack.length > 0) {
+    Ast_Node node = pop(parser->stack);
+    parse_final_push(parser, node);
+  }
+}
+
+void parse_expression(Parser* parser) {
+  parse_expression_enter(parser);
+  parse_expression_leave(parser);
+}
 
 void parse_infix_or_suffix(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
@@ -446,7 +458,7 @@ void parse_infix_or_suffix(Parser* parser) {
     Ast_Kind kind = (Ast_Kind)token.kind | Ast_Flag_binary;
     parse_stack_transfer_higher_precedence(parser, kind);
     ast_push_kind(&parser->stack, kind);
-    parse_expression(parser);
+    parse_expression_enter(parser);
   } break;
   case Token_Kind_arrow: {
     // TODO: fun_enter insert
@@ -458,10 +470,13 @@ void parse_infix_or_suffix(Parser* parser) {
     assert(0);
   } break;
   case Token_Kind_brace_open: {
+    parse_print(*parser, "");
     parse_stack_transfer_higher_precedence(parser, Ast_Kind_subscript);
-    parse_expression(parser);
+    parse_expression_enter(parser);
+    parse_print(*parser, "");
     parse_expect_token(parser, Token_Kind_brace_close);
     parse_stack_push_kind_with_final_length(parser, Ast_Kind_subscript);
+    parse_print(*parser, "");
   } break;
   case Token_Kind_at: {
     parse_stack_transfer_higher_precedence(parser, Ast_Kind_load);
@@ -493,7 +508,7 @@ void parse_infix_or_suffix(Parser* parser) {
     if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
       parse_stack_transfer_higher_precedence(parser, Ast_Kind_call);
       ast_push_kind(&parser->stack, Ast_Kind_call);
-      parse_expression(parser);
+      parse_expression_enter(parser);
     }
   } break;
   }
@@ -504,7 +519,7 @@ void parse_pattern(Parser* parser) {
   assert(0);
 }
 
-void parse_expression(Parser* parser) {
+void parse_expression_enter(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
@@ -512,7 +527,7 @@ void parse_expression(Parser* parser) {
   case Token_Kind_at_prefix:    case Token_Kind_at: {
     Ast_Kind kind = Ast_Flag_unary | ((Ast_Kind)token.kind & 0xff);
     ast_push_kind(&parser->stack, kind);
-    parse_expression(parser);
+    parse_expression_enter(parser);
   } break;
   case Token_Kind_int: case Token_Kind_name: {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
@@ -526,12 +541,12 @@ void parse_expression(Parser* parser) {
     parse_expression(parser);
     parse_expect_token(parser, Token_Kind_else);
     parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
-    parse_expression(parser);
+    parse_expression_enter(parser);
     parse_final_push_kind(parser, Ast_Kind_else_value_leave);
   } break;
   case Token_Kind_while: {
   // TODO: consider while value
-    parse_expression(parser);
+    parse_expression_enter(parser);
     parse_expect_token(parser, Token_Kind_do);
     parse_final_push_kind(parser, Ast_Kind_while_enter);
     parse_statement(parser);
@@ -543,7 +558,7 @@ void parse_expression(Parser* parser) {
     Ast_Kind enter_kind = Ast_Kind_paren_enter;
     Ast_Kind leave_kind = Ast_Kind_paren_leave;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
-      parse_expression(parser);
+      parse_expression_enter(parser);
       enter->length++;
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         enter_kind = Ast_Kind_record_enter;
@@ -553,6 +568,7 @@ void parse_expression(Parser* parser) {
       // TODO: equal/colon
       }
     }
+    parse_expression_leave(parser);
     if (enter->length == 1) {
       enter->kind = enter_kind;
       enter->leave_at = parse_final_push_kind(parser, leave_kind);
@@ -572,20 +588,16 @@ void parse_expression(Parser* parser) {
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
-    parse_expression(parser);
+    parse_expression_enter(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
-    parse_expression(parser);
     parse_stack_push_kind_with_final_length(parser, Ast_Kind_array);
+    parse_expression_enter(parser);
   } break;
   default:
     parser->tok--;
   break;
   }
   parse_infix_or_suffix(parser);
-  while (parser->stack.length > 0) {
-    Ast_Node node = pop(parser->stack);
-    parse_final_push(parser, node);
-  }
 }
 
 void parse_statement(Parser* parser) {
@@ -626,7 +638,7 @@ void parse_statement(Parser* parser) {
       parse_final_push_kind(parser, Ast_Kind_return);
     }
     else {
-      parse_expression(parser);
+      parse_expression_enter(parser);
       parse_final_push_kind(parser, Ast_Kind_return);
     }
   } break;
@@ -635,7 +647,7 @@ void parse_statement(Parser* parser) {
       parse_final_push_kind(parser, Ast_Kind_break);
     }
     else {
-      parse_expression(parser);
+      parse_expression_enter(parser);
       parse_final_push_kind(parser, Ast_Kind_break);
     }
   } break;
@@ -695,9 +707,17 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("c+b[1]",         "s{ c b 1 s[] add }s ");
+  test("b[1+2]",         "s{ b 1 2 add s[] }s ");
+  return;
+  test("b[1]",           "s{ b 1 s[] }s ");
+  test("[1]b",           "s{ 1 b a[] }s ");
+  test("[1+2]b",         "s{ 1 2 add b a[] }s ");
+  test("[1]b+c",         "s{ 1 b a[] c add }s ");
   test("1 + 2",          "s{ 1 2 add }s ");
   test("1 + -2",         "s{ 1 2 neg add }s ");
   test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
+  test("(1 + 2)*3",      "s{ ( 1 2 add ) 3 mul }s ");
   test("foo 1\n2",       "s{ foo 1 call 2 }s ");
   test("bar 1 2",        "s{ bar 1 call 2 call }s ");
   test("(1)",            "s{ ( 1 ) }s ");
@@ -706,6 +726,8 @@ void parse_test(void) {
   test("(1\n 2)",        "s{ r(2 1 2 )r }s ");
   test("(1; 2)",         "s{ r(2 1 2 )r }s ");
   test("(1; 2;)",        "s{ r(2 1 2 )r }s ");
+  // test("a = 1",          "s{ 1 a =}s ");
+  // test("a = 1 + 2",      "s{ 1 2 add a =}s ");
   // test("a+b = 1-2",      "s{ 1 2 sub a b add = }s ");
   // test("x=1; y:2",       "s{ 1 x = 2 y : }s ");
   // test("a = 1-2",        "s{ 1 2 sub a = }s ");
