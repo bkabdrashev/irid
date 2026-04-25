@@ -416,7 +416,6 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
   add(irgen.irs, nil);
   for (Astid astid = {0}; astid < ast.length; astid++) {
     Ast_Node node = get(ast, astid);
-    Irid irid = irgen.irid_nil;
     switch (node.kind) {
     case Ast_Kind_source_enter: {
       fun_enter(astid);
@@ -435,29 +434,34 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     } break;
     case Ast_Kind_tuple_leave: {
       Recordid tuple = pop(irgen.recordid_stack);
-      irid = ir_push_record(tuple);
+      Irid irid = ir_push_record(tuple);
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_int: {
-      irid = ir_push_int(node.i64);
+      Irid irid = ir_push_int(node.i64);
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_name: {
-      irid = ir_push_load_var(node.istr);
+      Irid irid = ir_push_load_var(node.istr);
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_ptr: 
     case Ast_Kind_load: 
     case Ast_Kind_neg: {
       Irid one = pop(irgen.irid_stack);
-      irid = ir_push_unary((Ir_Kind)node.kind, one);
+      Irid irid = ir_push_unary((Ir_Kind)node.kind, one);
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_mul: 
     case Ast_Kind_add: {
       Irid two = pop(irgen.irid_stack);
       Irid one = pop(irgen.irid_stack);
-      irid = ir_push_binary((Ir_Kind)node.kind, one, two);
+      Irid irid = ir_push_binary((Ir_Kind)node.kind, one, two);
+      add(irgen.irid_stack, irid);
+    } break;
+    case Ast_Kind_position: {
+      Irid record  = top(irgen.irid_stack);
+      Irid irid = ir_push_position_offset(record, node.position);
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_assign_leave: {

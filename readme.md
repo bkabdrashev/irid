@@ -150,6 +150,16 @@ y = 2
 vec = { x, y } // (x = x; y = y)
 ```
 
+- [ ] named block syntax name:{}. This requires declaration have strict order.
+```irid
+outer: {
+  inner: {
+    break.outer 10
+  }
+}
+outer + outer
+```
+
 - [ ] {} pattern syntax for extracting members from a record
 ```irid
 { y, x } = vec

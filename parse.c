@@ -58,6 +58,7 @@ typedef enum {
   Ast_Kind_while_do            = 170,
   Ast_Kind_break               = 173,
   Ast_Kind_pop                 = 174,
+  Ast_Kind_pattern = 176,
 } Ast_Kind;
 
 typedef I32 Astid;
@@ -65,11 +66,12 @@ typedef I32 Astid;
 typedef struct {
   Ast_Kind kind;
   union {
-    U64   value;
-   I32   position;
+    U64 value;
+    I32 position;
     struct {
       Astid enter_at;
       Astid last_at;
+      I32 tok;
     };
     struct {
       Astid leave_at;
@@ -104,6 +106,9 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     break;
     case Ast_Kind_statement:
       string_builder_push_cstr(&sb, "stm");
+    break;
+    case Ast_Kind_pattern:
+      string_builder_push_cstr(&sb, "pattern");
     break;
     case Ast_Kind_expression:
       string_builder_push_cstr(&sb, "exp");
@@ -280,8 +285,10 @@ void ast_print(Ast ast) {
 typedef struct {
   Ast stack;
   Ast final;
+  Ast_Kind* kinds;
   Tokens tokens;
   I32  tok;
+  I32  alt;
 } Parser;
 
 Astid parse_final_push(Parser* parser, Ast_Node node) {
@@ -436,125 +443,130 @@ Astid parse_stack_push_kind_with_final_length(Parser* parser, Ast_Kind kind) {
   return astid;
 }
 
+void parse_expression(Parser* parser) {
+  Token token = parser->tokens.base[parser->tok++];
+  switch (token.kind) {
+  case Token_Kind_minus_prefix: case Token_Kind_minus:
+  case Token_Kind_plus_prefix:  case Token_Kind_plus:
+  case Token_Kind_at_prefix:    case Token_Kind_at: {
+    Ast_Kind kind = Ast_Flag_unary | ((Ast_Kind)token.kind & 0xff);
+    ast_push_kind(parser->stack, kind);
+    parse_expression(parser);
+    parse_infix_or_suffix(parser);
+  } break;
+  case Token_Kind_int: case Token_Kind_name: {
+    Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
+    Ast_Node ast = { .kind = kind, .value = token.value };
+    parse_final_push(parser, ast);
+    parse_infix_or_suffix(parser);
+  } break;
+  case Token_Kind_if: {
+    parse_expression(parser, parser->final.length);
+    parse_expect_token(parser, Token_Kind_do);
+    parse_final_push_kind(parser, Ast_Kind_if_value_enter);
+    parse_expression(parser);
+    parse_expect_token(parser, Token_Kind_else);
+    parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
+    parse_expression(parser);
+    parse_final_push_kind(parser, Ast_Kind_else_value_leave);
+  } break;
+  case Token_Kind_while: {
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_while_do);
+  } goto label_expression;
+  case Token_Kind_paren_open: {
+    Ast_Node paren_open = { Ast_Kind_paren_enter, {0} };
+    Astid astid_open = parse_final_push(parser, paren_open);
+    Ast_Node paren_close = { .kind = Ast_Kind_paren_leave, .enter_at = astid_open, .last_at = parser.final.length };
+    add(parser.stack, paren_close);
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_assign_enter);
+  } goto label_expression;
+  case Token_Kind_curly_open: {
+    Astid astid_enter = parse_final_push_kind(parser, Ast_Kind_block_value_enter);
+    Ast_Node   leave = { Ast_Kind_block_value_leave, .enter_at = astid_enter };
+    add(parser.stack, leave);
+  } goto label_statement;
+  case Token_Kind_brace_open:
+  case Token_Kind_brace_prefix_open: {
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array_close);
+  } goto label_expression;
+  default:
+    parser.tok--;
+  break;
+  }
+}
+
+void parse_statement(Parser* parser) {
+  Token token = parser->tokens.base[parser->tok++];
+  switch (token.kind) {
+  case Token_Kind_source_enter: {
+    parse_statement(parser);
+    parse_final_push_kind(parser, Ast_Kind_source_leave);
+  } break;
+  case Token_Kind_if: {
+    parse_expression(parser, parser->final.length);
+    parse_expect_token(parser, Token_Kind_do);
+    parse_final_push_kind(parser, Ast_Kind_if_enter);
+    parse_statement(parser);
+    if (parse_match_token(parser, Token_Kind_else)) {
+      parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
+      parse_statement(parser);
+      parse_final_push_kind(parser, Ast_Kind_else_leave);
+    }
+    else {
+      parse_final_push_kind(&parser, Ast_Kind_if_leave);
+    }
+  } break;
+  case Token_Kind_while: {
+    parse_expression(parser, parser->final.length);
+    parse_expect_token(parser, Token_Kind_do);
+    parse_final_push_kind(parser, Ast_Kind_while_enter);
+    parse_statement(parser);
+    parse_final_push_kind(parser, Ast_Kind_while_leave);
+  } break;
+  // case Token_Kind_for:
+  case Token_Kind_return: {
+    if (token.flag & Token_Flag_willnewline) {
+      parse_final_push_kind(parser, Ast_Kind_return);
+    }
+    else {
+      parse_expression(parser, parser->final.length);
+      parse_final_push_kind(parser, Ast_Kind_return);
+    }
+  } break;
+  case Token_Kind_break: {
+    if (token.flag & Token_Flag_willnewline) {
+      parse_final_push_kind(parser, Ast_Kind_break);
+    }
+    else {
+      parse_expression(parser, parser->final.length);
+      parse_final_push_kind(parser, Ast_Kind_break);
+    }
+  } break;
+  default: {
+    parser.tok--;
+    I32 tok = parser.tok;
+    I32 length = parser->final.length;
+    parse_expression(parser, parser->final.length);
+    if (parse_match_token(parser, Token_Kind_equal)) {
+      parser->tok = tok;
+      parser->final.length = length;
+      parse_pattern(parser, parser->final.length);
+    }
+  }
+}
+
 Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
   Parser parser = {0};
   parser.stack.base = xmalloc(sizeof(Ast_Node) * 2*tokens.length);
+  parser.kinds      = xmalloc(sizeof(Ast_Kind) * 2*tokens.length);
   parser.final.base = final_buffer;
   parser.tokens     = tokens;
   parser.tok        = 0;
-  ast_push_kind(&parser.stack, Ast_Kind_source_leave);
-  goto label_statement;
+  parse_statement();
   while (!ast_is_empty(parser.stack)) {
     Ast_Node ast = pop(parser.stack);
     switch (ast.kind) {
-    case Ast_Kind_statement: { label_statement:;
-      Token token = tokens.base[parser.tok++];
-      switch (token.kind) {
-      case Token_Kind_source_enter: {
-        parse_final_push_kind(&parser, Ast_Kind_source_enter);
-      } goto label_statement;
-      case Token_Kind_if: {
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_if_do);
-      } goto label_expression;
-      case Token_Kind_while: {
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_while_do);
-      } goto label_expression;
-      // case Token_Kind_for:
-      case Token_Kind_return: {
-        if (token.flag & Token_Flag_willnewline) {
-          parse_final_push_kind(&parser, Ast_Kind_return);
-        }
-        else {
-          parse_stack_push_kind_with_final_length(&parser, Ast_Kind_return);
-          goto label_expression;
-        }
-      } break;
-      case Token_Kind_break: {
-        if (token.flag & Token_Flag_willnewline) {
-          parse_final_push_kind(&parser, Ast_Kind_break);
-        }
-        else {
-          parse_stack_push_kind_with_final_length(&parser, Ast_Kind_break);
-          goto label_expression;
-        }
-      } break;
-      default: {
-        parser.tok--;
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_assign_enter);
-      } goto label_expression;
-      }
-    } break;
-    case Ast_Kind_while_do: {
-      parse_expect_token(&parser, Token_Kind_do);
-      parse_final_push_kind(&parser, Ast_Kind_while_enter);
-      ast_push_kind(&parser.stack, Ast_Kind_while_leave);
-    } goto label_statement;
-    case Ast_Kind_if_do: {
-      parse_expect_token(&parser, Token_Kind_do);
-      parse_final_push_kind(&parser, Ast_Kind_if_enter);
-      ast_push_kind(&parser.stack, Ast_Kind_if_else);
-    } goto label_statement;
-    case Ast_Kind_if_else: {
-      if (parse_match_token(&parser, Token_Kind_else)) {
-        parse_final_push_kind(&parser, Ast_Kind_if_leave_else_enter);
-        ast_push_kind(&parser.stack, Ast_Kind_else_leave);
-        goto label_statement;
-      }
-      else {
-        parse_final_push_kind(&parser, Ast_Kind_if_leave);
-        goto label_infix_or_suffix;
-      }
-    } break;
-    case Ast_Kind_if_value_do: {
-      parse_expect_token(&parser, Token_Kind_do);
-      parse_final_push_kind(&parser, Ast_Kind_if_enter);
-      ast_push_kind(&parser.stack, Ast_Kind_if_value_else);
-    } goto label_expression;
-    case Ast_Kind_if_value_else: {
-      parse_expect_token(&parser, Token_Kind_else);
-      parse_final_push_kind(&parser, Ast_Kind_if_leave_else_enter);
-      parse_stack_push_kind_with_final_length(&parser, Ast_Kind_else_value_leave);
-    } goto label_expression;
     case Ast_Kind_expression: { label_expression:;
-      Token token = tokens.base[parser.tok++];
-      switch (token.kind) {
-      case Token_Kind_minus_prefix: case Token_Kind_minus:
-      case Token_Kind_plus_prefix:  case Token_Kind_plus:
-      case Token_Kind_at_prefix:    case Token_Kind_at: {
-        Ast_Kind kind = Ast_Flag_unary | ((Ast_Kind)token.kind & 0xff);
-        ast_push_kind(&parser.stack, kind);
-      } goto label_expression;
-      case Token_Kind_int: case Token_Kind_name: {
-        Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
-        Ast_Node ast = { .kind = kind, .value = token.value };
-        parse_final_push(&parser, ast);
-      } goto label_infix_or_suffix;
-      case Token_Kind_if: {
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_if_value_do);
-      } goto label_expression;
-      case Token_Kind_while: {
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_while_do);
-      } goto label_expression;
-      case Token_Kind_paren_open: {
-        Ast_Node paren_open = { Ast_Kind_paren_enter, {0} };
-        Astid astid_open = parse_final_push(&parser, paren_open);
-        Ast_Node paren_close = { .kind = Ast_Kind_paren_leave, .enter_at = astid_open, .last_at = parser.final.length };
-        add(parser.stack, paren_close);
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_assign_enter);
-      } goto label_expression;
-      case Token_Kind_curly_open: {
-        Astid astid_enter = parse_final_push_kind(&parser, Ast_Kind_block_value_enter);
-        Ast_Node   leave = { Ast_Kind_block_value_leave, .enter_at = astid_enter };
-        add(parser.stack, leave);
-      } goto label_statement;
-      case Token_Kind_brace_open:
-      case Token_Kind_brace_prefix_open: {
-        parse_stack_push_kind_with_final_length(&parser, Ast_Kind_array_close);
-      } goto label_expression;
-      default:
-        parser.tok--;
-      break;
-      }
     } break;
     case Ast_Kind_infix_or_suffix: { label_infix_or_suffix:;
       Token token = tokens.base[parser.tok++];
@@ -615,6 +627,7 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
     case Ast_Kind_assign_enter: {
       Ast_Node* top_final = &top(parser.final);
       if (parse_match_token(&parser, Token_Kind_equal)) {
+        parser.tok = ast.tok;
         Ast_Node assign = { Ast_Kind_assign_leave, {0} };
         I32 final_mark = ast.last_at;
         I32 stack_mark_length = parse_assign_from_final_to_stack(&parser, final_mark);
@@ -639,26 +652,8 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
     case Ast_Kind_declare_leave:
     case Ast_Kind_assign_leave: {
       for (I32 i = ast.last_at; i < parser.stack.length; i++) {
-        /* 
-          I need to transfer from stack for final via parse_final_push().
-          Technically I can transfer directly and then push assignment but
-          it would make it harder to process in next stages (it would require recursion/stack).
-          I need to convert so that the whole pattern is desugurated. There are several trivial cases:
-          a -> a =
-          a b add -> a b add =
-          a neg -> a neg =
-
-          Right now the problem is tuples which are represented by a flat list such as:
-          t( a ; b ; c ; )t.
-          (tou can see at cstr_from_ast to know what each string mean (a, b, c are names))
-          The difficulty with tuples is that nested tuples are possible.
-
-          t( a ; b ; )t -> pos0 a = pos1 b = 
-          t( a ; b c add ; )t -> pos0 a = pos1 b c add =
-          t( a ; t( b ; c ; )t; d )t -> pos0 a = pos1 pos0 b = pos1 c = pop pos2 d =
-
-          You can see how irgen handles variuos ast kinds for reference.
-        */ 
+        Ast_Node node = get(parser.stack, i);
+        parse_final_push(&parser, node);
       }
       parser.stack.length = ast.last_at;
     } break;
@@ -756,6 +751,7 @@ Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
     }
   }
   free(parser.stack.base);
+  free(parser.kinds);
   return parser.final;
 }
 
