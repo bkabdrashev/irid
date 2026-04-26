@@ -394,28 +394,40 @@ void irgen_print() {
   printf("\n");
 }
 
-Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Record* record_buffer) {
-  irgen.ast = ast;
-  irgen.arena       = arena_init(KB(4) * ast.length);
-  irgen.funs.base   = fun_buffer;
-  irgen.blocks.base = block_buffer;
-  irgen.irs.base    = ir_buffer;
-  irgen.records.base   = record_buffer;
-  irgen.fun_stack.base   = xmalloc(ast.length * sizeof(Fun*));
-  irgen.block_stack.base = xmalloc(ast.length * sizeof(Block));
-  irgen.ir_stack.base    = xmalloc(ast.length * sizeof(Ir));
-  irgen.irid_stack.base  = xmalloc(ast.length * sizeof(Irid));
-  irgen.recordid_stack.base = xmalloc(ast.length * sizeof(Recordid));
-  irgen.fun_stack.length   = 0;
-  irgen.block_stack.length = 0;
-  irgen.ir_stack.length    = 0;
-  irgen.irid_stack.length  = 0;
-  irgen.irid_nil = (Irid){ 0 };
-  Ir nil = {0, {0}};
-  add(irgen.ir_stack, nil);
-  add(irgen.irs, nil);
-  for (Astid astid = {0}; astid < ast.length; astid++) {
-    Ast_Node node = get(ast, astid);
+Astid irgen_ast_range(Astid);
+Astid irgen_assign(Astid astid) {
+  Ast_Node node = get(irgen.ast, astid++);
+  switch (node.kind) {
+  case Ast_Kind_tuple_enter: {
+    Irid rhs = pop(irgen.irid_stack);
+    for (I32 i = 0; i < node.length; i++) {
+      Irid pos = ir_push_position_offset(rhs, i);
+      add(irgen.irid_stack, pos);
+      astid = irgen_assign(astid);
+    }
+  } break;
+  default: {
+    astid = irgen_ast_range(astid);
+    Irid lhs = pop(irgen.irid_stack);
+    Irid rhs = pop(irgen.irid_stack);
+    Ir* ir = &get(irgen.ir_stack, lhs);
+    if (ir->kind == Ir_Kind_load_var) {
+      ir->kind = Ir_Kind_store_var;
+      ir->store_var.irid = rhs;
+    }
+    else if (ir->kind == Ir_Kind_load) {
+      ir->kind = Ir_Kind_store;
+      ir->binary.two = rhs;
+    }
+  } break;
+  }
+  return astid;
+}
+
+Astid irgen_ast_range(Astid enter) {
+  Astid astid;
+  for (astid = enter; astid < irgen.ast.length; astid++) {
+    Ast_Node node = get(irgen.ast, astid);
     switch (node.kind) {
     case Ast_Kind_source_enter: {
       fun_enter(astid);
@@ -464,24 +476,45 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Irid irid = ir_push_position_offset(record, node.position);
       add(irgen.irid_stack, irid);
     } break;
+    case Ast_Kind_assign_enter: {
+      irgen_assign(astid);
+    } break;
     case Ast_Kind_assign_leave: {
-      Irid lhs = pop(irgen.irid_stack);
-      Irid rhs = pop(irgen.irid_stack);
-      Ir* ir = &get(irgen.ir_stack, lhs);
-      if (ir->kind == Ir_Kind_load_var) {
-        ir->kind = Ir_Kind_store_var;
-        ir->store_var.irid = rhs;
-      }
-      else if (ir->kind == Ir_Kind_load) {
-        ir->kind = Ir_Kind_store;
-        ir->binary.two = rhs;
-      }
+      return astid+1;
     } break;
     case Ast_Kind_paren_leave: break;
     case Ast_Kind_paren_enter: break;
-    default: assert(0);
+    default:
+    assert(0);
     }
   }
+  return astid;
+}
+
+
+Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Record* record_buffer) {
+  irgen.ast = ast;
+  irgen.arena       = arena_init(KB(4) * ast.length);
+  irgen.funs.base   = fun_buffer;
+  irgen.blocks.base = block_buffer;
+  irgen.irs.base    = ir_buffer;
+  irgen.records.base   = record_buffer;
+  irgen.fun_stack.base   = xmalloc(ast.length * sizeof(Fun*));
+  irgen.block_stack.base = xmalloc(ast.length * sizeof(Block));
+  irgen.ir_stack.base    = xmalloc(ast.length * sizeof(Ir));
+  irgen.irid_stack.base  = xmalloc(ast.length * sizeof(Irid));
+  irgen.recordid_stack.base = xmalloc(ast.length * sizeof(Recordid));
+  irgen.fun_stack.length   = 0;
+  irgen.block_stack.length = 0;
+  irgen.ir_stack.length    = 0;
+  irgen.irid_stack.length  = 0;
+  irgen.irid_nil = (Irid){ 0 };
+  Ir nil = {0, {0}};
+  add(irgen.ir_stack, nil);
+  add(irgen.irs, nil);
+
+  irgen_ast_range(0);
+
   free(irgen.recordid_stack.base);
   free(irgen.irid_stack.base);
   free(irgen.ir_stack.base);
@@ -557,14 +590,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // 1 = a
-  // r1 = int 1
-  // r2 = store var "a" r1
-  // r3 = load var "a"
-  // r4 = load var "a"
-  // r5 = add r3 r4
-  // s{ t(2 1 2 )t =t(2 =a =b )t= }s 
-  // test("a@ = 1, 2", "");
+  test("(1 + 2, 3)", "");
 }
 
 #undef test

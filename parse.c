@@ -68,7 +68,6 @@ typedef struct {
     struct {
       Astid enter_at;
       Astid last_at;
-      I32 tok;
     };
     struct {
       Astid leave_at;
@@ -382,11 +381,6 @@ void parse_stack_transfer_to_final_is_not(Parser* parser, Ast_Kind kind) {
   }
 }
 
-void parse_final_increment_length(Parser* parser, Astid astid) {
-  get(parser->final, astid).length++;
-}
-
-
 B8 parse_match_token(Parser* parser, Token_Kind kind) {
   Token token = parser->tokens.base[parser->tok];
   if (token.kind == kind) {
@@ -498,8 +492,8 @@ void parse_infix_or_suffix(Parser* parser) {
     if (top->kind == Ast_Kind_tuple_leave) {
       Ast_Node* open = &get(parser->final, top->enter_at);
       Ast_Node split = { Ast_Kind_tuple_split, .position = open->length };
-      parse_final_push(parser, split);
-      parse_final_increment_length(parser, top->enter_at);
+      get(parser->final, top->enter_at).last_at = parse_final_push(parser, split);
+      get(parser->final, top->enter_at).length++;
     }
     else {
       Ast_Node tuple_enter = { Ast_Kind_tuple_enter, {.length = 1} };
@@ -511,10 +505,10 @@ void parse_infix_or_suffix(Parser* parser) {
     }
     parse_expression_enter(parser);
     if (top(parser->final).kind != Ast_Kind_tuple_split) {
-      Ast_Node split = { Ast_Kind_tuple_split, .position = 0 };
-      parse_final_push(parser, split);
       Ast_Node tuple_leave = pop(parser->stack);
       Ast_Node* tuple_enter = &get(parser->final, tuple_leave.enter_at);
+      Ast_Node split = { Ast_Kind_tuple_split, .position = tuple_enter->length };
+      parse_final_push(parser, split);
       tuple_enter->length++;
       add(parser->final, tuple_leave);
     }
