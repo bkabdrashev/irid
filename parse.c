@@ -331,7 +331,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
     return 15;
   case Ast_Kind_load:
     return 17;
-  case Ast_Kind_subscript_open:
+  case Ast_Kind_subscript:
   case Ast_Kind_call:
   case Ast_Kind_access:
     return 19;
@@ -356,10 +356,10 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_neg:
   case Ast_Kind_pos:
     return 16;
-  case Ast_Kind_array_open:
+  case Ast_Kind_array:
   case Ast_Kind_load:
     return 18;
-  case Ast_Kind_subscript_open:
+  case Ast_Kind_subscript:
   case Ast_Kind_call:
   case Ast_Kind_access:
     return 20;
@@ -368,7 +368,7 @@ I32 parse_left_precedence(Ast_Kind kind) {
   }
 }
 
-void parse_stack_transfer_higher_precedence(Parser* parser, Ast_Kind kind) {
+void parse_stack_transfer_to_final_higher_precedence(Parser* parser, Ast_Kind kind) {
   while (!ast_is_empty(parser->stack)) {
     Ast_Node* top_node = &top(parser->stack);
     I32 on_stack_precedence  = parse_left_precedence(top_node->kind);
@@ -382,6 +382,14 @@ void parse_stack_transfer_higher_precedence(Parser* parser, Ast_Kind kind) {
     }
   }
 }
+
+void parse_stack_transfer_to_final_is_not(Parser* parser, Ast_Kind kind) {
+  while (top(parser->stack).kind != Ast_Kind_array_open) {
+    Ast_Node node = pop(parser->stack);
+    parse_final_push(parser, node);
+  }
+}
+
 void parse_final_increment_length(Parser* parser, Astid astid) {
   get(parser->final, astid).length++;
 }
@@ -463,7 +471,7 @@ void parse_infix_or_suffix(Parser* parser) {
   case Token_Kind_plus: case Token_Kind_minus:
   case Token_Kind_star: case Token_Kind_dot: {
     Ast_Kind kind = (Ast_Kind)token.kind | Ast_Flag_binary;
-    parse_stack_transfer_higher_precedence(parser, kind);
+    parse_stack_transfer_to_final_higher_precedence(parser, kind);
     ast_push_kind(&parser->stack, kind);
     parse_expression_enter(parser);
   } break;
@@ -477,14 +485,17 @@ void parse_infix_or_suffix(Parser* parser) {
     assert(0);
   } break;
   case Token_Kind_brace_open: {
-    parse_stack_transfer_higher_precedence(parser, Ast_Kind_subscript_open);
+    parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_subscript);
     parse_stack_push_kind_with_final_length(parser, Ast_Kind_subscript_open);
     parse_expression_enter(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
+    parse_stack_transfer_to_final_is_not(parser, Ast_Kind_array_open);
+    del(parser->stack);
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_subscript);
     parse_infix_or_suffix(parser);
   } break;
   case Token_Kind_at: {
-    parse_stack_transfer_higher_precedence(parser, Ast_Kind_load);
+    parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_load);
     parse_final_push_kind(parser, Ast_Kind_load);
     parse_infix_or_suffix(parser);
   } break;
@@ -511,7 +522,7 @@ void parse_infix_or_suffix(Parser* parser) {
   default: {
     parser->tok--;
     if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
-      parse_stack_transfer_higher_precedence(parser, Ast_Kind_call);
+      parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_call);
       ast_push_kind(&parser->stack, Ast_Kind_call);
       parse_expression_enter(parser);
     }
@@ -593,10 +604,12 @@ void parse_expression_enter(Parser* parser) {
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
-    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array);
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array_open);
     parse_expression_enter(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
-    parse_stack_transfer_higher_precedence(parser, Ast_Kind_array);
+    parse_stack_transfer_to_final_is_not(parser, Ast_Kind_array_open);
+    del(parser->stack);
+    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array);
     parse_expression_enter(parser);
   } break;
   default:
@@ -713,7 +726,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("b[1+2]*c",           "s{ b 1 s[] }s ");
+  // final: b 1 2
+  // stack: [ +
+  test("b[1+2]*c",       "s{ b 1 2 add s[] c mul }s ");
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul }s ");
   test("[1+2]b",         "s{ 1 2 add b a[] }s ");
   test("[1]b+c",         "s{ 1 b a[] c add }s ");
