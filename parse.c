@@ -43,12 +43,9 @@ typedef enum {
   Ast_Kind_call            = 155 | Ast_Flag_binary,
   Ast_Kind_if_enter            = 156,
   Ast_Kind_if_leave            = 157,
-  Ast_Kind_if_do               = 158,
-  Ast_Kind_if_else             = 159,
   Ast_Kind_if_leave_else_enter = 160,
   Ast_Kind_else_leave          = 161,
-  Ast_Kind_if_value_do         = 162,
-  Ast_Kind_if_value_else       = 163,
+  Ast_Kind_if_value_leave      = 163,
   Ast_Kind_else_value_leave    = 164,
   Ast_Kind_fun_enter           = 165,
   Ast_Kind_fun_leave           = 166,
@@ -137,17 +134,8 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_if_leave:
       string_builder_push_cstr(&sb, ")fi");
     break;
-    case Ast_Kind_if_do:
-      string_builder_push_cstr(&sb, "if_do");
-    break;
-    case Ast_Kind_if_value_do:
-      string_builder_push_cstr(&sb, "if_v_do");
-    break;
-    case Ast_Kind_if_else:
-      string_builder_push_cstr(&sb, "if_else");
-    break;
-    case Ast_Kind_if_value_else:
-      string_builder_push_cstr(&sb, "v_if_else");
+    case Ast_Kind_if_value_leave:
+      string_builder_push_cstr(&sb, ")vi");
     break;
     case Ast_Kind_if_leave_else_enter:
       string_builder_push_cstr(&sb, ")fi el(");
@@ -202,10 +190,10 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_cstr(&sb, "load");
     break;
     case Ast_Kind_assign_enter:
-      string_builder_push_cstr(&sb, "l=");
+      string_builder_push_cstr(&sb, "=(");
     break;
     case Ast_Kind_assign_leave:
-      string_builder_push_cstr(&sb, "=");
+      string_builder_push_cstr(&sb, ")=");
     break;
     case Ast_Kind_declare_enter:
       string_builder_push_cstr(&sb, "l:");
@@ -429,7 +417,7 @@ void parse_print(Parser parser, Cstr cstr) {
   printf("\n");
 }
 
-I32 parse_assign_from_final_to_stack(Parser* parser, I32 mark) {
+I32 parse_transfer_final_to_stack_from(Parser* parser, I32 mark) {
   I32 result = parser->stack.length;
   for (I32 i = mark; i < parser->final.length; i++) {
     Ast_Node node = get(parser->final, i);
@@ -462,9 +450,6 @@ Astid parse_stack_push_kind(Parser* parser, Ast_Kind kind) {
 
 void parse_expression_enter(Parser* parser);
 void parse_statement(Parser* parser);
-
-void parse_expression_leave(Parser* parser) {
-}
 
 void parse_expression(Parser* parser, Ast_Kind until_kind) {
   parse_stack_push_kind_with_final_length(parser, until_kind);
@@ -545,11 +530,6 @@ void parse_infix_or_suffix(Parser* parser) {
   }
 }
 
-void parse_pattern(Parser* parser) {
-  // TODO
-  assert(0);
-}
-
 void parse_expression_enter(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
@@ -571,11 +551,14 @@ void parse_expression_enter(Parser* parser) {
     parse_stack_transfer_to_final(parser);
     parse_expression(parser, Ast_Kind_if_leave);
     del(parser->stack);
-    // TODO: else optional
-    parse_expect_token(parser, Token_Kind_else);
-    parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
-    parse_expression_enter(parser);
-    parse_final_push_kind(parser, Ast_Kind_else_value_leave);
+    if (parse_match_token(parser, Token_Kind_else)) {
+      parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
+      parse_expression_enter(parser);
+      parse_final_push_kind(parser, Ast_Kind_else_value_leave);
+    }
+    else {
+      parse_final_push_kind(parser, Ast_Kind_if_value_leave);
+    }
   } break;
   case Token_Kind_while: {
   // TODO: consider while value
@@ -688,14 +671,14 @@ void parse_statement(Parser* parser) {
   } break;
   default: {
     parser->tok--;
-    I32 tok = parser->tok;
-    I32 length = parser->final.length;
+    Astid enter = parser->final.length;
     parse_expression(parser, Ast_Kind_assign_enter);
     del(parser->stack);
     if (parse_match_token(parser, Token_Kind_equal)) {
-      parser->tok = tok;
-      parser->final.length = length;
-      parse_pattern(parser);
+      Astid leave = parse_transfer_final_to_stack_from(parser, enter);
+      parse_expression(parser, Ast_Kind_assign_leave);
+      parse_final_push_kind(parser, Ast_Kind_assign_enter);
+      parse_transfer_stack_to_final_from(parser, leave);
     }
   }
   }
@@ -743,8 +726,12 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a = 1",          "s{ 1 =( a )= }s ");
+  test("a = 1 + 2",      "s{ 1 2 add =( a )= }s ");
+  test("a+b = 1-2",      "s{ 1 2 sub =( a b add )= }s ");
+  test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t =( t(2 a , b , )t )= }s ");
   test("wh 1 do 2",        "s{ 1 wh( 2 )hw }s ");
-  test("(if 1 do 2)",      "s{ ( 1 if( 2 )vi }s ");
+  test("(if 1 do 2)",      "s{ ( 1 if( 2 )vi ) }s ");
   test("(if 1 do 2 el 3)", "s{ ( 1 if( 2 )fi el( 3 )ve ) }s ");
   test("if 1 do 2",      "s{ 1 if( 2 )fi }s ");
   test("if 1 do 2 el 3", "s{ 1 if( 2 )fi el( 3 )le }s ");
@@ -772,13 +759,6 @@ void parse_test(void) {
   test("(1\n 2)",        "s{ r(2 1 2 )r }s ");
   test("(1; 2)",         "s{ r(2 1 2 )r }s ");
   test("(1; 2;)",        "s{ r(2 1 2 )r }s ");
-  // test("a = 1",          "s{ 1 a =}s ");
-  // test("a = 1 + 2",      "s{ 1 2 add a =}s ");
-  // test("a+b = 1-2",      "s{ 1 2 sub a b add = }s ");
-  // test("x=1; y:2",       "s{ 1 x = 2 y : }s ");
-  // test("a = 1-2",        "s{ 1 2 sub a = }s ");
-  // test("a = (x=1; y:2)", "s{ r(2 1 x = 2 y : )r a = }s ");
-  // test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t pos0 a = pos1 b pop }s ");
 }
 
 #undef test

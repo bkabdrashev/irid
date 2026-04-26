@@ -152,12 +152,31 @@ vec = { x, y } // (x = x; y = y)
 
 - [ ] named block syntax name:{}. This requires declaration have strict order.
 ```irid
-outer: {
-  inner: {
-    break.outer 10
+outer = {
+  inner = {
+    br outer = 10
   }
 }
 outer + outer
+```
+
+- [ ] br with if/el/wh
+```irid
+wh 1 {
+  a = if 2 do {
+    br // breaks if
+  }
+}
+wh 1 {
+  if 2 do {
+    br // breaks wh
+  }
+}
+a = wh 1 {
+  wh 2 do {
+    br // breaks inner wh
+  }
+}
 ```
 
 - [ ] {} pattern syntax for extracting members from a record
