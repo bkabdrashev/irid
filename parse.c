@@ -715,7 +715,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a + (b,c), d = 1", "s{ t(2 1 , 2 , )t =t(2 a =, b =, )t= )= }s ");
+  test("a + (b,c), d = 1", "s{ 1 =t(2 a ( t(2 b , c , )t ) add =, d =, )t= )= }s ");
   test("a, (b,c), d = 1", "s{ 1 =t(3 a =, ( =t(2 b =, c =, )t= ) =, d =, )t= )= }s ");
   test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t =t(2 a =, b =, )t= )= }s ");
   test("a+b = 1-2",      "s{ 1 2 sub a b add )= }s ");
