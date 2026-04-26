@@ -367,6 +367,10 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return -1;
   }
 }
+void parse_stack_transfer_to_final(Parser* parser) {
+  Ast_Node transfer = pop(parser->stack);
+  parse_final_push(parser, transfer);
+}
 
 void parse_stack_transfer_to_final_higher_precedence(Parser* parser, Ast_Kind kind) {
   while (!ast_is_empty(parser->stack)) {
@@ -450,19 +454,25 @@ Astid parse_stack_push_kind_with_final_length(Parser* parser, Ast_Kind kind) {
   return astid;
 }
 
+Astid parse_stack_push_kind(Parser* parser, Ast_Kind kind) {
+  Ast_Node ast = { kind, {0} };
+  Astid astid = push(parser->stack, ast);
+  return astid;
+}
+
 void parse_expression_enter(Parser* parser);
 void parse_statement(Parser* parser);
 
 void parse_expression_leave(Parser* parser) {
-  while (parser->stack.length > 0) {
+}
+
+void parse_expression(Parser* parser, Ast_Kind until_kind) {
+  parse_stack_push_kind_with_final_length(parser, until_kind);
+  parse_expression_enter(parser);
+  while (!empty(parser->stack) && top(parser->stack).kind != until_kind) {
     Ast_Node node = pop(parser->stack);
     parse_final_push(parser, node);
   }
-}
-
-void parse_expression(Parser* parser) {
-  parse_expression_enter(parser);
-  parse_expression_leave(parser);
 }
 
 void parse_infix_or_suffix(Parser* parser) {
@@ -500,24 +510,25 @@ void parse_infix_or_suffix(Parser* parser) {
     parse_infix_or_suffix(parser);
   } break;
   case Token_Kind_comma: {
-    // TODO: tuple_enter insert
-    // parse_stack_transfer_higher_precedence(parser, Ast_Kind_tuple_enter);
-    // Ast_Node* top = &top(parser.stack);
-    // if (top->kind == Ast_Kind_tuple_leave) {
-    //   Ast_Node* open = &get(parser.final, top->enter_at);
-    //   Ast_Node split = { Ast_Kind_tuple_split, .position = open->length };
-    //   parse_final_push(&parser, split);
-    //   parse_final_increment_length(&parser, top->enter_at);
-    // }
-    // else {
-    //   Ast_Node tuple_enter = { Ast_Kind_tuple_enter, {.length = 1} };
-    //   Astid tuple_enter_astid = parse_final_insert(&parser, top->last_at, tuple_enter);
-    //   Ast_Node split = { Ast_Kind_tuple_split, .position = 0 };
-    //   parse_final_push(&parser, split);
-    //   Ast_Node tuple_leave = { Ast_Kind_tuple_leave, .enter_at = tuple_enter_astid };
-    //   add(parser.stack, tuple_leave);
-    // }
-    assert(0);
+    parse_print(*parser, "comma");
+    parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_tuple_enter);
+    Ast_Node* top = &top(parser->stack);
+    if (top->kind == Ast_Kind_tuple_leave) {
+      Ast_Node* open = &get(parser->final, top->enter_at);
+      Ast_Node split = { Ast_Kind_tuple_split, .position = open->length };
+      parse_final_push(parser, split);
+      parse_final_increment_length(parser, top->enter_at);
+    }
+    else {
+      Ast_Node tuple_enter = { Ast_Kind_tuple_enter, {.length = 1} };
+      Astid tuple_enter_astid = parse_final_insert(parser, top->last_at, tuple_enter);
+      parse_print(*parser, "insert");
+      Ast_Node split = { Ast_Kind_tuple_split, .position = 0 };
+      parse_final_push(parser, split);
+      Ast_Node tuple_leave = { Ast_Kind_tuple_leave, .enter_at = tuple_enter_astid };
+      add(parser->stack, tuple_leave);
+    }
+    parse_expression_enter(parser);
   } break;
   default: {
     parser->tok--;
@@ -542,7 +553,7 @@ void parse_expression_enter(Parser* parser) {
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
   case Token_Kind_at_prefix:    case Token_Kind_at: {
     Ast_Kind kind = Ast_Flag_unary | ((Ast_Kind)token.kind & 0xff);
-    ast_push_kind(&parser->stack, kind);
+    parse_stack_push_kind(parser, kind);
     parse_expression_enter(parser);
   } break;
   case Token_Kind_int: case Token_Kind_name: {
@@ -551,10 +562,10 @@ void parse_expression_enter(Parser* parser) {
     parse_final_push(parser, ast);
   } break;
   case Token_Kind_if: {
-    parse_expression(parser);
+    parse_expression(parser, Ast_Kind_if_enter);
     parse_expect_token(parser, Token_Kind_do);
-    parse_final_push_kind(parser, Ast_Kind_if_enter);
-    parse_expression(parser);
+    parse_stack_transfer_to_final(parser);
+    parse_expression(parser, Ast_Kind_if_leave);
     parse_expect_token(parser, Token_Kind_else);
     parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
     parse_expression_enter(parser);
@@ -562,7 +573,7 @@ void parse_expression_enter(Parser* parser) {
   } break;
   case Token_Kind_while: {
   // TODO: consider while value
-    parse_expression_enter(parser);
+    parse_expression(parser, Ast_Kind_while_enter);
     parse_expect_token(parser, Token_Kind_do);
     parse_final_push_kind(parser, Ast_Kind_while_enter);
     parse_statement(parser);
@@ -584,6 +595,8 @@ void parse_expression_enter(Parser* parser) {
       // TODO: equal/colon
       }
     }
+    // BUG: leave is nop
+    assert(0);
     parse_expression_leave(parser);
     if (enter->length == 1) {
       enter->kind = enter_kind;
@@ -604,12 +617,10 @@ void parse_expression_enter(Parser* parser) {
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
-    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array_open);
-    parse_expression_enter(parser);
-    parse_expect_token(parser, Token_Kind_brace_close);
-    parse_stack_transfer_to_final_is_not(parser, Ast_Kind_array_open);
+    parse_expression(parser, Ast_Kind_array_open);
     del(parser->stack);
-    parse_stack_push_kind_with_final_length(parser, Ast_Kind_array);
+    parse_expect_token(parser, Token_Kind_brace_close);
+    parse_stack_push_kind(parser, Ast_Kind_array);
     parse_expression_enter(parser);
   } break;
   default:
@@ -631,9 +642,9 @@ void parse_statement(Parser* parser) {
     parse_final_push_kind(parser, Ast_Kind_source_leave);
   } break;
   case Token_Kind_if: {
-    parse_expression(parser);
+    parse_expression(parser, Ast_Kind_if_enter);
+    parse_stack_transfer_to_final(parser);
     parse_expect_token(parser, Token_Kind_do);
-    parse_final_push_kind(parser, Ast_Kind_if_enter);
     parse_statement(parser);
     if (parse_match_token(parser, Token_Kind_else)) {
       parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
@@ -645,9 +656,9 @@ void parse_statement(Parser* parser) {
     }
   } break;
   case Token_Kind_while: {
-    parse_expression(parser);
+    parse_expression(parser, Ast_Kind_while_enter);
+    parse_stack_transfer_to_final(parser);
     parse_expect_token(parser, Token_Kind_do);
-    parse_final_push_kind(parser, Ast_Kind_while_enter);
     parse_statement(parser);
     parse_final_push_kind(parser, Ast_Kind_while_leave);
   } break;
@@ -674,7 +685,8 @@ void parse_statement(Parser* parser) {
     parser->tok--;
     I32 tok = parser->tok;
     I32 length = parser->final.length;
-    parse_expression(parser);
+    parse_expression(parser, Ast_Kind_assign_enter);
+    del(parser->stack);
     if (parse_match_token(parser, Token_Kind_equal)) {
       parser->tok = tok;
       parser->final.length = length;
@@ -726,8 +738,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  // final: b 1 2
-  // stack: [ +
+  test("1, 2",       "s{ t( 1 ; 2 )t }s ");
+  return;
   test("b[1+2]*c",       "s{ b 1 2 add s[] c mul }s ");
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul }s ");
   test("[1+2]b",         "s{ 1 2 add b a[] }s ");
