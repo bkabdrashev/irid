@@ -150,13 +150,13 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_cstr(&sb, "v_if_else");
     break;
     case Ast_Kind_if_leave_else_enter:
-      string_builder_push_cstr(&sb, "else(");
+      string_builder_push_cstr(&sb, ")fi el(");
     break;
     case Ast_Kind_else_value_leave:
-      string_builder_push_cstr(&sb, ")ev");
+      string_builder_push_cstr(&sb, ")ve");
     break;
     case Ast_Kind_else_leave:
-      string_builder_push_cstr(&sb, ")el");
+      string_builder_push_cstr(&sb, ")le");
     break;
     case Ast_Kind_add:
       string_builder_push_cstr(&sb, "add");
@@ -570,6 +570,7 @@ void parse_expression_enter(Parser* parser) {
     parse_expect_token(parser, Token_Kind_do);
     parse_stack_transfer_to_final(parser);
     parse_expression(parser, Ast_Kind_if_leave);
+    del(parser->stack);
     parse_expect_token(parser, Token_Kind_else);
     parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
     parse_expression_enter(parser);
@@ -589,7 +590,8 @@ void parse_expression_enter(Parser* parser) {
     Ast_Kind enter_kind = Ast_Kind_paren_enter;
     Ast_Kind leave_kind = Ast_Kind_paren_leave;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
-      parse_expression_enter(parser);
+      parse_expression(parser, Ast_Kind_paren_leave);
+      del(parser->stack);
       enter->length++;
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         enter_kind = Ast_Kind_record_enter;
@@ -597,11 +599,9 @@ void parse_expression_enter(Parser* parser) {
       }
       else if (parse_match_token(parser, Token_Kind_equal)) {
       // TODO: equal/colon
+        assert(0);
       }
     }
-    // BUG: leave is nop
-    assert(0);
-    parse_expression_leave(parser);
     if (enter->length == 1) {
       enter->kind = enter_kind;
       enter->leave_at = parse_final_push_kind(parser, leave_kind);
@@ -742,9 +742,12 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("(if 1 do 2 el 3)", "s{ ( 1 if( 2 )fi el( 3 )ve ) }s ");
+  test("if 1 do 2",      "s{ 1 if( 2 )fi }s ");
+  test("if 1 do 2 el 3", "s{ 1 if( 2 )fi el( 3 )le }s ");
+  test("1,2",            "s{ t(2 1 , 2 , )t }s ");
+  test("(1,2;3)",        "s{ r(2 t(2 1 , 2 , )t 3 )r }s ");
   test("b[1+2]*c",       "s{ b 1 2 add s[] c mul }s ");
-  return;
-  test("1,2",       "s{ t(2 1 , 2 , )t }s ");
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul }s ");
   test("[1+2]b",         "s{ 1 2 add b a[] }s ");
   test("[1]b+c",         "s{ 1 b a[] c add }s ");
@@ -756,6 +759,7 @@ void parse_test(void) {
   test("1 + 2",          "s{ 1 2 add }s ");
   test("1 + -2",         "s{ 1 2 neg add }s ");
   test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
+  test("1*(2+3)",        "s{ 1 ( 2 3 add ) mul }s ");
   test("(1 + 2)*3",      "s{ ( 1 2 add ) 3 mul }s ");
   test("foo 1\n2",       "s{ foo 1 call 2 }s ");
   test("bar 1 2",        "s{ bar 1 call 2 call }s ");

@@ -305,7 +305,7 @@ Cstr cstr_from_slice_token(Tokens slice, C8* buffer) {
       string_builder_push_cstr(&sb, "do");
     break;
     case Token_Kind_else:
-      string_builder_push_cstr(&sb, "else");
+      string_builder_push_cstr(&sb, "el");
     break;
     case Token_Kind_return:
       string_builder_push_cstr(&sb, "return");
