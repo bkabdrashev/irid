@@ -441,6 +441,11 @@ void parse_expression_flag(Parser* parser, Ast_Flag flag) {
   parse_stack_push_kind(parser, Ast_Kind_none);
   I32 stack_length = parser->stack.length;
   parse_expression_enter(parser, flag);
+  while (parser->stack.length > stack_length) {
+    Ast_Node node = pop(parser->stack);
+    parse_final_push(parser, node);
+  }
+  del(parser->stack);
   if (parse_match_token(parser, Token_Kind_comma)) {
     Ast_Node tuple_enter = { Ast_Kind_tuple_enter | flag, { .length = 0 } };
     Astid tuple_enter_astid = parse_final_insert(parser, final_length, tuple_enter);
@@ -461,11 +466,6 @@ void parse_expression_flag(Parser* parser, Ast_Flag flag) {
     Ast_Node tuple_leave = { Ast_Kind_tuple_leave | flag, .enter_at = tuple_enter_astid };
     parse_final_push(parser, tuple_leave);
   }
-  while (parser->stack.length > stack_length) {
-    Ast_Node node = pop(parser->stack);
-    parse_final_push(parser, node);
-  }
-  del(parser->stack);
 }
 
 void parse_expression_flag_none(Parser* parser) {
@@ -715,8 +715,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a + (b,c), d = 1", "s{ t(2 1 , 2 , )t =t(2 a =, b =, )t= )= }s ");
+  test("a, (b,c), d = 1", "s{ 1 =t(3 a =, ( =t(2 b =, c =, )t= ) =, d =, )t= )= }s ");
   test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t =t(2 a =, b =, )t= )= }s ");
-  return;
   test("a+b = 1-2",      "s{ 1 2 sub a b add )= }s ");
   test("a, b, c = 1",    "s{ 1 =t(3 a =, b =, c =, )t= )= }s ");
   test("a, b = 1",       "s{ 1 =t(2 a =, b =, )t= )= }s ");
