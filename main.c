@@ -7,12 +7,12 @@
 
 int main(void) {
   istr_init(MB(64));
-  istr_from_cstr_token_kind("if",     Token_Kind_if);
-  istr_from_cstr_token_kind("do",     Token_Kind_do);
-  istr_from_cstr_token_kind("el",     Token_Kind_else);
-  istr_from_cstr_token_kind("return", Token_Kind_return);
-  istr_from_cstr_token_kind("while",  Token_Kind_while);
-  istr_from_cstr_token_kind("break",  Token_Kind_break);
+  istr_from_cstr_token_kind("if", Token_Kind_if);
+  istr_from_cstr_token_kind("do", Token_Kind_do);
+  istr_from_cstr_token_kind("el", Token_Kind_else);
+  istr_from_cstr_token_kind("re", Token_Kind_return);
+  istr_from_cstr_token_kind("wh", Token_Kind_while);
+  istr_from_cstr_token_kind("br", Token_Kind_break);
   parse_test();
   irgen_test();
   return 0;

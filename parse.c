@@ -117,19 +117,19 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
       string_builder_push_cstr(&sb, "infix");
     break;
     case Ast_Kind_return:
-      string_builder_push_cstr(&sb, "return");
+      string_builder_push_cstr(&sb, "re");
     break;
     case Ast_Kind_while_enter:
-      string_builder_push_cstr(&sb, "while(");
+      string_builder_push_cstr(&sb, "wh(");
     break;
     case Ast_Kind_while_leave:
-      string_builder_push_cstr(&sb, ")w");
+      string_builder_push_cstr(&sb, ")hw");
     break;
     case Ast_Kind_while_do:
       string_builder_push_cstr(&sb, "while_do");
     break;
     case Ast_Kind_break:
-      string_builder_push_cstr(&sb, "break");
+      string_builder_push_cstr(&sb, "br");
     break;
     case Ast_Kind_if_enter:
       string_builder_push_cstr(&sb, "if(");
@@ -571,6 +571,7 @@ void parse_expression_enter(Parser* parser) {
     parse_stack_transfer_to_final(parser);
     parse_expression(parser, Ast_Kind_if_leave);
     del(parser->stack);
+    // TODO: else optional
     parse_expect_token(parser, Token_Kind_else);
     parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
     parse_expression_enter(parser);
@@ -742,6 +743,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("wh 1 do 2",        "s{ 1 wh( 2 )hw }s ");
+  test("(if 1 do 2)",      "s{ ( 1 if( 2 )vi }s ");
   test("(if 1 do 2 el 3)", "s{ ( 1 if( 2 )fi el( 3 )ve ) }s ");
   test("if 1 do 2",      "s{ 1 if( 2 )fi }s ");
   test("if 1 do 2 el 3", "s{ 1 if( 2 )fi el( 3 )le }s ");
