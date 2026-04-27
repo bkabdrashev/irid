@@ -552,28 +552,24 @@ void parse_expression_enter(Parser* parser, Ast_Flag flag) {
     parse_final_push_kind(parser, Ast_Kind_while_leave);
   } break;
   case Token_Kind_paren_open: {
-    Astid astid_enter = parse_final_push_kind(parser, Ast_Kind_record_enter);
-    Ast_Node* enter = &get(parser->final, astid_enter);
-    Ast_Kind enter_kind = Ast_Kind_paren_enter;
-    Ast_Kind leave_kind = Ast_Kind_paren_leave;
+    Astid final_length = parser->final.length;
+    Astid record_length = 0;
+    B8 is_semicolon = false;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
       parse_expression_flag(parser, flag);
-      enter->length++;
+      record_length++;
       if (parse_match_token(parser, Token_Kind_semicolon)) {
-        enter_kind = Ast_Kind_record_enter;
-        leave_kind = Ast_Kind_record_leave;
+        is_semicolon = true;
       }
       else if (parse_match_token(parser, Token_Kind_equal)) {
       // TODO: equal/colon
         assert(0);
       }
     }
-    if (enter->length == 1) {
-      enter->kind = enter_kind;
-      enter->leave_at = parse_final_push_kind(parser, leave_kind);
-    }
-    else {
-      enter->leave_at = parse_final_push_kind(parser, Ast_Kind_record_leave);
+    if (is_semicolon || record_length != 1) {
+      Ast_Node record_enter = { Ast_Kind_record_enter, .length = record_length };
+      parse_final_insert(parser, final_length, record_enter);
+      parse_final_push_kind(parser, Ast_Kind_record_leave);
     }
   } break;
   case Token_Kind_curly_open: {
@@ -715,8 +711,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a + (b,c), d = 1", "s{ 1 =t(2 a ( t(2 b , c , )t ) add =, d =, )t= )= }s ");
-  test("a, (b,c), d = 1", "s{ 1 =t(3 a =, ( =t(2 b =, c =, )t= ) =, d =, )t= )= }s ");
+  test("a + (b,c), d = 1", "s{ 1 =t(2 a t(2 b , c , )t add =, d =, )t= )= }s ");
+  test("a, (b,c), d = 1", "s{ 1 =t(3 a =, =t(2 b =, c =, )t= =, d =, )t= )= }s ");
   test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t =t(2 a =, b =, )t= )= }s ");
   test("a+b = 1-2",      "s{ 1 2 sub a b add )= }s ");
   test("a, b, c = 1",    "s{ 1 =t(3 a =, b =, c =, )t= )= }s ");
@@ -724,8 +720,8 @@ void parse_test(void) {
   test("a = 1",          "s{ 1 a )= }s ");
   test("a = 1 + 2",      "s{ 1 2 add a )= }s ");
   test("wh 1 do 2",        "s{ 1 wh( 2 )hw }s ");
-  test("(if 1 do 2)",      "s{ ( 1 if( 2 )vi ) }s ");
-  test("(if 1 do 2 el 3)", "s{ ( 1 if( 2 )fi el( 3 )ve ) }s ");
+  test("(if 1 do 2)",      "s{ 1 if( 2 )vi }s ");
+  test("(if 1 do 2 el 3)", "s{ 1 if( 2 )fi el( 3 )ve }s ");
   test("if 1 do 2",      "s{ 1 if( 2 )fi }s ");
   test("if 1 do 2 el 3", "s{ 1 if( 2 )fi el( 3 )le }s ");
   test("1,2",            "s{ t(2 1 , 2 , )t }s ");
@@ -742,12 +738,12 @@ void parse_test(void) {
   test("1 + 2",          "s{ 1 2 add }s ");
   test("1 + -2",         "s{ 1 2 neg add }s ");
   test("1 + 2*3",        "s{ 1 2 3 mul add }s ");
-  test("1*(2+3)",        "s{ 1 ( 2 3 add ) mul }s ");
-  test("(1 + 2)*3",      "s{ ( 1 2 add ) 3 mul }s ");
+  test("1*(2+3)",        "s{ 1 2 3 add mul }s ");
+  test("(1 + 2)*3",      "s{ 1 2 add 3 mul }s ");
   test("foo 1\n2",       "s{ foo 1 call 2 }s ");
   test("bar 1 2",        "s{ bar 1 call 2 call }s ");
-  test("(1)",            "s{ ( 1 ) }s ");
-  test("(1\n)",          "s{ ( 1 ) }s ");
+  test("(1)",            "s{ 1 }s ");
+  test("(1\n)",          "s{ 1 }s ");
   test("(1;)",           "s{ r(1 1 )r }s ");
   test("(1\n 2)",        "s{ r(2 1 2 )r }s ");
   test("(1; 2)",         "s{ r(2 1 2 )r }s ");

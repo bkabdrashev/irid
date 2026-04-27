@@ -470,10 +470,13 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_assign_tuple_enter: {
-      Irid rhs = top(irgen.irid_stack);
+      Irid rhs = pop(irgen.irid_stack);
+      Irid start = irgen.ir_stack.length;
+      for (I32 i = 0; i < node.length; i++) {
+        ir_push_position_offset(rhs, i);
+      }
       for (I32 i = node.length-1; i >= 0; i--) {
-        Irid pos = ir_push_position_offset(rhs, i);
-        add(irgen.irid_stack, pos);
+        add(irgen.irid_stack, i+start);
       }
     } break;
     case Ast_Kind_assign_tuple_leave:
@@ -575,7 +578,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a,(b,c) = 1", "");
+  test("a,(b,c),d = 1", "");
 }
 
 #undef test
