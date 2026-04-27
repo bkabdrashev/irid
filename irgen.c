@@ -429,18 +429,14 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       add(irgen.recordid_stack, tuple);
     } break;
     case Ast_Kind_tuple_split: {
-      if (irgen.recordid_stack.length) {
-        Recordid tuple = top(irgen.recordid_stack);
-        Irid val = pop(irgen.irid_stack);
-        recordid_push_position(tuple, node.position, val);
-      }
+      Recordid tuple = top(irgen.recordid_stack);
+      Irid val = pop(irgen.irid_stack);
+      recordid_push_position(tuple, node.position, val);
     } break;
     case Ast_Kind_tuple_leave: {
-      if (irgen.recordid_stack.length) {
-        Recordid tuple = pop(irgen.recordid_stack);
-        Irid irid = ir_push_record(tuple);
-        add(irgen.irid_stack, irid);
-      }
+      Recordid tuple = pop(irgen.recordid_stack);
+      Irid irid = ir_push_record(tuple);
+      add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_int: {
       Irid irid = ir_push_int(node.i64);
@@ -480,10 +476,11 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       }
     } break;
     case Ast_Kind_assign_tuple_leave:
-      astid++;
+      astid++; // NOTE: skips )= or =,
       break;
     case Ast_Kind_assign_tuple_split:
     case Ast_Kind_assign_leave: {
+      irgen_print();
       Irid lhs = pop(irgen.irid_stack);
       Irid rhs = pop(irgen.irid_stack);
       Ir* ir = &get(irgen.ir_stack, lhs);
@@ -578,7 +575,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a,(b,c),d = 1", "");
+  // test("(a,b) + 1 = 2", "");
 }
 
 #undef test

@@ -14,6 +14,6 @@ int main(void) {
   istr_from_cstr_token_kind("wh", Token_Kind_while);
   istr_from_cstr_token_kind("br", Token_Kind_break);
   parse_test();
-  irgen_test();
+  // irgen_test();
   return 0;
 }

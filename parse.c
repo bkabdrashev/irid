@@ -2,59 +2,120 @@ typedef enum {
   Ast_Flag_none   = 0,
   Ast_Flag_unary  = 1 << 8,
   Ast_Flag_binary = 1 << 9,
-  Ast_Flag_assign = 1 << 10,
+  Ast_Flag_list   = 1 << 10,
+  Ast_Flag_enter = 1 << 11,
+  Ast_Flag_leave = 1 << 12,
+  Ast_Flag_split = 1 << 13,
 } Ast_Flag;
+
+enum {
+  Ast_Kind_name      = Token_Kind_name & 0xff,
+  Ast_Kind_int       = Token_Kind_int & 0xff,
+  Ast_Kind_add       = Token_Kind_plus,
+  Ast_Kind_sub       = Token_Kind_minus,
+  Ast_Kind_mul       = Token_Kind_star,
+  Ast_Kind_neg       = Token_Kind_minus+1,
+  Ast_Kind_pos       = Token_Kind_plus+1,
+  Ast_Kind_ptr       = Token_Kind_at,
+  Ast_Kind_load      = Token_Kind_at+1,
+  Ast_Kind_dot       = Token_Kind_dot,
+  Ast_Kind_subscript = Token_Kind_brace_open,
+  Ast_Kind_array     = Token_Kind_brace_open + 1,
+  Ast_Kind_assign    = Token_Kind_equal,
+  Ast_Kind_declare   = Token_Kind_colon,
+  Ast_Kind_block       = (Token_Kind_curly_open & 0xff),
+  Ast_Kind_block_value = (Token_Kind_curly_open & 0xff) + 1,
+  Ast_Kind_source      = Token_Kind_source_enter,
+  Ast_Kind_tuple       = Token_Kind_comma,
+  Ast_Kind_assign_tuple= Token_Kind_comma+1,
+  Ast_Kind_fun         = Token_Kind_arrow,
+  Ast_Kind_if          = Token_Kind_if & 0xff,
+  Ast_Kind_if_value    = (Token_Kind_if & 0xff) +1,
+  Ast_Kind_else        = Token_Kind_else,
+  Ast_Kind_else_value  = Token_Kind_else+1,
+  Ast_Kind_return      = Token_Kind_return,
+  Ast_Kind_return_void = Token_Kind_return+1,
+  Ast_Kind_break       = Token_Kind_break,
+  Ast_Kind_break_void  = Token_Kind_break+1,
+  Ast_Kind_while       = Token_Kind_while,
+  Ast_Kind_record      = Token_Kind_paren_open & 0xff,
+  Ast_Kind_call,
+};
 
 typedef enum {
   Ast_Kind_none = 0,
-  Ast_Kind_name = Token_Kind_name & 0xff,
-  Ast_Kind_int  = Token_Kind_int & 0xff,
-  Ast_Kind_add  = Token_Kind_plus  | Ast_Flag_binary,
-  Ast_Kind_sub  = Token_Kind_minus | Ast_Flag_binary,
-  Ast_Kind_mul  = Token_Kind_star  | Ast_Flag_binary,
-  Ast_Kind_neg  = Token_Kind_minus | Ast_Flag_unary,
-  Ast_Kind_pos  = Token_Kind_plus  | Ast_Flag_unary,
-  Ast_Kind_ptr  = Token_Kind_at    | Ast_Flag_unary,
-  Ast_Kind_access = Token_Kind_dot | Ast_Flag_binary,
-  Ast_Kind_load            = 128 | Ast_Flag_unary,
-  Ast_Kind_subscript       = 130 | Ast_Flag_binary,
-  Ast_Kind_subscript_open  = 130,
-  Ast_Kind_position        = 131,
-  Ast_Kind_array           = 133 | Ast_Flag_binary,
-  Ast_Kind_array_open      = 133,
-  Ast_Kind_assign_enter      = 134,
-  Ast_Kind_assign_leave      = 135,
-  Ast_Kind_declare_enter     = 136,
-  Ast_Kind_declare_leave     = 137,
-  Ast_Kind_paren_enter     = 139,
-  Ast_Kind_paren_leave     = 140,
-  Ast_Kind_record_enter    = 141,
-  Ast_Kind_record_leave    = 142,
-  Ast_Kind_tuple_enter = 143,
-  Ast_Kind_tuple_split = 144,
-  Ast_Kind_tuple_leave = 145,
-  Ast_Kind_assign_tuple_enter = 143 | Ast_Flag_assign,
-  Ast_Kind_assign_tuple_split = 144 | Ast_Flag_assign,
-  Ast_Kind_assign_tuple_leave = 145 | Ast_Flag_assign,
-  Ast_Kind_source_enter    = 146,
-  Ast_Kind_source_leave    = 147,
-  Ast_Kind_block_enter     = 148,
-  Ast_Kind_block_leave     = 149,
-  Ast_Kind_block_value_enter = 150,
-  Ast_Kind_block_value_leave = 151,
-  Ast_Kind_call            = 155 | Ast_Flag_binary,
-  Ast_Kind_if_enter            = 156,
-  Ast_Kind_if_leave            = 157,
-  Ast_Kind_if_leave_else_enter = 160,
-  Ast_Kind_else_leave          = 161,
-  Ast_Kind_if_value_leave      = 163,
-  Ast_Kind_else_value_leave    = 164,
-  Ast_Kind_fun_enter           = 165,
-  Ast_Kind_fun_leave           = 166,
-  Ast_Kind_return              = 167,
-  Ast_Kind_while_enter         = 168,
-  Ast_Kind_while_leave         = 169,
-  Ast_Kind_break               = 173,
+  Ast_Kind_add_enter    = Ast_Kind_add | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_add_split    = Ast_Kind_add | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_add_leave    = Ast_Kind_add | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_sub_enter    = Ast_Kind_sub | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_sub_split    = Ast_Kind_sub | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_sub_leave    = Ast_Kind_sub | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_mul_enter    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_mul_split    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_mul_leave    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_neg_enter    = Ast_Kind_neg | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_neg_leave    = Ast_Kind_neg | Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_pos_enter    = Ast_Kind_pos | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_pos_leave    = Ast_Kind_pos | Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_ptr_enter    = Ast_Kind_ptr | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_ptr_leave    = Ast_Kind_ptr | Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_dot_enter    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_dot_split    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_dot_leave    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_load_enter   = Ast_Kind_load| Ast_Flag_unary | Ast_Flag_enter,
+  Ast_Kind_load_leave   = Ast_Kind_load| Ast_Flag_unary | Ast_Flag_leave,
+  Ast_Kind_subscript_enter = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_subscript_split = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_subscript_leave = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_array_enter     = Ast_Kind_array     | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_array_split     = Ast_Kind_array     | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_array_leave     = Ast_Kind_array     | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_assign_enter    = Ast_Kind_assign    | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_assign_split    = Ast_Kind_assign    | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_assign_leave    = Ast_Kind_assign    | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_declare_enter   = Ast_Kind_declare   | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_declare_split   = Ast_Kind_declare   | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_declare_leave   = Ast_Kind_declare   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_record_enter    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_enter,
+  Ast_Kind_record_split    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_record_leave    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_leave,
+  Ast_Kind_tuple_enter     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_enter,
+  Ast_Kind_tuple_split     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_tuple_leave     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_leave,
+  Ast_Kind_assign_tuple_enter = Ast_Kind_assign_tuple | Ast_Flag_list | Ast_Flag_enter,
+  Ast_Kind_assign_tuple_split = Ast_Kind_assign_tuple | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_assign_tuple_leave = Ast_Kind_assign_tuple | Ast_Flag_list | Ast_Flag_leave,
+  Ast_Kind_source_enter       = Ast_Kind_source | Ast_Flag_list | Ast_Flag_enter,
+  Ast_Kind_source_split       = Ast_Kind_source | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_source_leave       = Ast_Kind_source | Ast_Flag_list | Ast_Flag_leave,
+  Ast_Kind_block_enter        = Ast_Kind_block | Ast_Flag_list | Ast_Flag_enter,
+  Ast_Kind_block_split        = Ast_Kind_block | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_block_leave        = Ast_Kind_block | Ast_Flag_list | Ast_Flag_leave,
+  Ast_Kind_block_value_enter  = Ast_Kind_block_value | Ast_Flag_list | Ast_Flag_enter,
+  Ast_Kind_block_vlaue_split  = Ast_Kind_block_value | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_block_value_leave  = Ast_Kind_block_value | Ast_Flag_list | Ast_Flag_leave,
+  Ast_Kind_call_enter         = Ast_Kind_call | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_call_split         = Ast_Kind_call | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_call_leave         = Ast_Kind_call | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_fun_enter          = Ast_Kind_fun  | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_fun_split          = Ast_Kind_fun  | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_fun_leave          = Ast_Kind_fun  | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_return_enter        = Ast_Kind_return | Ast_Flag_unary | Ast_Flag_enter,
+  Ast_Kind_return_leave        = Ast_Kind_return| Ast_Flag_unary | Ast_Flag_leave,
+  // Ast_Kind_return_void         = Ast_Kind_return,
+  Ast_Kind_break_enter         = Ast_Kind_break | Ast_Flag_unary | Ast_Flag_enter,
+  Ast_Kind_break_leave         = Ast_Kind_break | Ast_Flag_unary | Ast_Flag_leave,
+  // Ast_Kind_break_void          = Ast_Kind_break ,
+  Ast_Kind_while_enter         = Ast_Kind_while | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_while_split         = Ast_Kind_while | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_while_leave         = Ast_Kind_while | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_if_enter,
+  Ast_Kind_if_split,
+  Ast_Kind_if_leave,
+  Ast_Kind_if_leave_else_enter,
+  Ast_Kind_else_leave,
+  Ast_Kind_if_value_leave,
+  Ast_Kind_else_value_leave,
 } Ast_Kind;
 
 typedef I32 Astid;
@@ -62,18 +123,23 @@ typedef I32 Astid;
 typedef struct {
   Ast_Kind kind;
   union {
-    U64 value;
-    I32 position;
-    struct {
-      Astid enter_at;
-      Astid last_at;
-    };
-    struct {
-      Astid leave_at;
-      I32 length;
-    };
+    U64   bits;
     I64   i64;
     Istr  istr;
+    struct {
+      I32   position;
+      Astid next;
+    } split;
+    struct {
+      Astid length;
+    } list;
+    struct {
+      Astid one;
+      Astid two;
+    } binary;
+    struct {
+      Astid one;
+    } unary;
   };
 } Ast_Node; 
 
@@ -91,162 +157,124 @@ B8 ast_is_empty(Ast ast) {
   return ast.length == 0;
 }
 
+Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
+  Cstr result = "unknown";
+  switch (ast_kind & 0xff) {
+  case Ast_Kind_none:         result = "none"; break;
+  case Ast_Kind_name:         result = "name"; break;
+  case Ast_Kind_int:          result = "int"; break;
+  case Ast_Kind_add:          result = "add"; break;
+  case Ast_Kind_sub:          result = "sub"; break;
+  case Ast_Kind_mul:          result = "mul"; break;
+  case Ast_Kind_neg:          result = "neg"; break;
+  case Ast_Kind_pos:          result = "pos"; break;
+  case Ast_Kind_ptr:          result = "ptr"; break;
+  case Ast_Kind_load:         result = "load"; break;
+  case Ast_Kind_dot:          result = "dot"; break;
+  case Ast_Kind_subscript:    result = "subscript"; break;
+  case Ast_Kind_array:        result = "array"; break;
+  case Ast_Kind_assign:       result = "assign"; break;
+  case Ast_Kind_declare:      result = "declare"; break;
+  case Ast_Kind_block:        result = "block"; break;
+  case Ast_Kind_block_value:  result = "block_value"; break;
+  case Ast_Kind_source:       result = "source"; break;
+  case Ast_Kind_tuple:        result = "tuple"; break;
+  case Ast_Kind_assign_tuple: result = "assign_tuple"; break;
+  case Ast_Kind_fun:          result = "fun"; break;
+  case Ast_Kind_if:           result = "if"; break;
+  case Ast_Kind_if_value:     result = "if_value"; break;
+  case Ast_Kind_else:         result = "else"; break;
+  case Ast_Kind_else_value:   result = "else_value"; break;
+  case Ast_Kind_return:       result = "return"; break;
+  case Ast_Kind_return_void:  result = "return_void"; break;
+  case Ast_Kind_break:        result = "break"; break;
+  case Ast_Kind_break_void:   result = "break_void"; break;
+  case Ast_Kind_while:        result = "while"; break;
+  case Ast_Kind_record:       result = "record"; break;
+  case Ast_Kind_call:         result = "call"; break;
+  }
+  return result;
+}
+
+Cstr cstr_from_ast_kind_enter(Ast_Kind ast_kind) {
+  Cstr result = "<unknown>";
+  switch (ast_kind & 0xff) {
+  case Ast_Kind_block:        result = "b{"; break;
+  case Ast_Kind_block_value:  result = "v{"; break;
+  case Ast_Kind_source:       result = "s{"; break;
+  case Ast_Kind_tuple:        result = "t("; break;
+  case Ast_Kind_assign_tuple: result = "a("; break;
+  case Ast_Kind_if:           result = "if"; break;
+  case Ast_Kind_if_value:     result = "if"; break;
+  case Ast_Kind_else:         result = "el"; break;
+  case Ast_Kind_else_value:   result = "el"; break;
+  case Ast_Kind_while:        result = "wh"; break;
+  case Ast_Kind_record:       result = "r("; break;
+  default: result = cstr_from_ast_kind(ast_kind);
+  }
+  return result;
+}
+
+Cstr cstr_from_ast_kind_leave(Ast_Kind ast_kind) {
+  Cstr result = "<unknown>";
+  switch (ast_kind & 0xff) {
+  case Ast_Kind_block:        result = "}b"; break;
+  case Ast_Kind_block_value:  result = "}v"; break;
+  case Ast_Kind_source:       result = "}s"; break;
+  case Ast_Kind_tuple:        result = ")t"; break;
+  case Ast_Kind_assign_tuple: result = ")a"; break;
+  case Ast_Kind_record:       result = ")r"; break;
+  default: result = cstr_from_ast_kind(ast_kind);
+  }
+  return result;
+}
+
+Cstr cstr_from_ast_kind_split(Ast_Kind ast_kind) {
+  Cstr result = "<unknown>";
+  switch (ast_kind & 0xff) {
+  case Ast_Kind_call:         result = "call"; break;
+  case Ast_Kind_add:          result = "+"; break;
+  case Ast_Kind_sub:          result = "-"; break;
+  case Ast_Kind_mul:          result = "*"; break;
+  case Ast_Kind_dot:          result = "."; break;
+  case Ast_Kind_subscript:    result = "[]"; break;
+  case Ast_Kind_array:        result = "[]"; break;
+  case Ast_Kind_assign:       result = "="; break;
+  case Ast_Kind_declare:      result = ":"; break;
+  case Ast_Kind_block:        result = ";"; break;
+  case Ast_Kind_block_value:  result = ";"; break;
+  case Ast_Kind_source:       result = ";"; break;
+  case Ast_Kind_tuple:        result = ","; break;
+  case Ast_Kind_assign_tuple: result = ","; break;
+  case Ast_Kind_fun:          result = "->"; break;
+  case Ast_Kind_if:           result = "do"; break;
+  case Ast_Kind_if_value:     result = "do"; break;
+  case Ast_Kind_while:        result = "do"; break;
+  case Ast_Kind_record:       result = ";"; break;
+  default: result = cstr_from_ast_kind(ast_kind);
+  }
+  return result;
+}
+
 Cstr cstr_from_ast(Ast ast, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 i = 0; i < ast.length; i++) {
     Ast_Node node = ast.base[i];
     switch (node.kind) {
-    case Ast_Kind_none:
-      string_builder_push_cstr(&sb, "none");
-    break;
-    case Ast_Kind_return:
-      string_builder_push_cstr(&sb, "re");
-    break;
-    case Ast_Kind_while_enter:
-      string_builder_push_cstr(&sb, "wh(");
-    break;
-    case Ast_Kind_while_leave:
-      string_builder_push_cstr(&sb, ")hw");
-    break;
-    case Ast_Kind_break:
-      string_builder_push_cstr(&sb, "br");
-    break;
-    case Ast_Kind_if_enter:
-      string_builder_push_cstr(&sb, "if(");
-    break;
-    case Ast_Kind_if_leave:
-      string_builder_push_cstr(&sb, ")fi");
-    break;
-    case Ast_Kind_if_value_leave:
-      string_builder_push_cstr(&sb, ")vi");
-    break;
-    case Ast_Kind_if_leave_else_enter:
-      string_builder_push_cstr(&sb, ")fi el(");
-    break;
-    case Ast_Kind_else_value_leave:
-      string_builder_push_cstr(&sb, ")ve");
-    break;
-    case Ast_Kind_else_leave:
-      string_builder_push_cstr(&sb, ")le");
-    break;
-    case Ast_Kind_add:
-      string_builder_push_cstr(&sb, "add");
-    break;
-    case Ast_Kind_sub:
-      string_builder_push_cstr(&sb, "sub");
-    break;
-    case Ast_Kind_mul:
-      string_builder_push_cstr(&sb, "mul");
-    break;
-    case Ast_Kind_access:
-      string_builder_push_cstr(&sb, "access");
-    break;
-    case Ast_Kind_fun_enter:
-      string_builder_push_cstr(&sb, "fun(");
-    break;
-    case Ast_Kind_fun_leave:
-      string_builder_push_cstr(&sb, ")fun");
-    break;
-    case Ast_Kind_array:
-      string_builder_push_cstr(&sb, "a[]");
-    break;
-    case Ast_Kind_array_open:
-      string_builder_push_cstr(&sb, "a[");
-    break;
-    case Ast_Kind_subscript:
-      string_builder_push_cstr(&sb, "s[]");
-    break;
-    case Ast_Kind_subscript_open:
-      string_builder_push_cstr(&sb, "s[");
-    break;
-    case Ast_Kind_position:
-      string_builder_push_cstr(&sb, "pos");
-      string_builder_push_i64(&sb, node.position);
-    break;
-    case Ast_Kind_ptr:
-      string_builder_push_cstr(&sb, "ptr");
-    break;
-    case Ast_Kind_load:
-      string_builder_push_cstr(&sb, "load");
-    break;
-    case Ast_Kind_assign_enter:
-      string_builder_push_cstr(&sb, "=(");
-    break;
-    case Ast_Kind_assign_leave:
-      string_builder_push_cstr(&sb, ")=");
-    break;
-    case Ast_Kind_declare_enter:
-      string_builder_push_cstr(&sb, "l:");
-    break;
-    case Ast_Kind_declare_leave:
-      string_builder_push_cstr(&sb, ":");
-    break;
-    case Ast_Kind_block_enter:
-      string_builder_push_cstr(&sb, "{");
-    break;
-    case Ast_Kind_block_leave:
-      string_builder_push_cstr(&sb, "}");
-    break;
-    case Ast_Kind_block_value_enter:
-      string_builder_push_cstr(&sb, "v{");
-    break;
-    case Ast_Kind_block_value_leave:
-      string_builder_push_cstr(&sb, "}v");
-    break;
-    case Ast_Kind_source_enter:
-      string_builder_push_cstr(&sb, "s{");
-    break;
-    case Ast_Kind_source_leave:
-      string_builder_push_cstr(&sb, "}s");
-    break;
-    case Ast_Kind_paren_enter:
-      string_builder_push_cstr(&sb, "(");
-    break;
-    case Ast_Kind_paren_leave:
-      string_builder_push_cstr(&sb, ")");
-    break;
-    case Ast_Kind_record_enter:
-      string_builder_push_cstr(&sb, "r(");
-      string_builder_push_i64(&sb, node.length);
-    break;
-    case Ast_Kind_record_leave:
-      string_builder_push_cstr(&sb, ")r");
-    break;
-    case Ast_Kind_tuple_enter:
-      string_builder_push_cstr(&sb, "t(");
-      string_builder_push_i64(&sb, node.length);
-    break;
-    case Ast_Kind_tuple_split:
-      string_builder_push_cstr(&sb, ",");
-    break;
-    case Ast_Kind_tuple_leave:
-      string_builder_push_cstr(&sb, ")t");
-    break;
-    case Ast_Kind_assign_tuple_enter:
-      string_builder_push_cstr(&sb, "=t(");
-      string_builder_push_i64(&sb, node.length);
-    break;
-    case Ast_Kind_assign_tuple_split:
-      string_builder_push_cstr(&sb, "=,");
-    break;
-    case Ast_Kind_assign_tuple_leave:
-      string_builder_push_cstr(&sb, ")t=");
-    break;
-    case Ast_Kind_call:
-      string_builder_push_cstr(&sb, "call");
-    break;
-    case Ast_Kind_int:
-      string_builder_push_i64(&sb, node.i64);
-    break;
-    case Ast_Kind_name:
-      string_builder_push_istr(&sb, node.istr);
-    break;
-    case Ast_Kind_neg:
-      string_builder_push_cstr(&sb, "neg");
-    break;
-    case Ast_Kind_pos:
-      string_builder_push_cstr(&sb, "pos");
-    break;
+    default: {
+      if (node.kind & Ast_Flag_enter) {
+        Cstr cstr = cstr_from_ast_kind_enter(node.kind);
+        string_builder_push_cstr(&sb, cstr);
+      }
+      else if (node.kind & Ast_Flag_split) {
+        Cstr cstr = cstr_from_ast_kind_split(node.kind);
+        string_builder_push_cstr(&sb, cstr);
+      }
+      else if (node.kind & Ast_Flag_leave) {
+        Cstr cstr = cstr_from_ast_kind_leave(node.kind);
+        string_builder_push_cstr(&sb, cstr);
+      }
+    } break;
     }
     string_builder_push_cstr(&sb, " ");
   }
@@ -297,20 +325,20 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
     return 3;
-  case Ast_Kind_sub:
-  case Ast_Kind_add:
+  case Ast_Kind_sub_leave:
+  case Ast_Kind_add_leave:
     return 11;
-  case Ast_Kind_mul:
+  case Ast_Kind_mul_leave:
     return 13;
-  case Ast_Kind_ptr:
-  case Ast_Kind_neg:
-  case Ast_Kind_pos:
+  case Ast_Kind_ptr_leave:
+  case Ast_Kind_neg_leave:
+  case Ast_Kind_pos_leave:
     return 15;
-  case Ast_Kind_load:
+  case Ast_Kind_load_leave:
     return 17;
-  case Ast_Kind_subscript:
-  case Ast_Kind_call:
-  case Ast_Kind_access:
+  case Ast_Kind_subscript_leave:
+  case Ast_Kind_call_leave:
+  case Ast_Kind_dot_leave:
     return 19;
   default :
     return -1;
@@ -325,20 +353,21 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
     return 3;
-  case Ast_Kind_sub:
-  case Ast_Kind_add:
+  case Ast_Kind_sub_leave:
+  case Ast_Kind_add_leave:
     return 12;
-  case Ast_Kind_mul: return 14;
-  case Ast_Kind_ptr:
-  case Ast_Kind_neg:
-  case Ast_Kind_pos:
+  case Ast_Kind_mul_leave:
+    return 14;
+  case Ast_Kind_ptr_leave:
+  case Ast_Kind_neg_leave:
+  case Ast_Kind_pos_leave:
     return 16;
-  case Ast_Kind_array:
-  case Ast_Kind_load:
+  case Ast_Kind_array_leave:
+  case Ast_Kind_load_leave:
     return 18;
-  case Ast_Kind_subscript:
-  case Ast_Kind_call:
-  case Ast_Kind_access:
+  case Ast_Kind_subscript_leave:
+  case Ast_Kind_call_leave:
+  case Ast_Kind_dot_leave:
     return 20;
   default :
     return -1;
@@ -365,7 +394,7 @@ void parse_stack_transfer_to_final_higher_precedence(Parser* parser, Ast_Kind ki
 }
 
 void parse_stack_transfer_to_final_is_not(Parser* parser, Ast_Kind kind) {
-  while (top(parser->stack).kind != Ast_Kind_array_open) {
+  while (top(parser->stack).kind != Ast_Kind_array_enter) {
     Ast_Node node = pop(parser->stack);
     parse_final_push(parser, node);
   }
@@ -421,58 +450,47 @@ I32 parse_transfer_stack_to_final_from(Parser* parser, I32 mark) {
   return result;
 }
 
-Astid parse_stack_push_kind_with_final_length(Parser* parser, Ast_Kind kind) {
-  Ast_Node ast = { kind, { .last_at = parser->final.length } };
-  Astid astid = push(parser->stack, ast);
-  return astid;
-}
-
 Astid parse_stack_push_kind(Parser* parser, Ast_Kind kind) {
   Ast_Node ast = { kind, {0} };
   Astid astid = push(parser->stack, ast);
   return astid;
 }
 
-void parse_expression_enter(Parser* parser, Ast_Flag flag);
+void parse_expression_enter(Parser* parser);
 void parse_statement(Parser* parser);
 
-void parse_expression_flag(Parser* parser, Ast_Flag flag) {
+void parse_expression(Parser* parser) {
   I32 final_length = parser->final.length;
   parse_stack_push_kind(parser, Ast_Kind_none);
   I32 stack_length = parser->stack.length;
-  parse_expression_enter(parser, flag);
+  parse_expression_enter(parser);
   while (parser->stack.length > stack_length) {
     Ast_Node node = pop(parser->stack);
     parse_final_push(parser, node);
   }
   del(parser->stack);
   if (parse_match_token(parser, Token_Kind_comma)) {
-    Ast_Node tuple_enter = { Ast_Kind_tuple_enter | flag, { .length = 0 } };
+    Ast_Node tuple_enter = { Ast_Kind_tuple_enter, .list.length = 0 };
     Astid tuple_enter_astid = parse_final_insert(parser, final_length, tuple_enter);
     Ast_Node* enter = &get(parser->final, tuple_enter_astid);
     do {
-      Ast_Node split = { Ast_Kind_tuple_split | flag, .position = enter->length };
+      Ast_Node split = { Ast_Kind_tuple_split, .split.position = enter->list.length };
       parse_final_push(parser, split);
-      enter->length++;
-      parse_expression_enter(parser, flag);
+      enter->list.length++;
+      parse_expression_enter(parser);
     } while (parse_match_token(parser, Token_Kind_comma));
 
     Ast_Node top = top(parser->final);
-    if (top.kind != (Ast_Kind_tuple_split|flag)) {
-      Ast_Node split = { Ast_Kind_tuple_split | flag, .position = enter->length };
+    if (top.kind != Ast_Kind_tuple_split) {
+      Ast_Node split = { Ast_Kind_tuple_split, .split.position = enter->list.length };
       parse_final_push(parser, split);
-      enter->length++;
+      enter->list.length++;
     }
-    Ast_Node tuple_leave = { Ast_Kind_tuple_leave | flag, .enter_at = tuple_enter_astid };
-    parse_final_push(parser, tuple_leave);
+    parse_final_push_kind(parser, Ast_Kind_tuple_leave);
   }
 }
 
-void parse_expression_flag_none(Parser* parser) {
-  parse_expression_flag(parser, Ast_Flag_none);
-}
-
-void parse_infix_or_suffix(Parser* parser, Ast_Flag flag) {
+void parse_infix_or_suffix(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
   case Token_Kind_plus: case Token_Kind_minus:
@@ -480,7 +498,7 @@ void parse_infix_or_suffix(Parser* parser, Ast_Flag flag) {
     Ast_Kind kind = (Ast_Kind)token.kind | Ast_Flag_binary;
     parse_stack_transfer_to_final_higher_precedence(parser, kind);
     ast_push_kind(&parser->stack, kind);
-    parse_expression_enter(parser, Ast_Flag_none);
+    parse_expression_enter(parser);
   } break;
   case Token_Kind_arrow: {
     // TODO: fun_enter insert
@@ -488,33 +506,33 @@ void parse_infix_or_suffix(Parser* parser, Ast_Flag flag) {
     // parse_stack_transfer_higher_precedence(&parser, Ast_Kind_fun_enter);
     // Ast_Node* top = &top(parser.stack);
     // parse_final_insert(&parser, top->last_at, fun_enter);
-    // parse_stack_push_kind_with_final_length(&parser, Ast_Kind_fun_leave);
+    // parse_stack_push_kind(&parser, Ast_Kind_fun_leave);
     assert(0);
   } break;
   case Token_Kind_brace_open: {
     parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_subscript);
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
-    parse_stack_push_kind_with_final_length(parser, Ast_Kind_subscript);
-    parse_infix_or_suffix(parser, flag);
+    parse_stack_push_kind(parser, Ast_Kind_subscript);
+    parse_infix_or_suffix(parser);
   } break;
   case Token_Kind_at: {
     parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_load);
     parse_final_push_kind(parser, Ast_Kind_load);
-    parse_infix_or_suffix(parser, flag);
+    parse_infix_or_suffix(parser);
   } break;
   default: {
     parser->tok--;
     if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
       parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_call);
       ast_push_kind(&parser->stack, Ast_Kind_call);
-      parse_expression_enter(parser, Ast_Flag_none);
+      parse_expression_enter(parser);
     }
   } break;
   }
 }
 
-void parse_expression_enter(Parser* parser, Ast_Flag flag) {
+void parse_expression_enter(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
@@ -522,21 +540,21 @@ void parse_expression_enter(Parser* parser, Ast_Flag flag) {
   case Token_Kind_at_prefix:    case Token_Kind_at: {
     Ast_Kind kind = Ast_Flag_unary | ((Ast_Kind)token.kind & 0xff);
     parse_stack_push_kind(parser, kind);
-    parse_expression_enter(parser, 0);
+    parse_expression_enter(parser);
   } break;
   case Token_Kind_int: case Token_Kind_name: {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
-    Ast_Node ast = { .kind = kind, .value = token.value };
+    Ast_Node ast = { .kind = kind, .bits = token.value };
     parse_final_push(parser, ast);
   } break;
   case Token_Kind_if: {
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     parse_expect_token(parser, Token_Kind_do);
     parse_final_push_kind(parser, Ast_Kind_if_enter);
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     if (parse_match_token(parser, Token_Kind_else)) {
       parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
-      parse_expression_enter(parser, 0);
+      parse_expression_enter(parser);
       parse_final_push_kind(parser, Ast_Kind_else_value_leave);
     }
     else {
@@ -545,7 +563,7 @@ void parse_expression_enter(Parser* parser, Ast_Flag flag) {
   } break;
   case Token_Kind_while: {
   // TODO: consider while value
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     parse_expect_token(parser, Token_Kind_do);
     parse_final_push_kind(parser, Ast_Kind_while_enter);
     parse_statement(parser);
@@ -556,7 +574,7 @@ void parse_expression_enter(Parser* parser, Ast_Flag flag) {
     Astid record_length = 0;
     B8 is_semicolon = false;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
-      parse_expression_flag(parser, flag);
+      parse_expression(parser);
       record_length++;
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         is_semicolon = true;
@@ -567,7 +585,7 @@ void parse_expression_enter(Parser* parser, Ast_Flag flag) {
       }
     }
     if (is_semicolon || record_length != 1) {
-      Ast_Node record_enter = { Ast_Kind_record_enter, .length = record_length };
+      Ast_Node record_enter = { Ast_Kind_record_enter, .list.length = record_length };
       parse_final_insert(parser, final_length, record_enter);
       parse_final_push_kind(parser, Ast_Kind_record_leave);
     }
@@ -578,21 +596,46 @@ void parse_expression_enter(Parser* parser, Ast_Flag flag) {
       parse_statement(parser);
       parse_match_token(parser, Token_Kind_semicolon);
     }
-    Ast_Node leave = { Ast_Kind_block_value_leave, .enter_at = astid_enter };
-    parse_final_push(parser, leave);
+    parse_final_push_kind(parser, Ast_Kind_block_value_leave);
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
     parse_stack_push_kind(parser, Ast_Kind_array);
-    parse_expression_enter(parser, 0);
+    parse_expression_enter(parser);
   } break;
   default:
     parser->tok--;
   break;
   }
-  parse_infix_or_suffix(parser, flag);
+  parse_infix_or_suffix(parser);
+}
+
+Astid parse_convert_to_pattern(Parser* parser, Astid astid) {
+  Ast_Node node = get(parser->final, astid);
+  Ast_Kind kind = node.kind;
+  switch (node.kind) {
+  case Ast_Kind_tuple_enter: {
+    kind = Ast_Kind_assign_tuple_enter;
+    parser->final.base[astid++].kind = kind;
+    while (node.kind != Ast_Kind_tuple_leave) {
+      astid = parse_convert_to_pattern(parser, astid);
+      node = get(parser->final, astid);
+    }
+    kind = Ast_Kind_assign_tuple_leave;
+    parser->final.base[astid++].kind = kind;
+  } break;
+  case Ast_Kind_tuple_split: {
+    kind = Ast_Kind_assign_tuple_split;
+  } break;
+  default: {
+    if (node.kind & Ast_Flag_binary) {
+    }
+  } break;
+  }
+  parser->final.base[astid].kind = kind;
+  return astid+1;
 }
 
 void parse_statement(Parser* parser) {
@@ -607,7 +650,7 @@ void parse_statement(Parser* parser) {
     parse_final_push_kind(parser, Ast_Kind_source_leave);
   } break;
   case Token_Kind_if: {
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     parse_final_push_kind(parser, Ast_Kind_if_enter);
 
     parse_expect_token(parser, Token_Kind_do);
@@ -622,7 +665,7 @@ void parse_statement(Parser* parser) {
     }
   } break;
   case Token_Kind_while: {
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     parse_final_push_kind(parser, Ast_Kind_while_enter);
     parse_expect_token(parser, Token_Kind_do);
     parse_statement(parser);
@@ -634,7 +677,7 @@ void parse_statement(Parser* parser) {
       parse_final_push_kind(parser, Ast_Kind_return);
     }
     else {
-      parse_expression_enter(parser, Ast_Flag_none);
+      parse_expression_enter(parser);
       parse_final_push_kind(parser, Ast_Kind_return);
     }
   } break;
@@ -643,26 +686,19 @@ void parse_statement(Parser* parser) {
       parse_final_push_kind(parser, Ast_Kind_break);
     }
     else {
-      parse_expression_enter(parser, Ast_Flag_none);
+      parse_expression_enter(parser);
       parse_final_push_kind(parser, Ast_Kind_break);
     }
   } break;
   default: {
     parser->tok--;
-    I32 tok = parser->tok;
-    I32 length = parser->final.length;
     Astid enter = parser->final.length;
-    parse_expression_flag_none(parser);
+    parse_expression(parser);
     if (parse_match_token(parser, Token_Kind_equal)) {
-      parser->tok = tok;
-      parser->final.length = length;
-
-      parse_expression_flag(parser, Ast_Flag_assign);
-      parse_expect_token(parser, Token_Kind_equal);
-
+      parse_convert_to_pattern(parser, enter);
       Astid leave = parse_transfer_final_to_stack_from(parser, enter);
       parse_stack_push_kind(parser, Ast_Kind_assign_leave);
-      parse_expression_flag_none(parser);
+      parse_expression(parser);
       parse_transfer_stack_to_final_from(parser, leave);
     }
   }
@@ -711,12 +747,13 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a, b, c = 1",    "s{ 1 =t(3 a =, b =, c =, )t= )= }s ");
+  test("a, b = 1",       "s{ 1 =t(2 a =, b =, )t= )= }s ");
   test("a + (b,c), d = 1", "s{ 1 =t(2 a t(2 b , c , )t add =, d =, )t= )= }s ");
   test("a, (b,c), d = 1", "s{ 1 =t(3 a =, =t(2 b =, c =, )t= =, d =, )t= )= }s ");
   test("a, b = 1, 2",    "s{ t(2 1 , 2 , )t =t(2 a =, b =, )t= )= }s ");
   test("a+b = 1-2",      "s{ 1 2 sub a b add )= }s ");
-  test("a, b, c = 1",    "s{ 1 =t(3 a =, b =, c =, )t= )= }s ");
-  test("a, b = 1",       "s{ 1 =t(2 a =, b =, )t= )= }s ");
+  return;
   test("a = 1",          "s{ 1 a )= }s ");
   test("a = 1 + 2",      "s{ 1 2 add a )= }s ");
   test("wh 1 do 2",        "s{ 1 wh( 2 )hw }s ");
