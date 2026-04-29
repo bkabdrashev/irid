@@ -21,7 +21,7 @@ typedef enum {
 
   Ir_Kind_load      = Ast_Kind_load_leave,
   Ir_Kind_ptr       = Ast_Kind_ptr_leave,
-  Ir_Kind_store     = 128,
+  Ir_Kind_store     = 128 | Ir_Flag_binary,
   Ir_Kind_load_var  = 129,
   Ir_Kind_store_var = 130,
 
@@ -58,6 +58,10 @@ struct Ir {
       Irid of;
       I32  at;
     } position;
+    struct {
+      Irid of;
+      Istr at;
+    } name;
   };
 };
 
@@ -330,6 +334,13 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
     string_builder_push_cstr(sb, ".");
     string_builder_push_i64(sb, ir.position.at);
   break;
+  case Ir_Kind_name_offset:
+    string_builder_push_cstr(sb, "name offset ");
+    string_builder_push_cstr(sb, "r");
+    string_builder_push_i64(sb, ir.name.of);
+    string_builder_push_cstr(sb, ".");
+    string_builder_push_istr(sb, ir.name.at);
+  break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < recordid_length(ir.recordid); i++) {
@@ -454,6 +465,29 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Irid irid = ir_push_unary((Ir_Kind)node.kind, one);
       add(irgen.irid_stack, irid);
     } break;
+    case Ast_Kind_dot_leave: {
+      Irid two = pop(irgen.irid_stack);
+      Irid one = pop(irgen.irid_stack);
+      Ir* ir = &get(irgen.ir_stack, two);
+      if (ir->kind == Ir_Kind_int) {
+        ir->kind = Ir_Kind_position_offset;
+        ir->position.at = ir->i64;
+        ir->position.of = one;
+        ir->kind = Ir_Kind_position_offset;
+        Irid irid = ir_push_unary(Ir_Kind_load, two);
+        add(irgen.irid_stack, irid);
+      }
+      else if (ir->kind == Ir_Kind_load_var) {
+        ir->kind = Ir_Kind_name_offset;
+        ir->name.at = ir->istr;
+        ir->name.of = one;
+        Irid irid = ir_push_unary(Ir_Kind_load, two);
+        add(irgen.irid_stack, irid);
+      }
+      else {
+        assert(0);
+      }
+    } break;
     case Ast_Kind_mul_leave: 
     case Ast_Kind_add_leave: {
       Irid two = pop(irgen.irid_stack);
@@ -568,7 +602,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("(a,b) = 2", "");
+  test("a.b = 1", "");
 }
 
 #undef test

@@ -21,7 +21,7 @@ enum {
   Ast_Kind_array     = Token_Kind_brace_open + 1,
   Ast_Kind_assign    = Token_Kind_equal,
   Ast_Kind_declare   = Token_Kind_colon,
-  Ast_Kind_block       = (Token_Kind_curly_open & 0xff),
+ Ast_Kind_block       = (Token_Kind_curly_open & 0xff),
   Ast_Kind_block_value = (Token_Kind_curly_open & 0xff) + 1,
   Ast_Kind_source      = Token_Kind_source_enter,
   Ast_Kind_tuple       = Token_Kind_comma,
@@ -51,17 +51,17 @@ typedef enum {
   Ast_Kind_mul_enter    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_enter,
   Ast_Kind_mul_split    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_split,
   Ast_Kind_mul_leave    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_dot_enter    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_dot_split    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_dot_leave    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_leave,
   Ast_Kind_neg_enter    = Ast_Kind_neg | Ast_Flag_unary  | Ast_Flag_enter,
   Ast_Kind_neg_leave    = Ast_Kind_neg | Ast_Flag_unary  | Ast_Flag_leave,
   Ast_Kind_pos_enter    = Ast_Kind_pos | Ast_Flag_unary  | Ast_Flag_enter,
   Ast_Kind_pos_leave    = Ast_Kind_pos | Ast_Flag_unary  | Ast_Flag_leave,
   Ast_Kind_ptr_enter    = Ast_Kind_ptr | Ast_Flag_unary  | Ast_Flag_enter,
   Ast_Kind_ptr_leave    = Ast_Kind_ptr | Ast_Flag_unary  | Ast_Flag_leave,
-  Ast_Kind_dot_enter    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_dot_split    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_dot_leave    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_load_enter   = Ast_Kind_load| Ast_Flag_unary | Ast_Flag_enter,
-  Ast_Kind_load_leave   = Ast_Kind_load| Ast_Flag_unary | Ast_Flag_leave,
+  Ast_Kind_load_enter   = Ast_Kind_load| Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_load_leave   = Ast_Kind_load| Ast_Flag_unary  | Ast_Flag_leave,
   Ast_Kind_subscript_enter = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_enter,
   Ast_Kind_subscript_split = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_split,
   Ast_Kind_subscript_leave = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_leave,
@@ -804,6 +804,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a.0",     "s{ 1 2 3 add b a[] mul ; }s ");
+  return;
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
   test("c+b[1]",         "s{ c b 1 s[] add ; }s ");
