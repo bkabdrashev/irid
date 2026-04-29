@@ -4,8 +4,8 @@ typedef I32 Funid;
 typedef I32 Recordid;
 
 typedef enum {
-  Ir_Flag_unary  = 1 << 8,
-  Ir_Flag_binary = 1 << 9,
+  Ir_Flag_unary  = Ast_Flag_unary,
+  Ir_Flag_binary = Ast_Flag_binary,
 } Ir_Flag;
 
 typedef enum {
@@ -13,15 +13,15 @@ typedef enum {
 
   Ir_Kind_int = Ast_Kind_int,
 
-  Ir_Kind_add = Ast_Kind_add,
-  Ir_Kind_sub = Ast_Kind_sub,
-  Ir_Kind_mul = Ast_Kind_mul,
+  Ir_Kind_add = Ast_Kind_add_leave,
+  Ir_Kind_sub = Ast_Kind_sub_leave,
+  Ir_Kind_mul = Ast_Kind_mul_leave,
 
-  Ir_Kind_neg = Ast_Kind_neg,
+  Ir_Kind_neg = Ast_Kind_neg_leave,
 
-  Ir_Kind_load      = Ast_Kind_load,
-  Ir_Kind_ptr       = Ast_Kind_ptr,
-  Ir_Kind_store     = (Ast_Kind_load & 0xff) | Ir_Flag_binary,
+  Ir_Kind_load      = Ast_Kind_load_leave,
+  Ir_Kind_ptr       = Ast_Kind_ptr_leave,
+  Ir_Kind_store     = 128,
   Ir_Kind_load_var  = 129,
   Ir_Kind_store_var = 130,
 
@@ -421,17 +421,18 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     case Ast_Kind_source_enter: {
       fun_enter(astid);
     } break;
+    case Ast_Kind_source_split: {} break;
     case Ast_Kind_source_leave: {
       fun_leave();
     } break;
     case Ast_Kind_tuple_enter: {
-      Recordid tuple = recordid_new(node.length);
+      Recordid tuple = recordid_new(node.list.length);
       add(irgen.recordid_stack, tuple);
     } break;
     case Ast_Kind_tuple_split: {
       Recordid tuple = top(irgen.recordid_stack);
       Irid val = pop(irgen.irid_stack);
-      recordid_push_position(tuple, node.position, val);
+      recordid_push_position(tuple, node.split.position, val);
     } break;
     case Ast_Kind_tuple_leave: {
       Recordid tuple = pop(irgen.recordid_stack);
@@ -446,32 +447,27 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Irid irid = ir_push_load_var(node.istr);
       add(irgen.irid_stack, irid);
     } break;
-    case Ast_Kind_ptr: 
-    case Ast_Kind_load: 
-    case Ast_Kind_neg: {
+    case Ast_Kind_ptr_leave: 
+    case Ast_Kind_load_leave: 
+    case Ast_Kind_neg_leave: {
       Irid one = pop(irgen.irid_stack);
       Irid irid = ir_push_unary((Ir_Kind)node.kind, one);
       add(irgen.irid_stack, irid);
     } break;
-    case Ast_Kind_mul: 
-    case Ast_Kind_add: {
+    case Ast_Kind_mul_leave: 
+    case Ast_Kind_add_leave: {
       Irid two = pop(irgen.irid_stack);
       Irid one = pop(irgen.irid_stack);
       Irid irid = ir_push_binary((Ir_Kind)node.kind, one, two);
       add(irgen.irid_stack, irid);
     } break;
-    case Ast_Kind_position: {
-      Irid record  = top(irgen.irid_stack);
-      Irid irid = ir_push_position_offset(record, node.position);
-      add(irgen.irid_stack, irid);
-    } break;
     case Ast_Kind_assign_tuple_enter: {
       Irid rhs = pop(irgen.irid_stack);
       Irid start = irgen.ir_stack.length;
-      for (I32 i = 0; i < node.length; i++) {
+      for (I32 i = 0; i < node.list.length; i++) {
         ir_push_position_offset(rhs, i);
       }
-      for (I32 i = node.length-1; i >= 0; i--) {
+      for (I32 i = node.list.length-1; i >= 0; i--) {
         add(irgen.irid_stack, i+start);
       }
     } break;
@@ -480,7 +476,6 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       break;
     case Ast_Kind_assign_tuple_split:
     case Ast_Kind_assign_leave: {
-      irgen_print();
       Irid lhs = pop(irgen.irid_stack);
       Irid rhs = pop(irgen.irid_stack);
       Ir* ir = &get(irgen.ir_stack, lhs);
@@ -493,8 +488,6 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
         ir->binary.two = rhs;
       }
     } break;
-    case Ast_Kind_paren_leave: break;
-    case Ast_Kind_paren_enter: break;
     default:
     assert(0);
     }
@@ -575,7 +568,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("(a,b) + 1 = 2", "");
+  test("(a,b) = 2", "");
 }
 
 #undef test
