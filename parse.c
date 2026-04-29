@@ -538,12 +538,14 @@ void parse_infix_or_suffix(Parser* parser) {
     parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_subscript_leave);
     parse_expression(parser);
     parse_expect_token(parser, Token_Kind_brace_close);
-    parse_final_push_kind(parser, Ast_Kind_subscript_leave);
+    Astid enter = get(parser->enters, parser->ent);
+    parse_final_push_leave(parser, Ast_Kind_subscript_leave, enter);
     parse_infix_or_suffix(parser);
   } break;
   case Token_Kind_at: {
     parse_stack_transfer_to_final_higher_precedence(parser, Ast_Kind_load_leave);
-    parse_final_push_kind(parser, Ast_Kind_load_leave);
+    Astid enter = get(parser->enters, parser->ent);
+    parse_final_push_leave(parser, Ast_Kind_load_leave, enter);
     parse_infix_or_suffix(parser);
   } break;
   default: {
@@ -558,27 +560,6 @@ void parse_infix_or_suffix(Parser* parser) {
 }
 
 void parse_expression_enter(Parser* parser) {
-  /*
-  - - a 
-  a neg
-  a neg c add
-  ^_/
-
-  a * b + c
-  $ a b * c +
-  ^____/   / 
-  ^_______/  
-
-  a + b * c
-  $ a $ b c * +
-  ^   ^____/  /
-  |__________/
-
-  (a + b) * c
-  a b + c *
-  ^__/   /
-  ^_____/
-  */
   I32 stack_length = parser->stack.length;
   add(parser->enters, parser->final.length);
   Token token = parser->tokens.base[parser->tok++];
@@ -804,8 +785,6 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a.0",     "s{ 1 2 3 add b a[] mul ; }s ");
-  return;
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
   test("c+b[1]",         "s{ c b 1 s[] add ; }s ");
