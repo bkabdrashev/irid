@@ -583,15 +583,30 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       blockid_nez_link_to(headerid, nez_blockid);
       add(irgen.headerids, headerid);
     } break;
-  case Ast_Kind_if_leave: {
-    Blockid headerid    = pop(irgen.headerids);
-    Blockid blockid     = blockid_set_jump();
-    Blockid eqz_blockid = block_new();
-    blockid_eqz_link_to(headerid, eqz_blockid);
-    blockid_jump_link_to(blockid, eqz_blockid);
-  } break;
+    case Ast_Kind_if_leave: {
+      Blockid headerid    = pop(irgen.headerids);
+      Blockid blockid     = blockid_set_jump();
+      Blockid eqz_blockid = block_new();
+      blockid_eqz_link_to(headerid, eqz_blockid);
+      blockid_jump_link_to(blockid, eqz_blockid);
+    } break;
+    case Ast_Kind_if_leave_else_enter: {
+      Blockid headerid    = pop(irgen.headerids);
+      Blockid blockid     = blockid_set_jump();
+      Blockid eqz_blockid = block_new();
+      blockid_eqz_link_to(headerid, eqz_blockid);
+      add(irgen.headerids, blockid);
+    } break;
+    case Ast_Kind_else_leave: {
+      Blockid nez_blockid = pop(irgen.headerids);
+      Blockid blockid     = blockid_set_jump();
+      Blockid end_blockid = block_new();
+      blockid_jump_link_to(nez_blockid, end_blockid);
+      blockid_jump_link_to(blockid, end_blockid);
+    } break;
     default:
-    assert(0);
+      assert(0);
+    break;
     }
   }
 
@@ -670,7 +685,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("if 1 do 2", "");
+  test("if 1 do a = 2 el a = 3", "");
 }
 
 #undef test
