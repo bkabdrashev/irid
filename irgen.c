@@ -151,11 +151,6 @@ typedef struct {
 } Irs;
 
 typedef struct {
-  Funid   funid;
-  Blockid blockid;
-} Frame;
-
-typedef struct {
   Fun** base;
   I32   length;
 } Fun_Stack;
@@ -630,7 +625,7 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
   return irgen.funs;
 }
 
-Cstr cstr_from_cfg(Funs funs, C8* buffer) {
+Cstr cstr_from_funs(Funs funs, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
     Fun fun = irgen.funs.base[f];
@@ -678,15 +673,15 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 max_ast_length   = source_length + 2;
   Ast_Node* ast_buffer = xmalloc(sizeof(Ast_Node) * 2*max_ast_length);
   Ast ast              = ast_from_source(source, ast_buffer);
-  Fun* cfg_buffer      = xmalloc(sizeof(Fun)*ast.length);
+  Fun* funs_buffer     = xmalloc(sizeof(Fun)*ast.length);
   Block* block_buffer  = xmalloc(sizeof(Block)*ast.length);
   Ir* ir_buffer        = xmalloc(sizeof(Ir)*ast.length);
   Record* record_buffer= xmalloc(sizeof(Record)*ast.length);
-  Funs funs            = irgen_ast(ast, cfg_buffer, block_buffer, ir_buffer, record_buffer);
+  Funs funs            = irgen_ast(ast, funs_buffer, block_buffer, ir_buffer, record_buffer);
                          free(ast.base);
   C8* buffer           = xmalloc(MB(64));
-  Cstr result          = cstr_from_cfg(funs, buffer);
-  free(cfg_buffer);
+  Cstr result          = cstr_from_funs(funs, buffer);
+  free(funs_buffer);
   free(block_buffer);
   free(ir_buffer);
   free(record_buffer);
@@ -697,8 +692,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1", "");
-  test("2", "");
+  test("a = 1; b = 2; if a do { a = 4 }; a+b", "");
 }
 
 #undef test
