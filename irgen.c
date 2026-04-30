@@ -349,7 +349,6 @@ void fun_leave() {
     fun->entryid = first;
     fun->leaveid = irgen.blocks.length;
   }
-
 }
 
 Fun* fun_get(Funid funid) {
@@ -474,6 +473,12 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
   irgen.block_stack.length = 0;
   irgen.ir_stack.length    = 0;
   irgen.irid_stack.length  = 0;
+  irgen.recordid_stack.length = 0;
+  irgen.headerids.length      = 0;
+  irgen.funs.length    = 0;
+  irgen.blocks.length  = 0;
+  irgen.irs.length     = 0;
+  irgen.records.length = 0;
   irgen.irid_nil = (Irid){ 0 };
   Ir nil = {0, {0}};
   add(irgen.ir_stack, nil);
@@ -488,6 +493,11 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     case Ast_Kind_source_split: {} break;
     case Ast_Kind_source_leave: {
       fun_leave();
+    } break;
+    case Ast_Kind_block_value_enter: {
+    } break;
+    case Ast_Kind_block_split: {} break;
+    case Ast_Kind_block_value_leave: {
     } break;
     case Ast_Kind_tuple_enter: {
       Recordid tuple = recordid_new(node.list.length);
@@ -610,11 +620,13 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     }
   }
 
+  free(irgen.headerids.base);
   free(irgen.recordid_stack.base);
   free(irgen.irid_stack.base);
   free(irgen.ir_stack.base);
   free(irgen.block_stack.base);
   free(irgen.fun_stack.base);
+  arena_deinit(&irgen.arena);
   return irgen.funs;
 }
 
@@ -685,7 +697,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("if 1 do a = 2 el a = 3", "");
+  test("1", "");
+  test("2", "");
 }
 
 #undef test

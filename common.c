@@ -67,8 +67,12 @@ void* arena_push_zero(Arena* arena, Umi size) {
   return mem;
 }
 
-void arena_free_all(Arena* arena) {
+void arena_release_all(Arena* arena) {
   arena->top = arena->base;
+}
+
+void arena_deinit(Arena* arena) {
+  free(arena->base);
 }
 
 U64 hash_bytes(const void* ptr, U64 len) {
