@@ -73,6 +73,7 @@ struct Record {
   Istr* names;
   Irid* assigned;
   Irid* declared;
+  Map   positions;
 };
 
 typedef struct Field Field;
@@ -123,17 +124,9 @@ typedef enum {
 } Symbol_Kind;
 
 typedef struct {
-  Istr* keys;
-  I32*  vals;
-  I32 len;
-  I32 cap;
-} Map;
-
-typedef struct {
   Blockid entryid;
   Blockid leaveid;
   Irid    returnid;
-  Map     syms;
   I32     varid;
 } Fun;
 
@@ -197,24 +190,7 @@ Irid ir_push_int(I64 i64) {
 }
 
 Irid ir_push_load_var(Istr istr) {
-  Fun* fun = top(irgen.fun_stack);
-  I32 i = hash_u64(istr.index);
-  Varid varid = 0;
-  for (;;) {
-    i &= fun->syms.cap - 1;
-    Istr key = fun->syms.keys[i];
-    if (!key.index) {
-      fun->syms.keys[i] = istr;
-      fun->syms.vals[i] = fun->varid++;
-      break;
-    }
-    else if (key.index == istr.index) {
-      varid = fun->syms.vals[i];
-      break;
-    }
-    istr.index++;
-  }
-  Ir ir = { Ir_Kind_load_var, .varid = varid };
+  Ir ir = { Ir_Kind_load_var, .istr = istr };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -254,6 +230,7 @@ Recordid recordid_new(I32 length) {
   record.names    = arena_push_zero(&irgen.arena, length*sizeof(Istr));
   record.assigned = arena_push_zero(&irgen.arena, length*sizeof(Irid));
   record.declared = arena_push_zero(&irgen.arena, length*sizeof(Irid));
+  record.positions = map_init(&irgen.arena, length);
   Recordid recordid = push(irgen.records, record);
   return recordid;
 }
@@ -348,6 +325,7 @@ Funid fun_enter(Astid astid) {
     fun->leaveid = blockid;
   }
   fun->returnid = irgen.irid_nil;
+  fun->varid = 0;
   return funid;
 }
 
@@ -371,6 +349,27 @@ void fun_leave() {
     fun->entryid = first;
     fun->leaveid = irgen.blocks.length;
   }
+  {
+    // from_istr_init(&irgen.arena, &fun->syms.map, fun->varid);
+    // fun->syms.vals = arena_push_zero(&irgen.arena, sizeof(I32)*fun->syms.map.cap);
+    // fun->varid = 0;
+    // for (Blockid b = fun->entryid; b < fun->leaveid; b++) {
+    //   Block block = get(irgen.blocks, b);
+    //   for (Irid irid = block.entryid; irid < block.leaveid; irid++) {
+    //     Ir* ir = &get(irgen.irs, irid);
+    //     if (ir->kind == Ir_Kind_store_var || ir->kind == Ir_Kind_load_var) {
+    //       I32 i = from_istr_put_if_not_exist(&fun->syms.map, ir->istr);
+    //       if (fun->syms.map.keys[i].index) {
+    //         ir->varid = fun->syms.vals[i];
+    //       }
+    //       else {
+    //         fun->syms.vals[i] = fun->varid++;
+    //         ir->varid = fun->syms.vals[i];
+    //       }
+    //     }
+    //   }
+    // }
+  }
 }
 
 Fun* fun_get(Funid funid) {
@@ -390,13 +389,14 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
     string_builder_push_i64(sb, ir.i64);
   break;
   case Ir_Kind_load_var:
-    string_builder_push_cstr(sb, "load var ");
+    string_builder_push_cstr(sb, "load var \"");
     string_builder_push_istr(sb, ir.istr);
+    string_builder_push_cstr(sb, "\"");
   break;
   case Ir_Kind_store_var:
-    string_builder_push_cstr(sb, "store var ");
+    string_builder_push_cstr(sb, "store var \"");
     string_builder_push_istr(sb, ir.istr);
-    string_builder_push_cstr(sb, " = ");
+    string_builder_push_cstr(sb, "\" = ");
     string_builder_push_cstr(sb, "r");
     string_builder_push_i64(sb, ir.store_var.irid);
   break;
@@ -600,9 +600,8 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Irid rhs = pop(irgen.irid_stack);
       Ir* ir = &get(irgen.ir_stack, lhs);
       if (ir->kind == Ir_Kind_load_var) {
-      // TODO: it is useful to know the number of names that have been assigned in a function
-      //       this would allow the semantic analyzer to allocate right demand
-      //       we can keep sorted list of Istr that appeared here
+        Fun* fun = top(irgen.fun_stack);
+        fun->varid++;
         ir->kind = Ir_Kind_store_var;
         ir->store_var.irid = rhs;
       }
@@ -723,6 +722,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
+  test("@a.b", "");
 }
 
 #undef test
