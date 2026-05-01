@@ -98,6 +98,11 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
 /*
+a = 1
+b = 2
+if a do { a = 4 }
+a+b
+
 main {
   .0: in{}, out{ a: 1, b: 2 }
     r1 = int 1
@@ -106,18 +111,92 @@ main {
     r4 = store var b = r3
     r5 = load var a
     if r5 then .1 else .2
-  .1: in{ a: 1, b: 2 }, out{ a: 4, b: 2 }
+  .1: in{}, out{ a: 4 }
     r6 = int 4
     r7 = store var a = r6
     jump .2
-  .2: in{ a: 1 or 4, b: 2 }, out{ a: 1 or 4, b:  }
+  .2: in{ a: 1 or 4; b: 2 }, out{}
     r8 = load var a
     r9 = load var b
     r10 = add r8 r9
     jump .3
   .3:
   ret r0
-}*/
+}
+ 
+------------------
+a = 1
+b = @a
+if 2 do { b@ = 3 }
+a+b@
+
+main {
+  .0: in{}, out{ a: 1, b: @a }
+    r1 = int 1
+    r2 = store var a = r1
+    r3 = load var a
+    r4 = ptr r3 // @a
+    r5 = store var b = r4
+    r6 = int 2
+    if r6 then .1 else .2
+  .1: in{ b: @a }, out{ a: 3 }
+    r7 = int 3
+    r8 = load var b  //  @a
+    r9 = store r8 r7
+    jump .2
+  .2: in{ a: 1 or 3; b: @a }, out{}
+    r10 = load var a
+    r11 = load var b
+    r12 = load r11
+    r13 = add r10 r12
+    jump .3
+  .3:
+  ret r0
+}
+------------------------------
+a = 1
+b = 2
+c = @b
+if 3 do { c = @a }
+if 4 do { c@ = 5 }
+a+b+c@
+
+main {
+  .0: in{}, out{ a: 1; b: 2; c: @b }
+    r1 = int 1
+    r2 = store var a = r1
+    r3 = int 2
+    r4 = store var b = r3
+    r5 = load var b
+    r6 = ptr r5
+    r7 = store var c = r6
+    r8 = int 3
+    if r8 then .1 else .2
+  .1:
+    r9 = load var a
+    r10 = ptr r9
+    r11 = store var c = r10
+    jump .2
+  .2: in{}, out{ c: }
+    r12 = int 4
+    if r12 then .3 else .4
+  .3: in{ c }, out{ b: }
+    r13 = int 5
+    r14 = load var c   
+    r15 = store r14 r13
+    jump .4
+  .4:
+    r16 = load var a
+    r17 = load var b
+    r18 = add r16 r17
+    r19 = load var c
+    r20 = load r19
+    r21 = add r18 r20
+    jump .5
+  .5:
+  ret r0
+}
+*/
 
   test("", "");
 }

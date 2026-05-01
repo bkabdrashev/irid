@@ -1,3 +1,4 @@
+typedef I32 Varid;
 typedef I32 Irid;
 typedef I32 Blockid;
 typedef I32 Funid;
@@ -42,6 +43,7 @@ struct Ir {
   union {
     I64 i64;
     Istr istr;
+    Varid varid;
     Recordid recordid;
     struct {
       Irid one;
@@ -51,7 +53,7 @@ struct Ir {
       Irid one;
     } unary;
     struct {
-      Istr istr;
+      Varid varid;
       Irid irid;
     } store_var;
     struct {
@@ -114,10 +116,25 @@ struct Block {
   };
 };
 
+typedef enum {
+  Symbol_Kind_none,
+  Symbol_Kind_fun,
+  Symbol_Kind_var,
+} Symbol_Kind;
+
+typedef struct {
+  Istr* keys;
+  I32*  vals;
+  I32 len;
+  I32 cap;
+} Map;
+
 typedef struct {
   Blockid entryid;
   Blockid leaveid;
   Irid    returnid;
+  Map     syms;
+  I32     varid;
 } Fun;
 
 typedef struct {
@@ -180,7 +197,24 @@ Irid ir_push_int(I64 i64) {
 }
 
 Irid ir_push_load_var(Istr istr) {
-  Ir ir = { Ir_Kind_load_var, .istr = istr };
+  Fun* fun = top(irgen.fun_stack);
+  I32 i = hash_u64(istr.index);
+  Varid varid = 0;
+  for (;;) {
+    i &= fun->syms.cap - 1;
+    Istr key = fun->syms.keys[i];
+    if (!key.index) {
+      fun->syms.keys[i] = istr;
+      fun->syms.vals[i] = fun->varid++;
+      break;
+    }
+    else if (key.index == istr.index) {
+      varid = fun->syms.vals[i];
+      break;
+    }
+    istr.index++;
+  }
+  Ir ir = { Ir_Kind_load_var, .varid = varid };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -205,12 +239,6 @@ Irid ir_push_record(Recordid recordid) {
 
 Irid ir_push_position_offset(Irid record, I32 position) {
   Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
-}
-
-Irid ir_push_store_var(Istr istr, Irid rhs) {
-  Ir ir = { Ir_Kind_store_var, .store_var = { .istr = istr, .irid = rhs } };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -282,7 +310,6 @@ void blockid_eqz_link_to(Blockid blockid, Blockid jumpto) {
   Block* block = blockid_get(blockid);
   block->branch.eqz.blockid = jumpto;
 }
-
 
 Block* block_leave() {
   Fun* fun = top(irgen.fun_stack);
@@ -573,6 +600,9 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
       Irid rhs = pop(irgen.irid_stack);
       Ir* ir = &get(irgen.ir_stack, lhs);
       if (ir->kind == Ir_Kind_load_var) {
+      // TODO: it is useful to know the number of names that have been assigned in a function
+      //       this would allow the semantic analyzer to allocate right demand
+      //       we can keep sorted list of Istr that appeared here
         ir->kind = Ir_Kind_store_var;
         ir->store_var.irid = rhs;
       }
@@ -692,7 +722,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a = 1; b = 2; if a do { a = 4 }; a+b", "");
+  test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
 }
 
 #undef test

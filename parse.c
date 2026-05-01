@@ -21,7 +21,7 @@ enum {
   Ast_Kind_array     = Token_Kind_brace_open + 1,
   Ast_Kind_assign    = Token_Kind_equal,
   Ast_Kind_declare   = Token_Kind_colon,
- Ast_Kind_block       = (Token_Kind_curly_open & 0xff),
+  Ast_Kind_block       = (Token_Kind_curly_open & 0xff),
   Ast_Kind_block_value = (Token_Kind_curly_open & 0xff) + 1,
   Ast_Kind_source      = Token_Kind_source_enter,
   Ast_Kind_tuple       = Token_Kind_comma,

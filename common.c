@@ -86,6 +86,12 @@ U64 hash_bytes(const void* ptr, U64 len) {
   return x;
 }
 
+U64 hash_u64(U64 x) {
+  x *= 0xff51afd7ed558ccd;
+  x ^= x >> 32;
+  return x;
+}
+
 void* xmalloc(Umi num_bytes) {
   void* ptr = malloc(num_bytes);
   if (!ptr) {
