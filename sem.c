@@ -1,48 +1,67 @@
-void sem_jump(Funid funid, Blockid from_blockid, Blockid to_blockid) {
-  b32 is_jump_updates_typeid_of_invar = false;
-  Varids varids = ;
-  for (I32 v = varids.enterid; v < varids.leaveid, v++) {
-    Typeid from_bb_varid_typeid = typeid_of_bb_varid(from_bbid, varid);
-    Typeid old_bb_invar_typeid  = typeid_of_bb_invar(bbid, varid);
-    Typeid new_bb_invar_typeid  = typeid_join(from_bb_varid_typeid, old_bb_invar_typeid);
+typedef I32 Typeid;
 
-    if (typeid_not_equal(new_bb_invar_typeid, old_bb_invar_typeid)) {
-      typeid_of_bb_invar_set(bbid, varid, new_bb_irparam_typeid);
-      typeid_of_bb_varid_set(bbid, varid, new_bb_irparam_typeid);
-      is_jump_updates_typeid_of_invar = true;
+Typeid type_join(Typeid one, Typeid two) {
+  assert(0);
+  return one;
+}
+
+B8 type_not_equal(Typeid one, Typeid two) {
+  assert(0);
+  return one != two;
+}
+
+void sem_worklist_push(Blockid blockid) {
+}
+
+void sem_jump(Funid funid, Blockid from_blockid, Blockid to_blockid) {
+  B8 is_jump_updates_var_typeid = false;
+  Block* from_block = blockid_get(from_blockid);
+  Block* to_block = blockid_get(to_blockid);
+  Map* outvars = &from_block->out_var_typeids;
+  Map* invars  = &to_block->in_var_typeids;
+  for (I32 i = 0; i < outvars->len; i++) {
+    Istr name = outvars->list[i];
+    Typeid out_var_typeid = map_get(outvars, name);
+    Typeid old_var_typeid = map_get(invars,  name);
+    Typeid new_var_typeid = type_join(out_var_typeid, old_var_typeid);
+
+    if (type_not_equal(new_var_typeid, old_var_typeid)) {
+      map_put(invars, name, new_var_typeid);
+      map_put(&to_block->out_var_typeids, name, new_var_typeid);
+      is_jump_updates_var_typeid = true;
     }
   }
-  if (is_jump_updates_typeid_of_bb_param || is_jump_updates_typeid_of_memloc) {
-    sem_worklist_push(funid, jump_to_bbid);
+  if (is_jump_updates_var_typeid) {
+    sem_worklist_push(to_blockid);
   }
 }
 
-void sem_irid(Blockid blockid, Irid irid) {
+void sem_ir(Blockid blockid, Irid irid) {
 }
 
-void sem_bbid(Funid funid, BBid bbid) {
-  Block* block = blockid_get(bbid);
-  for (Irid i = entryid; i <= block->leaveid; i++) {
-    sem_irid(bbid, i);
+void sem_block(Funid funid, Blockid blockid) {
+  Block* block = blockid_get(blockid);
+  for (Irid i = block->entryid; i <= block->leaveid; i++) {
+    sem_ir(blockid, i);
   }
 
   if (block->kind == Block_Kind_branch) {
-    Branchid branchid = branchid_of_bbid(bbid);
+    Block* block = blockid_get(blockid);
     { // condition is not equal to zero branch
       Typeid_Tasks undo_narrow = branchid_narrow_nez(branchid);
-      Jumpid jumpid = jumpid_of_bbid_nez(bbid);
+      Jumpid jumpid = jumpid_of_bbid_nez(blockid);
       sem_jumpid(funid, jumpid);
       typeid_unnarrow(branchid);
     }
     { // condition is equal to zero branch
       Typeid_Tasks undo_narrow = branchid_narrow_eqz(branchid);
-      Jumpid jumpid = jumpid_of_bbid_eqz(bbid);
+      Jumpid jumpid = jumpid_of_bbid_eqz(blockid);
       sem_jumpid(funid, jumpid);
       typeid_unnarrow(undo_narrow);
     }
   }
   else {
-    Jumpid jumpid = jumpid_of_bbid(bbid);
+    Jumpid jumpid = jumpid_of_bbid(blockid);
     sem_jumpid(funid, jumpid);
   }
 }
@@ -60,7 +79,7 @@ Tyid sem_funid(Funid funid) {
 
   while (sem_worklist_is_not_empty(funid, first_basic_block_id)) {
     BBid bbid = sem_worklist_next_bbid(funid);
-    sem_bbid(funid, bbid);
+    sem_block(funid, bbid);
   }
 
   sem_unset_working_funid(funid);

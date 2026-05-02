@@ -1,4 +1,3 @@
-typedef I32 Varid;
 typedef I32 Irid;
 typedef I32 Blockid;
 typedef I32 Funid;
@@ -43,7 +42,6 @@ struct Ir {
   union {
     I64 i64;
     Istr istr;
-    Varid varid;
     Recordid recordid;
     struct {
       Irid one;
@@ -53,7 +51,7 @@ struct Ir {
       Irid one;
     } unary;
     struct {
-      Varid varid;
+      Istr istr;
       Irid irid;
     } store_var;
     struct {
@@ -111,6 +109,8 @@ struct Block {
   I32 pred_count;
   Irid entryid;
   Irid leaveid;
+  Map out_var_typeids;
+  Map in_var_typeids;
   union {
     Jump   jump;
     Branch branch;
@@ -409,7 +409,7 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
   break;
   case Ir_Kind_store_var:
     string_builder_push_cstr(sb, "store var \"");
-    string_builder_push_istr(sb, ir.istr);
+    string_builder_push_istr(sb, ir.store_var.istr);
     string_builder_push_cstr(sb, "\" = ");
     string_builder_push_cstr(sb, "r");
     string_builder_push_i64(sb, ir.store_var.irid);

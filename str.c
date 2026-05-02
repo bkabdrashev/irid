@@ -189,6 +189,8 @@ void test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr s
 
 typedef struct {
   I32   cap;
+  I32   len;
+  Istr* list;
   Istr* keys;
   I32*  vals;
 } Map;
@@ -196,7 +198,9 @@ typedef struct {
 Map map_init(Arena* arena, Umi capacity) {
   Map map = {}; 
   map.cap  = 2*power_of_2_up(capacity);
+  map.len  = 0;
   map.keys = arena_push_zero(arena, sizeof(Istr)*map.cap);
+  map.list = arena_push_zero(arena, sizeof(Istr)*capacity);
   map.vals = arena_push_zero(arena, sizeof(I32)*map.cap);
   return map;
 }
@@ -208,12 +212,28 @@ void map_put(Map* map, Istr key, I32 val) {
     if (!map->keys[i]) {
       map->keys[i] = key;
       map->vals[i] = val;
+      map->list[map->len++] = key;
+      map->len++;
       break;
     }
     else if (map->keys[i] == key) {
+      map->vals[i] = val;
       break;
     }
     i++;
   }
 }
 
+I32 map_get(Map* map, Istr key) {
+  I32 i = hash_u64(key);
+  for (;;) {
+    i &= map->cap - 1;
+    if (!map->keys[i]) {
+      return 0;
+    }
+    else if (map->keys[i] == key) {
+      return map->vals[i];
+    }
+    i++;
+  }
+}
