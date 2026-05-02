@@ -208,6 +208,7 @@ void map_put(Map* map, Istr key, I32 val) {
     if (!map->keys[i]) {
       map->keys[i] = key;
       map->vals[i] = val;
+      break;
     }
     else if (map->keys[i] == key) {
       break;

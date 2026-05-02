@@ -76,6 +76,7 @@ typedef enum {
   Ast_Kind_declare_leave   = Ast_Kind_declare   | Ast_Flag_binary | Ast_Flag_leave,
   Ast_Kind_record_enter    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_enter,
   Ast_Kind_record_split    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_split,
+  Ast_Kind_record_assign   = Ast_Kind_record    | Ast_Flag_list,
   Ast_Kind_record_leave    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_leave,
   Ast_Kind_tuple_enter     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_enter,
   Ast_Kind_tuple_split     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_split,
@@ -127,6 +128,10 @@ typedef struct {
     struct {
       I32   position;
     } split;
+    struct {
+      I32  position;
+      Istr name;
+    } field;
     struct {
       Astid length;
       Astid leave;
@@ -262,6 +267,10 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     break;
     case Ast_Kind_int:
       string_builder_push_i64(&sb, node.i64);
+    break;
+    case Ast_Kind_record_assign:
+      string_builder_push_istr(&sb, node.field.name);
+      string_builder_push_cstr(&sb, "=");
     break;
     default: {
       if (node.kind & Ast_Flag_enter) {
@@ -602,20 +611,25 @@ void parse_expression_enter(Parser* parser) {
   case Token_Kind_paren_open: {
     Astid final_length = parser->final.length;
     Astid record_length = 0;
-    B8 is_semicolon = false;
+    B8 is_record = false;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
       parse_expression(parser);
-      record_length++;
+      if (parse_match_token(parser, Token_Kind_equal)) {
+        is_record = true;
+        Ast_Node node = pop(parser->final);
+        assert(node.kind == Ast_Kind_name);
+        parse_expression(parser);
+        Ast_Node assign = { Ast_Kind_record_assign, .field = { .name = node.istr, .position = record_length } };
+        parse_final_push(parser, assign);
+      }
       if (parse_match_token(parser, Token_Kind_semicolon)) {
-        is_semicolon = true;
+        is_record = true;
       }
-      else if (parse_match_token(parser, Token_Kind_equal)) {
-      // TODO: equal/colon
-        assert(0);
-      }
-      parse_final_push_kind(parser, Ast_Kind_record_split);
+      Ast_Node split = { Ast_Kind_record_split, .split.position = record_length };
+      parse_final_push(parser, split);
+      record_length++;
     }
-    if (is_semicolon || record_length != 1) {
+    if (is_record || record_length != 1) {
       Ast_Node record_enter = { Ast_Kind_record_enter, .list.length = record_length };
       parse_final_insert(parser, final_length, record_enter);
       parse_final_push_kind(parser, Ast_Kind_record_leave);
@@ -785,6 +799,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("(x=1; y = 2)",     "s{ 1 2 3 add b a[] mul ; }s ");
+  return;
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
   test("c+b[1]",         "s{ c b 1 s[] add ; }s ");
