@@ -1,9 +1,9 @@
-typedef enum {
+typedef enum Token_Kind_Flag {
   Token_Kind_Flag_prefix   = 1 << 8,
   Token_Kind_Flag_call_rhs = 1 << 9,
 } Token_Kind_Flag;
 
-typedef enum {
+typedef enum Token_Kind {
   Token_Kind_source_leave       = 0,
   Token_Kind_source_enter       = 1,
   Token_Kind_name               = 2 | Token_Kind_Flag_call_rhs,
@@ -34,28 +34,37 @@ typedef enum {
   Token_Kind_return             = 34,
   Token_Kind_break              = 36,
   Token_Kind_while              = 38,
+  Token_Kind_bang_equal         = 40,
+  Token_Kind_equal_equal        = 41,
+  Token_Kind_less_equal         = 42,
+  Token_Kind_less               = 43,
+  Token_Kind_greater_equal      = 44,
+  Token_Kind_greater            = 45,
 } Token_Kind;
 
 typedef const char* Cstr;
 typedef I32 Istr;
 
-typedef struct {
+typedef struct Str Str;
+struct Str {
   C8* base;
   Umi length;
-} Str;
+};
 
-typedef struct {
+typedef struct Internal_Strings Internal_Strings;
+struct Internal_Strings {
   C8* buffer_top;
   C8* buffer_bot;
   Str* strings;
   Token_Kind* token_kinds;
   Umi cap;
-} Internal_Strings;
+};
 
-typedef struct {
+typedef struct String_Builder String_Builder;
+struct String_Builder {
   C8* base;
   Umi size;
-} String_Builder;
+};
 
 Internal_Strings internal_strings = {0};
 const Istr istr_nil = {0};
@@ -187,53 +196,4 @@ void test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr s
   }
 }
 
-typedef struct {
-  I32   cap;
-  I32   len;
-  Istr* list;
-  Istr* keys;
-  I32*  vals;
-} Map;
 
-Map map_init(Arena* arena, Umi capacity) {
-  Map map = {}; 
-  map.cap  = 2*power_of_2_up(capacity);
-  map.len  = 0;
-  map.keys = arena_push_zero(arena, sizeof(Istr)*map.cap);
-  map.list = arena_push_zero(arena, sizeof(Istr)*capacity);
-  map.vals = arena_push_zero(arena, sizeof(I32)*map.cap);
-  return map;
-}
-
-void map_put(Map* map, Istr key, I32 val) {
-  I32 i = hash_u64(key);
-  for (;;) {
-    i &= map->cap - 1;
-    if (!map->keys[i]) {
-      map->keys[i] = key;
-      map->vals[i] = val;
-      map->list[map->len++] = key;
-      map->len++;
-      break;
-    }
-    else if (map->keys[i] == key) {
-      map->vals[i] = val;
-      break;
-    }
-    i++;
-  }
-}
-
-I32 map_get(Map* map, Istr key) {
-  I32 i = hash_u64(key);
-  for (;;) {
-    i &= map->cap - 1;
-    if (!map->keys[i]) {
-      return 0;
-    }
-    else if (map->keys[i] == key) {
-      return map->vals[i];
-    }
-    i++;
-  }
-}

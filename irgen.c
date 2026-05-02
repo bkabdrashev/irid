@@ -3,12 +3,12 @@ typedef I32 Blockid;
 typedef I32 Funid;
 typedef I32 Recordid;
 
-typedef enum {
+typedef enum Ir_Flag {
   Ir_Flag_unary  = Ast_Flag_unary,
   Ir_Flag_binary = Ast_Flag_binary,
 } Ir_Flag;
 
-typedef enum {
+typedef enum Ir_Kind {
   Ir_Kind_nop = 0,
 
   Ir_Kind_int = Ast_Kind_int,
@@ -16,6 +16,12 @@ typedef enum {
   Ir_Kind_add = Ast_Kind_add_leave,
   Ir_Kind_sub = Ast_Kind_sub_leave,
   Ir_Kind_mul = Ast_Kind_mul_leave,
+  Ir_Kind_eq  = Ast_Kind_eq_leave,
+  Ir_Kind_ne  = Ast_Kind_ne_leave,
+  Ir_Kind_lt  = Ast_Kind_lt_leave,
+  Ir_Kind_le  = Ast_Kind_le_leave,
+  Ir_Kind_gt  = Ast_Kind_gt_leave,
+  Ir_Kind_ge  = Ast_Kind_ge_leave,
 
   Ir_Kind_neg = Ast_Kind_neg_leave,
 
@@ -36,6 +42,9 @@ typedef enum {
 
 } Ir_Kind;
 
+typedef struct Irid_Pair Irid_Pair;
+struct Irid_Pair { Irid one; Irid two; };
+
 typedef struct Ir Ir;
 struct Ir {
   Ir_Kind kind;
@@ -43,10 +52,7 @@ struct Ir {
     I64 i64;
     Istr istr;
     Recordid recordid;
-    struct {
-      Irid one;
-      Irid two;
-    } binary;
+    Irid_Pair binary;
     struct {
       Irid one;
     } unary;
@@ -71,7 +77,7 @@ struct Record {
   Istr* names;
   Irid* assigned;
   Irid* declared;
-  Map   positions;
+  Hash_Map   positions;
 };
 
 typedef struct Field Field;
@@ -82,22 +88,26 @@ struct Field {
   Irid declared;
 };
 
-typedef struct {
+typedef struct Irids Irids;
+struct Irids {
   Irid* base;
   I32   length;
-} Irids;
+};
 
-typedef struct {
+
+typedef struct Jump Jump;
+struct Jump {
   Blockid blockid;
-} Jump;
+};
 
-typedef struct {
+typedef struct Branch Branch;
+struct Branch {
   Irid cond;
   Jump eqz;
   Jump nez;
-} Branch;
+};
 
-typedef enum {
+typedef enum Block_Kind {
   Block_Kind_none,
   Block_Kind_jump,
   Block_Kind_branch,
@@ -109,63 +119,66 @@ struct Block {
   I32 pred_count;
   Irid entryid;
   Irid leaveid;
-  Map out_var_typeids;
-  Map in_var_typeids;
+  Hash_Map out_var_typeids;
+  Hash_Map in_var_typeids;
   union {
     Jump   jump;
     Branch branch;
   };
 };
 
-typedef enum {
-  Symbol_Kind_none,
-  Symbol_Kind_fun,
-  Symbol_Kind_var,
-} Symbol_Kind;
-
-typedef struct {
+typedef struct Fun Fun;
+struct Fun {
   Blockid entryid;
   Blockid leaveid;
   Irid    returnid;
   I32     varid;
-} Fun;
+};
 
-typedef struct {
+typedef struct Funs Funs;
+struct Funs {
   Fun* base;
   I32  length;
-} Funs;
+};
 
-typedef struct {
+typedef struct Blocks Blocks;
+struct Blocks {
   Block* base;
   I32    length;
-} Blocks;
+};
 
-typedef struct {
+typedef struct Blockids Blockids;
+struct Blockids {
   Blockid* base;
   I32      length;
-} Blockids;
+};
 
-typedef struct {
+typedef struct Records Records;
+struct Records {
   Record* base;
   I32     length;
-} Records;
+};
 
-typedef struct {
+typedef struct Recordid_Stack Recordid_Stack;
+struct Recordid_Stack {
   Recordid* base;
   I32       length;
-} Recordid_Stack;
+};
 
-typedef struct {
+typedef struct Irs Irs;
+struct Irs {
   Ir* base;
   I32 length;
-} Irs;
+};
 
-typedef struct {
+typedef struct Fun_Stack Fun_Stack;
+struct Fun_Stack {
   Fun** base;
   I32   length;
-} Fun_Stack;
+};
 
-typedef struct {
+typedef struct Irgen Irgen;
+struct Irgen {
   Ast     ast;
   Arena   arena;
   Funs    funs;
@@ -179,7 +192,7 @@ typedef struct {
   Blocks    block_stack;
   Recordid_Stack recordid_stack;
   Blockids headerids;
-} Irgen;
+};
 
 Irgen irgen = {};
 
@@ -219,6 +232,14 @@ Irid ir_push_position_offset(Irid record, I32 position) {
   return irid;
 }
 
+Ir_Kind irid_kind(Irid irid) {
+  return get(irgen.irs, irid).kind;
+}
+
+Irid_Pair irid_binary(Irid irid) {
+  return get(irgen.irs, irid).binary;
+}
+
 I32 recordid_length(Recordid recordid) {
   Record record = get(irgen.records, recordid);
   return record.length;
@@ -230,7 +251,7 @@ Recordid recordid_new(I32 length) {
   record.names    = arena_push_zero(&irgen.arena, length*sizeof(Istr));
   record.assigned = arena_push_zero(&irgen.arena, length*sizeof(Irid));
   record.declared = arena_push_zero(&irgen.arena, length*sizeof(Irid));
-  record.positions = map_init(&irgen.arena, length);
+  record.positions = hash_map_init(&irgen.arena, length);
   Recordid recordid = push(irgen.records, record);
   return recordid;
 }
@@ -241,7 +262,7 @@ void recordid_push_assign_position(Recordid recordid, I32 position, Irid value) 
 }
 void recordid_push_assign_name(Recordid recordid, Istr name, I32 position) {
   Record* record = &get(irgen.records, recordid);
-  map_put(&record->positions, name, position);
+  hash_map_put(&record->positions, name, position);
   record->names[position] = name;
 }
 void recordid_push_declare_position(Recordid recordid, I32 position, Irid value) {
@@ -250,7 +271,7 @@ void recordid_push_declare_position(Recordid recordid, I32 position, Irid value)
 }
 void recordid_push_declare_name(Recordid recordid, Istr name, I32 position) {
   Record* record = &get(irgen.records, recordid);
-  map_put(&record->positions, name, position);
+  hash_map_put(&record->positions, name, position);
   record->names[position] = name;
 }
 Field field_nil = {istr_nil, 0, 0, 0};
@@ -270,6 +291,10 @@ Field recordid_get_by_position(Recordid recordid, I32 position) {
 
 Block* blockid_get(Blockid blockid) {
   return &irgen.block_stack.base[blockid];
+}
+
+Irid blockid_branch_condition(Blockid blockid) {
+  return irgen.block_stack.base[blockid].branch.cond;
 }
 
 Blockid blockid_set_branch(Irid cond) {

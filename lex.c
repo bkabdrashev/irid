@@ -253,6 +253,24 @@ Cstr cstr_from_slice_token(Tokens slice, C8* buffer) {
     case Token_Kind_star:
       string_builder_push_cstr(&sb, "*");
     break;
+    case Token_Kind_equal_equal:
+      string_builder_push_cstr(&sb, "==");
+    break;
+    case Token_Kind_bang_equal:
+      string_builder_push_cstr(&sb, "!=");
+    break;
+    case Token_Kind_less_equal:
+      string_builder_push_cstr(&sb, "<=");
+    break;
+    case Token_Kind_greater_equal:
+      string_builder_push_cstr(&sb, ">=");
+    break;
+    case Token_Kind_less:
+      string_builder_push_cstr(&sb, "<");
+    break;
+    case Token_Kind_greater:
+      string_builder_push_cstr(&sb, ">");
+    break;
     case Token_Kind_equal:
       string_builder_push_cstr(&sb, "=");
     break;

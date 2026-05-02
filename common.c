@@ -122,11 +122,6 @@ Umi power_of_2_up(Umi v) {
   return v;
 }
 
-typedef struct {
-  I32* base;
-  I32 length;
-} Slice_S32;
-
 #define empty(slice) ((slice).length == 0)
 #define push(slice, item) ((slice).base[(slice).length++] = (item), ((slice).length)-1)
 #define add(slice, item) do {(slice).base[(slice).length++] = (item);} while(0);
@@ -136,18 +131,75 @@ typedef struct {
 #define top(slice) ((slice).base[(slice).length-1])
 #define get(slice, index) ((slice).base[(index)])
 
-I32 slice_s32_push(Slice_S32* slice, I32 item) {
-  I32 index = slice->length;
-  slice->base[slice->length++] = item;
-  return index;
-}
-I32 slice_s32_pop(Slice_S32* slice) {
-  return slice->base[--slice->length];
-}
-I32 slice_s32_top(Slice_S32* slice) {
-  return slice->base[slice->length-1];
-}
-B8 slice_s32_is_empty(Slice_S32* slice) {
-  return slice->length == 0;
+typedef struct Hash_Map Hash_Map;
+struct Hash_Map {
+  I32   cap;
+  I32   len;
+  I32* list;
+  I32* keys;
+  I32*  vals;
+};
+
+Hash_Map hash_map_init(Arena* arena, Umi capacity) {
+  Hash_Map map = {}; 
+  map.cap  = 2*power_of_2_up(capacity);
+  map.len  = 0;
+  map.keys = arena_push_zero(arena, sizeof(I32)*map.cap);
+  map.list = arena_push_zero(arena, sizeof(I32)*capacity);
+  map.vals = arena_push_zero(arena, sizeof(I32)*map.cap);
+  return map;
 }
 
+void hash_map_put(Hash_Map* map, I32 key, I32 val) {
+  I32 i = hash_u64(key);
+  for (;;) {
+    i &= map->cap - 1;
+    if (!map->keys[i]) {
+      map->keys[i] = key;
+      map->vals[i] = val;
+      map->list[map->len++] = key;
+      map->len++;
+      break;
+    }
+    else if (map->keys[i] == key) {
+      map->vals[i] = val;
+      break;
+    }
+    i++;
+  }
+}
+
+I32 hash_map_get(Hash_Map* map, I32 key) {
+  I32 i = hash_u64(key);
+  for (;;) {
+    i &= map->cap - 1;
+    if (!map->keys[i]) {
+      return 0;
+    }
+    else if (map->keys[i] == key) {
+      return map->vals[i];
+    }
+    i++;
+  }
+}
+
+typedef struct Dense_Map Dense_Map;
+struct Dense_Map {
+  I32* base;
+  I32  length;
+};
+
+Dense_Map dense_map_init(Arena* arena, Umi capacity) {
+  Dense_Map map = {}; 
+  map.length = 0;
+  map.base   = arena_push_zero(arena, sizeof(I32)*capacity);
+  return map;
+}
+
+void dense_map_put(Dense_Map* map, I32 key, I32 val) {
+  map->base[key] = val;
+}
+
+I32 dense_map_get(Dense_Map* map, I32 key) {
+  return map->base[key];
+}

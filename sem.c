@@ -1,11 +1,123 @@
 typedef I32 Typeid;
 
-Typeid type_join(Typeid one, Typeid two) {
+typedef enum Type_Kind Type_Kind;
+enum Type_Kind {
+  Type_Kind_none,
+};
+
+typedef struct Sem_Tasks Sem_Tasks;
+struct Sem_Tasks {};
+
+typedef struct Sem Sem;
+struct Sem {
+  DMap typeid_of_irid;
+};
+
+typedef struct Typeid_Pair Typeid_Pair;
+struct Typeid_Pair { Typeid one; Typeid two; };
+
+Typeid typeid_of_irid(Irid irid) {
+  return get(sem.typeid_of_irid, irid);
+}
+
+Typeid_Pair typeid_of_irid_binary(Irid irid) {
+  Irid_Pair pair = irid_binary(irid);
+  Typeid one = typeid_of_irid(pair.one);
+  Typeid two = typeid_of_irid(pair.two);
+  Typeid_Pair result = { one, two };
+  return result;
+}
+
+B8 typeid_kind_of_irid_binary_operands_equal(Irid irid, Type_Kind type_kind) {
+  Pair_Typeid pair = typeid_of_irid_binary(irid);
+  return pair.tag == type_tag && pair.tag == type_tag;
+}
+
+Sem_Tasks sem_narrow_nez(Blockid blockid) {
+  Sem_Tasks tasks = {};
+  Irid condition = blockid_branch_condition(blockid);
+  switch (irid_kind(condition)) {
+  case Ir_Kind_eq: {
+    if (typeid_tag_of_irid_binary_operand_equal(condition, TypeTag_int)) {
+      typeid_tasks = typeid_narrow_int_eq(condition);
+    }
+    else {
+      log_todo("Ir_Kind_eq narrow nez between %s, %s", istr_from_typeid(typeid_one), istr_form_typeid(typeid_two));
+    }
+  } break;
+  case Ir_Kind_ne: {
+    if (typeid_tag_of_irid_binary_operand_equal(condition, TypeTag_int)) {
+      typeid_tasks = typeid_narrow_int_ne(condition);
+    }
+    else {
+      log_todo("Ir_Kind_ne narrow nez between %s, %s", istr_from_typeid(typeid_one), istr_form_typeid(typeid_two));
+    }
+  } break;
+  case Ir_Kind_lt: {
+    if (typeid_tag_of_irid_binary_operand_equal(condition, TypeTag_int)) {
+      typeid_tasks = typeid_narrow_int_lt(condition);
+    }
+    else {
+      log_todo("Ir_Kind_lt narrow nez between %s, %s", istr_from_typeid(typeid_one), istr_form_typeid(typeid_two));
+    }
+  } break;
+  case Ir_Kind_le: log_todo("Ir_Kind_le narrow nez");
+  case Ir_Kind_gt: log_todo("Ir_Kind_gt narrow nez");
+  case Ir_Kind_ge: log_todo("Ir_Kind_ge narrow nez");
+  default: {
+    Typeid old_typeid = typeid_of_irid(condition);
+    Typeid new_typeid = typeid_of_irid_narrow_nez(old_typeid);
+    typeid_of_irid_set(irid, new_typeid);
+    typeid_tasks_push(typeid_tasks, irid, old_typeid);
+  } break;
+  }
+
+  return typeid_tasks;
+}
+
+Typeid_Tasks sem_narrow_eqz(Branchid branchid) {
+  Typeid_Tasks typeid_tasks = {};
+  IRid condition = branchid_condition(branchid);
+  switch (ir_tag(condition)) {
+  case Ir_Kind_eq: {
+    if (typeid_tag_of_irid_binary_operand_equal(condition, TypeTag_int)) {
+      typeid_tasks = typeid_narrow_int_ne(condition);
+    }
+    else {
+      log_todo("Ir_Kind_eq narrow eqz between %s, %s", istr_from_typeid(typeid_one), istr_form_typeid(typeid_two));
+    }
+  } break;
+  case Ir_Kind_ne: {
+    if (typeid_tag_of_irid_binary_operand_equal(condition, TypeTag_int)) {
+      typeid_tasks = typeid_narrow_int_eq(condition);
+    }
+    else {
+      log_todo("Ir_Kind_ne narrow eqz between %s, %s", istr_from_typeid(typeid_one), istr_form_typeid(typeid_two));
+    }
+  } break;
+  case Ir_Kind_lt: log_todo("Ir_Kind_lt narrow eqz"); break;
+  case Ir_Kind_le: log_todo("Ir_Kind_le narrow eqz"); break;
+  case Ir_Kind_gt: log_todo("Ir_Kind_gt narrow eqz"); break;
+  case Ir_Kind_ge: log_todo("Ir_Kind_ge narrow eqz"); break;
+  default: {
+    Typeid old_typeid = typeid_of_irid(condition);
+    Typeid new_typeid = typeid_of_irid_narrow_eqz(old_typeid);
+    typeid_of_irid_set(irid, new_typeid);
+    typeid_tasks_push(typeid_tasks, irid, old_typeid);
+  } break;
+  }
+
+  return typeid_tasks;
+}
+
+
+
+Typeid typeid_join(Typeid one, Typeid two) {
   assert(0);
   return one;
 }
 
-B8 type_not_equal(Typeid one, Typeid two) {
+B8 typeid_not_equal(Typeid one, Typeid two) {
   assert(0);
   return one != two;
 }
@@ -17,17 +129,17 @@ void sem_jump(Funid funid, Blockid from_blockid, Blockid to_blockid) {
   B8 is_jump_updates_var_typeid = false;
   Block* from_block = blockid_get(from_blockid);
   Block* to_block = blockid_get(to_blockid);
-  Map* outvars = &from_block->out_var_typeids;
-  Map* invars  = &to_block->in_var_typeids;
+  Hash_Map* outvars = &from_block->out_var_typeids;
+  Hash_Map* invars  = &to_block->in_var_typeids;
   for (I32 i = 0; i < outvars->len; i++) {
     Istr name = outvars->list[i];
-    Typeid out_var_typeid = map_get(outvars, name);
-    Typeid old_var_typeid = map_get(invars,  name);
-    Typeid new_var_typeid = type_join(out_var_typeid, old_var_typeid);
+    Typeid out_var_typeid = hash_map_get(outvars, name);
+    Typeid old_var_typeid = hash_map_get(invars,  name);
+    Typeid new_var_typeid = typeid_join(out_var_typeid, old_var_typeid);
 
-    if (type_not_equal(new_var_typeid, old_var_typeid)) {
-      map_put(invars, name, new_var_typeid);
-      map_put(&to_block->out_var_typeids, name, new_var_typeid);
+    if (typeid_not_equal(new_var_typeid, old_var_typeid)) {
+      hash_map_put(invars, name, new_var_typeid);
+      hash_map_put(&to_block->out_var_typeids, name, new_var_typeid);
       is_jump_updates_var_typeid = true;
     }
   }
