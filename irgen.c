@@ -45,6 +45,12 @@ typedef enum Ir_Kind {
 typedef struct Irid_Pair Irid_Pair;
 struct Irid_Pair { Irid one; Irid two; };
 
+typedef struct Name_Offset Name_Offset;
+struct Name_Offset { Irid of; Istr at; };
+
+typedef struct Position_Offset Position_Offset;
+struct Position_Offset { Irid of; I32 at; };
+
 typedef struct Ir Ir;
 struct Ir {
   Ir_Kind kind;
@@ -60,14 +66,8 @@ struct Ir {
       Istr istr;
       Irid irid;
     } store_var;
-    struct {
-      Irid of;
-      I32  at;
-    } position;
-    struct {
-      Irid of;
-      Istr at;
-    } name;
+    Position_Offset position;
+    Name_Offset     name;
   };
 };
 
@@ -236,6 +236,14 @@ Ir_Kind irid_kind(Irid irid) {
   return get(irgen.irs, irid).kind;
 }
 
+Name_Offset irid_name_offset(Irid irid) {
+  return get(irgen.irs, irid).name;
+}
+
+B8 irid_kind_equal(Irid irid, Ir_Kind kind) {
+  return get(irgen.irs, irid).kind == kind;
+}
+
 Irid_Pair irid_binary(Irid irid) {
   return get(irgen.irs, irid).binary;
 }
@@ -293,11 +301,15 @@ Block* blockid_get(Blockid blockid) {
   return &irgen.block_stack.base[blockid];
 }
 
-Irid blockid_branch_condition(Blockid blockid) {
-  return irgen.block_stack.base[blockid].branch.cond;
+Branch blockid_branch(Blockid blockid) {
+  return irgen.block_stack.base[blockid].branch;
 }
 
-Blockid blockid_set_branch(Irid cond) {
+Jump blockid_jump(Blockid blockid) {
+  return irgen.block_stack.base[blockid].jump;
+}
+
+Blockid blockid_put_branch(Irid cond) {
   Fun* fun = top(irgen.fun_stack);
   Block* block = blockid_get(fun->leaveid);
   block->branch.cond = cond;
@@ -305,7 +317,7 @@ Blockid blockid_set_branch(Irid cond) {
   return fun->leaveid;
 }
 
-Blockid blockid_set_jump() {
+Blockid blockid_put_jump() {
   Fun* fun = top(irgen.fun_stack);
   Block* block = blockid_get(fun->leaveid);
   block->kind = Block_Kind_jump;
@@ -349,6 +361,10 @@ Blockid block_new() {
   memset(block, 0, sizeof(Block));
   block->entryid = irgen.ir_stack.length;
   return blockid;
+}
+
+Fun* funid_get(Funid funid) {
+  return &get(irgen.funs, funid);
 }
 
 Funid fun_enter(Astid astid) {
@@ -680,28 +696,28 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     } break;
     case Ast_Kind_if_split: {
       Irid cond = pop(irgen.irid_stack);
-      Blockid headerid     = blockid_set_branch(cond);
+      Blockid headerid     = blockid_put_branch(cond);
       Blockid nez_blockid  = block_new();
       blockid_nez_link_to(headerid, nez_blockid);
       add(irgen.headerids, headerid);
     } break;
     case Ast_Kind_if_leave: {
       Blockid headerid    = pop(irgen.headerids);
-      Blockid blockid     = blockid_set_jump();
+      Blockid blockid     = blockid_put_jump();
       Blockid eqz_blockid = block_new();
       blockid_eqz_link_to(headerid, eqz_blockid);
       blockid_jump_link_to(blockid, eqz_blockid);
     } break;
     case Ast_Kind_if_leave_else_enter: {
       Blockid headerid    = pop(irgen.headerids);
-      Blockid blockid     = blockid_set_jump();
+      Blockid blockid     = blockid_put_jump();
       Blockid eqz_blockid = block_new();
       blockid_eqz_link_to(headerid, eqz_blockid);
       add(irgen.headerids, blockid);
     } break;
     case Ast_Kind_else_leave: {
       Blockid nez_blockid = pop(irgen.headerids);
-      Blockid blockid     = blockid_set_jump();
+      Blockid blockid     = blockid_put_jump();
       Blockid end_blockid = block_new();
       blockid_jump_link_to(nez_blockid, end_blockid);
       blockid_jump_link_to(blockid, end_blockid);

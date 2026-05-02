@@ -130,6 +130,7 @@ Umi power_of_2_up(Umi v) {
 #define del(slice) (--(slice).length)
 #define top(slice) ((slice).base[(slice).length-1])
 #define get(slice, index) ((slice).base[(index)])
+#define put(slice, index, value) ((slice).base[(index)] = (value))
 
 typedef struct Hash_Map Hash_Map;
 struct Hash_Map {

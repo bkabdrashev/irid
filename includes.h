@@ -12,4 +12,4 @@
 #include "lex.c"
 #include "parse.c"
 #include "irgen.c"
-// #include "sem.c"
+#include "sem.c"
