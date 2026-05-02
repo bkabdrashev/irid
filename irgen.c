@@ -180,7 +180,7 @@ struct Fun_Stack {
 typedef struct Irgen Irgen;
 struct Irgen {
   Ast     ast;
-  Arena   arena;
+  Arena*  arena;
   Funs    funs;
   Blocks  blocks;
   Records records;
@@ -256,10 +256,10 @@ I32 recordid_length(Recordid recordid) {
 Recordid recordid_new(I32 length) {
   Record record = {};
   record.length = length;
-  record.names    = arena_push_zero(&irgen.arena, length*sizeof(Istr));
-  record.assigned = arena_push_zero(&irgen.arena, length*sizeof(Irid));
-  record.declared = arena_push_zero(&irgen.arena, length*sizeof(Irid));
-  record.positions = hash_map_init(&irgen.arena, length);
+  record.names    = arena_push_zero(irgen.arena, length*sizeof(Istr));
+  record.assigned = arena_push_zero(irgen.arena, length*sizeof(Irid));
+  record.declared = arena_push_zero(irgen.arena, length*sizeof(Irid));
+  record.positions = hash_map_init(irgen.arena, length);
   Recordid recordid = push(irgen.records, record);
   return recordid;
 }
@@ -534,9 +534,17 @@ void irgen_print() {
   printf("\n");
 }
 
-Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Record* record_buffer) {
+Funs irgen_ast(Arena* arena, Ast ast) {
+  I32 max_ast_length   = source_length + 2;
+  Ast_Node* ast_buffer = arena_push(&arena, sizeof(Ast_Node) * 2*max_ast_length);
+  Ast ast              = ast_from_source(source, ast_buffer);
+  Fun* funs_buffer     = arena_push(&arena, sizeof(Fun)*ast.length);
+  Block* block_buffer  = arena_push(&arena, sizeof(Block)*ast.length);
+  Ir* ir_buffer        = arena_push(&arena, sizeof(Ir)*ast.length);
+  Record* record_buffer= arena_push(&arena, sizeof(Record)*ast.length);
+
   irgen.ast = ast;
-  irgen.arena       = arena_init(KB(4) * ast.length);
+  irgen.arena       = arena;
   irgen.funs.base   = fun_buffer;
   irgen.blocks.base = block_buffer;
   irgen.irs.base    = ir_buffer;
@@ -784,12 +792,9 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source);
   I32 max_ast_length   = source_length + 2;
   Ast_Node* ast_buffer = xmalloc(sizeof(Ast_Node) * 2*max_ast_length);
-  Ast ast              = ast_from_source(source, ast_buffer);
-  Fun* funs_buffer     = xmalloc(sizeof(Fun)*ast.length);
-  Block* block_buffer  = xmalloc(sizeof(Block)*ast.length);
-  Ir* ir_buffer        = xmalloc(sizeof(Ir)*ast.length);
-  Record* record_buffer= xmalloc(sizeof(Record)*ast.length);
-  Funs funs            = irgen_ast(ast, funs_buffer, block_buffer, ir_buffer, record_buffer);
+  Ast ast              = ast_from_source(&arena, source, ast_buffer);
+  Arena arena          = arena_init(KB(64) * source_length);
+  Funs funs            = irgen_ast(&arena, ast, funs_buffer, block_buffer, ir_buffer, record_buffer);
                          free(ast.base);
   C8* buffer           = xmalloc(MB(64));
   Cstr result          = cstr_from_funs(funs, buffer);

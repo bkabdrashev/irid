@@ -134,11 +134,11 @@ Umi power_of_2_up(Umi v) {
 
 typedef struct Hash_Map Hash_Map;
 struct Hash_Map {
-  I32   cap;
-  I32   len;
+  I32  cap;
+  I32  len;
   I32* list;
   I32* keys;
-  I32*  vals;
+  I32* vals;
 };
 
 Hash_Map hash_map_init(Arena* arena, Umi capacity) {
@@ -159,7 +159,6 @@ void hash_map_put(Hash_Map* map, I32 key, I32 val) {
       map->keys[i] = key;
       map->vals[i] = val;
       map->list[map->len++] = key;
-      map->len++;
       break;
     }
     else if (map->keys[i] == key) {
@@ -187,12 +186,10 @@ I32 hash_map_get(Hash_Map* map, I32 key) {
 typedef struct Dense_Map Dense_Map;
 struct Dense_Map {
   I32* base;
-  I32  length;
 };
 
 Dense_Map dense_map_init(Arena* arena, Umi capacity) {
   Dense_Map map = {}; 
-  map.length = 0;
   map.base   = arena_push_zero(arena, sizeof(I32)*capacity);
   return map;
 }
