@@ -235,11 +235,20 @@ Recordid recordid_new(I32 length) {
   return recordid;
 }
 
-void recordid_push_position(Recordid recordid, I32 position, Irid value) {
+void recordid_push_assign_position(Recordid recordid, I32 position, Irid value) {
   Record* record = &get(irgen.records, recordid);
   record->assigned[position] = value;
 }
-void recordid_push_name(Recordid recordid, Istr name, I32 position) {
+void recordid_push_assign_name(Recordid recordid, Istr name, I32 position) {
+  Record* record = &get(irgen.records, recordid);
+  map_put(&record->positions, name, position);
+  record->names[position] = name;
+}
+void recordid_push_declare_position(Recordid recordid, I32 position, Irid value) {
+  Record* record = &get(irgen.records, recordid);
+  record->declared[position] = value;
+}
+void recordid_push_declare_name(Recordid recordid, Istr name, I32 position) {
   Record* record = &get(irgen.records, recordid);
   map_put(&record->positions, name, position);
   record->names[position] = name;
@@ -534,7 +543,7 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     case Ast_Kind_tuple_split: {
       Recordid tuple = top(irgen.recordid_stack);
       Irid val = pop(irgen.irid_stack);
-      recordid_push_position(tuple, node.split.position, val);
+      recordid_push_assign_position(tuple, node.split.position, val);
     } break;
     case Ast_Kind_tuple_leave: {
       Recordid tuple = pop(irgen.recordid_stack);
@@ -548,14 +557,21 @@ Funs irgen_ast(Ast ast, Fun* fun_buffer, Block* block_buffer, Ir* ir_buffer, Rec
     case Ast_Kind_record_split: {
       Recordid record = top(irgen.recordid_stack);
       Irid val = pop(irgen.irid_stack);
-      recordid_push_position(record, node.split.position, val);
+      recordid_push_assign_position(record, node.split.position, val);
     } break;
     case Ast_Kind_record_assign: {
       Recordid record = top(irgen.recordid_stack);
-      Irid val  = pop(irgen.irid_stack);
-      recordid_push_position(record, node.field.position, val);
-      recordid_push_name(record, node.field.name, node.field.position);
-      astid++; // skips _split
+      Irid val = pop(irgen.irid_stack);
+      recordid_push_assign_position(record, node.field.position, val);
+      recordid_push_assign_name(record, node.field.name, node.field.position);
+      astid++; // skips split
+    } break;
+    case Ast_Kind_record_declare: {
+      Recordid record = top(irgen.recordid_stack);
+      Irid val = pop(irgen.irid_stack);
+      recordid_push_declare_position(record, node.field.position, val);
+      recordid_push_declare_name(record, node.field.name, node.field.position);
+      astid++; // skips split
     } break;
     case Ast_Kind_record_leave: {
       Recordid record = pop(irgen.recordid_stack);
@@ -748,8 +764,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
-  test("(x = 1; y = 2)", "");
+  test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
+  test("(x = 1; y : 2)", "");
 }
 
 #undef test

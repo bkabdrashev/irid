@@ -76,7 +76,6 @@ typedef enum {
   Ast_Kind_declare_leave   = Ast_Kind_declare   | Ast_Flag_binary | Ast_Flag_leave,
   Ast_Kind_record_enter    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_enter,
   Ast_Kind_record_split    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_split,
-  Ast_Kind_record_assign   = Ast_Kind_record    | Ast_Flag_list,
   Ast_Kind_record_leave    = Ast_Kind_record    | Ast_Flag_list | Ast_Flag_leave,
   Ast_Kind_tuple_enter     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_enter,
   Ast_Kind_tuple_split     = Ast_Kind_tuple     | Ast_Flag_list | Ast_Flag_split,
@@ -115,6 +114,8 @@ typedef enum {
   Ast_Kind_else_leave          = Ast_Kind_else | Ast_Flag_leave,
   Ast_Kind_if_value_leave      = Ast_Kind_if_value   | Ast_Flag_leave,
   Ast_Kind_else_value_leave    = Ast_Kind_else_value | Ast_Flag_leave,
+  Ast_Kind_record_assign,
+  Ast_Kind_record_declare,
 } Ast_Kind;
 
 typedef I32 Astid;
@@ -271,6 +272,10 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
     case Ast_Kind_record_assign:
       string_builder_push_istr(&sb, node.field.name);
       string_builder_push_cstr(&sb, "=");
+    break;
+    case Ast_Kind_record_declare:
+      string_builder_push_istr(&sb, node.field.name);
+      string_builder_push_cstr(&sb, ":");
     break;
     default: {
       if (node.kind & Ast_Flag_enter) {
@@ -622,6 +627,14 @@ void parse_expression_enter(Parser* parser) {
         Ast_Node assign = { Ast_Kind_record_assign, .field = { .name = node.istr, .position = record_length } };
         parse_final_push(parser, assign);
       }
+      else if (parse_match_token(parser, Token_Kind_colon)) {
+        is_record = true;
+        Ast_Node node = pop(parser->final);
+        assert(node.kind == Ast_Kind_name);
+        parse_expression(parser);
+        Ast_Node assign = { Ast_Kind_record_declare, .field = { .name = node.istr, .position = record_length } };
+        parse_final_push(parser, assign);
+      }
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         is_record = true;
       }
@@ -799,7 +812,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("(x=1; y = 2)",     "s{ 1 2 3 add b a[] mul ; }s ");
+  test("(x=1; y: 2)",     "s{ 1 2 3 add b a[] mul ; }s ");
   return;
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");

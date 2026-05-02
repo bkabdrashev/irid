@@ -56,7 +56,7 @@ Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
 - [ ] $ syntax for defining templates/variables based on pattern
 ```irid
 foo : (a: $T; b: T) -> {
-  return a+b
+  re a+b
 }
 size : [$N]$T -> N * sizeof T
 length : [$N]$ -> N;
@@ -145,7 +145,7 @@ Vec2.x + Vec.y // 7
 
 - [ ] {} syntax for creating records with matching field names. This conflicts with expressoin block syntax.
 ```irid
-x = 1;
+x = 1
 y = 2
 vec = { x, y } // (x = x; y = y)
 ```
@@ -203,11 +203,19 @@ c = a.dot b // 3 + 8
 - [ ] function return value type checking
 ```irid
 foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
-  if () return 1
-  if () return 2.0
+  if () re 1
+  if () re 2.0
 }
 bar : () -> I32 { // not error since both values are converted via the same I32 
-  if () return 1.0
-  if () return 2.0
+  if () re 1.0
+  if () re 2.0
+}
+baz : () -> (x:I32; y:I32) { // not error
+  if () re (1, 2)
+  if () re (x=3, y=4)
+}
+zap : () -> (x:I32; y:I32) { // error since the second returned value have to swap 3 and 4
+  if () re (1, 2)
+  if () re (y=3, x=4)
 }
 ```
