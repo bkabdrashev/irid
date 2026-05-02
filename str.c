@@ -37,7 +37,7 @@ typedef enum {
 } Token_Kind;
 
 typedef const char* Cstr;
-typedef struct { I32 index; } Istr;
+typedef I32 Istr;
 
 typedef struct {
   C8* base;
@@ -69,60 +69,60 @@ void istr_init(Umi capacity) {
 }
 
 Token_Kind token_kind_from_istr(Istr istr) {
-  return internal_strings.token_kinds[istr.index];
+  return internal_strings.token_kinds[istr];
 }
 
 Cstr cstr_from_istr(Istr istr) {
-  return internal_strings.strings[istr.index].base;
+  return internal_strings.strings[istr].base;
 }
 
 Umi istr_length(Istr istr) {
-  return internal_strings.strings[istr.index].length;
+  return internal_strings.strings[istr].length;
 }
 
 Istr istr_from_cstr_token_kind(Cstr str, Token_Kind kind) {
   Umi len  = strlen(str);
-  Istr istr = { .index = hash_bytes(str, len) };
+  Istr istr = hash_bytes(str, len);
   for (;;) {
-    istr.index &= internal_strings.cap - 1;
-    Str slice = internal_strings.strings[istr.index];
+    istr &= internal_strings.cap - 1;
+    Str slice = internal_strings.strings[istr];
     if (!slice.base) {
       slice.base = internal_strings.buffer_top;
       slice.length = len;
       memcpy(slice.base, str, len + 1);
       internal_strings.buffer_top += len + 1;
-      internal_strings.strings[istr.index] = slice;
-      internal_strings.token_kinds[istr.index] = kind;
+      internal_strings.strings[istr] = slice;
+      internal_strings.token_kinds[istr] = kind;
       return istr;
     }
     else if (slice.length == len && strncmp(slice.base, str, len) == 0) {
       return istr;
     }
-    istr.index++;
+    istr++;
   }
   return (Istr){0};
 }
 
 Istr istr_from_range(Cstr begin, Cstr end) {
   Umi len   = end - begin;
-  Istr istr = { .index = hash_bytes(begin, len) };
+  Istr istr = hash_bytes(begin, len);
   for (;;) {
-    istr.index &= internal_strings.cap - 1;
-    Str slice = internal_strings.strings[istr.index];
+    istr &= internal_strings.cap - 1;
+    Str slice = internal_strings.strings[istr];
     if (!slice.base) {
       slice.base = internal_strings.buffer_top;
       slice.length = len;
       memcpy(slice.base, begin, len);
       slice.base[len] = '\0';
       internal_strings.buffer_top += len + 1;
-      internal_strings.strings[istr.index] = slice;
-      internal_strings.token_kinds[istr.index] = Token_Kind_name;
+      internal_strings.strings[istr] = slice;
+      internal_strings.token_kinds[istr] = Token_Kind_name;
       return istr;
     }
     else if (slice.length == len && strncmp(slice.base, begin, len) == 0) {
       return istr;
     }
-    istr.index++;
+    istr++;
   }
 }
 
@@ -202,14 +202,14 @@ Map map_init(Arena* arena, Umi capacity) {
 }
 
 void map_put(Map* map, Istr key, I32 val) {
-  I32 i = hash_u64(key.index);
+  I32 i = hash_u64(key);
   for (;;) {
     i &= map->cap - 1;
-    if (!map->keys[i].index) {
+    if (!map->keys[i]) {
       map->keys[i] = key;
       map->vals[i] = val;
     }
-    else if (map->keys[i].index == key.index) {
+    else if (map->keys[i] == key) {
       break;
     }
     i++;

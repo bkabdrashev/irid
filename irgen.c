@@ -418,7 +418,7 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
     string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < recordid_length(ir.recordid); i++) {
       Field field = recordid_get_by_position(ir.recordid, i);
-      if (field.name.index) {
+      if (field.name) {
         string_builder_push_istr(sb, field.name);
         if (field.declared != irgen.irid_nil) {
           string_builder_push_cstr(sb, " : ");
