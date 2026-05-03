@@ -1,8 +1,21 @@
 typedef I32 Typeid;
+typedef I32 Intsid;
+
+typedef struct I64_Pair I64_Pair;
+struct I64_Pair {
+  I64 one;
+  I64 two;
+};
+
+typedef struct Intervals Intervals;
+struct Intervals {
+  I64_Pair pair;
+  I32      next;
+};
 
 typedef enum Type_Kind {
   Type_Kind_none,
-  Type_Kind_int,
+  Type_Kind_ints,
   Type_Kind_record,
 } Type_Kind;
 
@@ -10,7 +23,6 @@ typedef struct Type Type;
 struct Type {
   Type_Kind kind;
   union {
-    I32 intid;
   };
 };
 
@@ -23,13 +35,14 @@ struct Types {
 typedef struct Sem_Tasks Sem_Tasks;
 struct Sem_Tasks {
   Typeid* typeids;
-  Istr*   vars;
+  Istr*   vars; 
   I32     length;
 };
 
 typedef struct Sem Sem;
 struct Sem {
-  Dense_Map typeid_of_irid;
+  Arena* arena;
+  Dense_Map typeid_of_irids;
   Types types;
   Dense_Map workset;
   Blockids worklist;
@@ -44,11 +57,91 @@ typedef struct Type_Pair Type_Pair;
 struct Type_Pair { Type one; Type two; };
 
 Typeid typeid_of_irid(Irid irid) {
-  return get(sem.typeid_of_irid, irid);
+  return dense_map_get(sem.typeid_of_irids, irid);
 }
 
 void typeid_of_irid_put(Irid irid, Typeid typeid) {
-  put(sem.typeid_of_irid, irid, typeid);
+  dense_map_put(&sem.typeid_of_irids, irid, typeid);
+}
+
+I32 hash_intervals(Intervals intervals) {
+  return 0;
+}
+
+Intsid intervals_intersection(Intsid one, Intsid two) {
+/*
+[1 2] 
+       [4 5]
+
+[1 2 3]
+  [2 3 4]
+
+[1 2 3 5]
+  [2 3]
+*/
+// TODO: backwards link hashing
+  Intervals curr = {};
+  Intervals prev = {};
+  while (one && two) {
+    Intervals ints_one = sem.ints_list[one];
+    Intervals ints_two = sem.ints_list[two];
+    I64 lo = MAX(ints_one[o].x, ints_two[t].x);
+    I64 hi = MIN(ints_one[o].y, ints_two[t].y);
+    if (lo <= hi) {
+      new.pair.one = lo;
+      new.pair.two = hi;
+      new.next = 0;
+    }
+    if (ints_one.y < ints_two.y) {
+      one = ints_one.next;
+    }
+    else {
+      two = ints_two.next;
+    }
+  }
+  return new;
+}
+
+Typeid typeid_ints(Intervals intervals) {
+  // - store (x,y),next in a ints list;
+  // - node = get(ints_list, intid) to get first node of intervals
+  // - node.next to get second node of intervals, etc
+  I32 i = hash_intervals(intervals);
+  for (;;) {
+    i &= sem.intids_set.cap - 1;
+    if (!sem.intids_set.keys[i]) {
+    }
+    else {
+      key = sem.intids_set.keys[i];
+      if (sem.ints_list[key].pair.one == intervals.pair.one
+       && sem.ints_list[key].pair.two == intervals.pair.two
+       && sem.ints_list[key].next     == intervals.next) {
+        return key;
+      }
+    }
+    i++;
+  }
+
+  hash_map_get(sem.ints_map, hash);
+  Typeid typeid = sem.types.length;
+  Type type = { .kind = Type_Kind_ints };
+  add(sem.types, type);
+  return typeid;
+}
+
+Typeid typeid_int(I64 i64) {
+  Intervals intervals = { .pair = {i64, i64}, .next = 0 };
+  return typeid_ints(intervals);
+}
+
+Typeid typeid_int_interval(I64 min, I64 max) {
+  Intervals intervals = { .pair = {min, max}, .next = 0 };
+  return typeid_ints(intervals);
+}
+
+Typeid typeid_int_intervals(I64 min, I64 max) {
+  Intervals intervals = { .pair = {min, max}, .next = 0 };
+  return typeid_ints(intervals);
 }
 
 Typeid typeid_join(Typeid one, Typeid two) {
@@ -226,7 +319,7 @@ void sem_worklist_push(Blockid blockid) {
 }
 
 B8 sem_worklist_is_not_empty() {
-  return empty(sem.worklist);
+  return !empty(sem.worklist);
 }
 
 Blockid sem_worklist_pop() {
@@ -259,7 +352,15 @@ void sem_jump(Blockid from_blockid, Blockid to_blockid) {
 }
 
 void sem_ir(Blockid blockid, Irid irid) {
-  assert(0);
+  Typeid result = typeid_of_irid(irid);
+  switch (irid_kind(irid)) {
+  case Ir_Kind_int: {
+    I64 i64 = irid_int(irid);
+    result  = typeid_int(i64);
+  } break;
+  default: assert(0);
+  }
+  typeid_of_irid_put(irid, result);
 }
 
 void sem_unnarrow(Sem_Tasks tasks) {
@@ -295,7 +396,6 @@ void sem_block(Blockid blockid) {
 Typeid sem_funid(Funid funid) {
   Fun* fun = funid_get(funid);
   sem_worklist_push(fun->entryid);
-  assert(0);
   // init block with typeids
 
   while (sem_worklist_is_not_empty()) {
@@ -307,6 +407,16 @@ Typeid sem_funid(Funid funid) {
   return typeid_of_irid(funid_return);
 }
 
+void sem_funs(Arena* arena, Funs funs) {
+  sem.worklist.base = arena_push(arena, sizeof(Blockid)*irgen.blocks.length);
+  sem.worklist.length = 0;
+  sem.workset         = dense_map_init(arena, sizeof(Blockid)*irgen.blocks.length);
+  sem.typeid_of_irids = dense_map_init(arena, sizeof(Typeid)*irgen.irs.length);
+  for (I32 f = 0; f < funs.length; f++) {
+    sem_funid(f);
+  }
+}
+
 Cstr cstr_from_sem(Funs funs, C8* buffer) {
   return "todo";
 }
@@ -316,14 +426,14 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Arena arena          = arena_init(KB(64) * source_length);
   Ast ast              = ast_from_source(&arena, source);
   Funs funs            = irgen_ast(&arena, ast);
-                         sem_funid(0);
+                         sem_funs(&arena, funs);
   C8* buffer           = arena_push(&arena, 32 * source_length);
   Cstr result          = cstr_from_sem(funs, buffer);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
 }
 
-#define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
+#define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
 /*

@@ -248,6 +248,10 @@ Irid_Pair irid_binary(Irid irid) {
   return get(irgen.irs, irid).binary;
 }
 
+I64 irid_int(Irid irid) {
+  return get(irgen.irs, irid).i64;
+}
+
 I32 recordid_length(Recordid recordid) {
   Record record = get(irgen.records, recordid);
   return record.length;

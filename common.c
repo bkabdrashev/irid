@@ -224,6 +224,6 @@ void dense_map_put(Dense_Map* map, I32 key, I32 val) {
   map->base[key] = val;
 }
 
-I32 dense_map_get(Dense_Map* map, I32 key) {
-  return map->base[key];
+I32 dense_map_get(Dense_Map map, I32 key) {
+  return map.base[key];
 }
