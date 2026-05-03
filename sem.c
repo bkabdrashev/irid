@@ -313,11 +313,14 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source);
+  Arena arena          = arena_init(KB(64) * source_length);
+  Ast ast              = ast_from_source(&arena, source);
+  Funs funs            = irgen_ast(&arena, ast);
                          sem_funid(0);
   C8* buffer           = arena_push(&arena, 32 * source_length);
   Cstr result          = cstr_from_sem(funs, buffer);
   test_at_source(result, expected, file_name, line, source);
-  arena_deinit(&arena);
+  arena_free(&arena);
 }
 
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)

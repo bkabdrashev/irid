@@ -42,9 +42,10 @@ Token* tokens_top(Tokens* token) {
 
 Lexer lexer = {0};
 
-Tokens lex_source(Cstr source, Token* buffer) {
+Tokens lex_source(Arena* arena, Cstr source) {
   Tokens slice_token = {0};
-  slice_token.base = buffer;;
+  Umi source_length = strlen(source);
+  slice_token.base = arena_push(arena, sizeof(Token) * (source_length + 2));
   lexer.source = source;
   lexer.stream = source;
   lexer.wasnewline = true;
@@ -221,7 +222,8 @@ Tokens lex_source(Cstr source, Token* buffer) {
   return slice_token;
 }
 
-Cstr cstr_from_slice_token(Tokens slice, C8* buffer) {
+Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
+  C8* buffer = arena_push(arena, 64 * slice.length);
   String_Builder sb = string_builder_begin(buffer);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {

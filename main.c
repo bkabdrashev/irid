@@ -13,6 +13,7 @@ int main(void) {
   istr_from_cstr_token_kind("re", Token_Kind_return);
   istr_from_cstr_token_kind("wh", Token_Kind_while);
   istr_from_cstr_token_kind("br", Token_Kind_break);
+  arena_test();
   parse_test();
   irgen_test();
   sem_test();

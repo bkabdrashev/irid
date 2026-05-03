@@ -266,7 +266,8 @@ Cstr cstr_from_ast_kind_split(Ast_Kind ast_kind) {
   return result;
 }
 
-Cstr cstr_from_ast(Ast ast, C8* buffer) {
+Cstr cstr_from_ast(Arena* arena, Ast ast) {
+  C8* buffer = arena_push(arena, 256 * ast.length);
   String_Builder sb = string_builder_begin(buffer);
   for (I32 i = 0; i < ast.length; i++) {
     Ast_Node node = ast.base[i];
@@ -311,10 +312,10 @@ Cstr cstr_from_ast(Ast ast, C8* buffer) {
   return result;
 }
 
-void ast_print(Ast ast) {
-  C8* buffer = xmalloc(10*ast.length);
-  printf("%s\n", cstr_from_ast(ast, buffer));
-  free(buffer);
+void ast_print(Arena* arena, Ast ast) {
+  C8* mark = arena_mark(arena);
+  printf("%s\n", cstr_from_ast(arena, ast));
+  arena_release_mark(arena, mark);
 }
 
 typedef struct {
@@ -323,6 +324,7 @@ typedef struct {
 } I32s;
 
 typedef struct {
+  Arena* arena;
   Ast stack;
   Ast final;
   I32s enters;
@@ -481,9 +483,9 @@ B8 parse_expect_token(Parser* parser, Token_Kind kind) {
 void parse_print(Parser* parser, Cstr cstr) {
   printf("%s\n", cstr);
   printf("ast final: ");
-  ast_print(parser->final);
+  ast_print(parser->arena, parser->final);
   printf("ast stack: ");
-  ast_print(parser->stack);
+  ast_print(parser->arena, parser->stack);
   printf("\n");
 }
 
@@ -781,51 +783,40 @@ void parse_statement(Parser* parser) {
   }
 }
 
-Ast parse_tokens(Tokens tokens, Ast_Node* final_buffer) {
+Ast parse_tokens(Arena* arena, Tokens tokens) {
   Parser parser = {0};
-  parser.stack.base = xmalloc(sizeof(Ast_Node) * 2*tokens.length);
-  parser.enters.base = xmalloc(sizeof(Astid) * 2*tokens.length);
-  parser.final.base = final_buffer;
+  parser.arena = arena;
+  parser.final.base = arena_push(arena, sizeof(Ast_Node) * 2*tokens.length);
+  C8* mark = arena_mark(arena);
+  parser.stack.base  = arena_push(arena, sizeof(Ast_Node) * 2*tokens.length);
+  parser.enters.base = arena_push(arena, sizeof(Astid) * 2*tokens.length);
   parser.tokens     = tokens;
   parser.tok        = 0;
   parser.ent        = 0;
   parse_statement(&parser);
-  free(parser.stack.base);
-  free(parser.enters.base);
+  arena_release_mark(arena, mark);
   return parser.final;
 }
 
-Ast ast_from_source(Cstr source, Ast_Node* final) {
-  Umi source_length   = strlen(source);
-  I32 max_length      = source_length + 2;
-  Token* token_buffer = xmalloc(sizeof(Token) * max_length);
-  Tokens tokens  = lex_source(source, token_buffer);
-  // C8* tokens_string   = xmalloc(tokens.length * 6 + 1);
-  // cstr_from_slice_token(tokens, tokens_string);
-  // printf("%s\n", tokens_string);
-  // free((void*)tokens_string);
-  Ast ast = parse_tokens(tokens, final);
-  free(tokens.base);
+Ast ast_from_source(Arena* arena, Cstr source) {
+  Tokens tokens  = lex_source(arena, source);
+  Cstr cstr = cstr_from_slice_token(arena, tokens);
+  printf("tokens: %s\n", cstr);
+  Ast ast        = parse_tokens(arena, tokens);
   return ast;
 }
 
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Umi source_length    = strlen(source);
-  I32 max_ast_length   = source_length + 2;
-  Ast_Node* ast_buffer = xmalloc(sizeof(Ast_Node) * 2*max_ast_length);
-  Ast ast = ast_from_source(source, ast_buffer);
-  C8* buffer = xmalloc(10 * (source_length+2));
-  Cstr result = cstr_from_ast(ast, buffer);
-  free(ast_buffer);
+  Arena arena = arena_init(KB(4) * strlen(source));
+  Ast ast = ast_from_source(&arena, source);
+  Cstr result = cstr_from_ast(&arena, ast);
   test_at_source(result, expected, file_name, line, source);
-  free(buffer);
+  arena_free(&arena);
 }
 
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("(x=1; y: 2)",     "s{ 1 2 3 add b a[] mul ; }s ");
-  return;
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
   test("c+b[1]",         "s{ c b 1 s[] add ; }s ");

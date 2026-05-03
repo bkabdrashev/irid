@@ -535,26 +535,19 @@ void irgen_print() {
 }
 
 Funs irgen_ast(Arena* arena, Ast ast) {
-  I32 max_ast_length   = source_length + 2;
-  Ast_Node* ast_buffer = arena_push(&arena, sizeof(Ast_Node) * 2*max_ast_length);
-  Ast ast              = ast_from_source(source, ast_buffer);
-  Fun* funs_buffer     = arena_push(&arena, sizeof(Fun)*ast.length);
-  Block* block_buffer  = arena_push(&arena, sizeof(Block)*ast.length);
-  Ir* ir_buffer        = arena_push(&arena, sizeof(Ir)*ast.length);
-  Record* record_buffer= arena_push(&arena, sizeof(Record)*ast.length);
-
   irgen.ast = ast;
   irgen.arena       = arena;
-  irgen.funs.base   = fun_buffer;
-  irgen.blocks.base = block_buffer;
-  irgen.irs.base    = ir_buffer;
-  irgen.records.base   = record_buffer;
-  irgen.fun_stack.base   = xmalloc(ast.length * sizeof(Fun*));
-  irgen.block_stack.base = xmalloc(ast.length * sizeof(Block));
-  irgen.ir_stack.base    = xmalloc(ast.length * sizeof(Ir));
-  irgen.irid_stack.base  = xmalloc(ast.length * sizeof(Irid));
-  irgen.recordid_stack.base = xmalloc(ast.length * sizeof(Recordid));
-  irgen.headerids.base      = xmalloc(ast.length * sizeof(Blockid));
+  irgen.funs.base   = arena_push(arena, sizeof(Fun)*ast.length);
+  irgen.blocks.base = arena_push(arena, sizeof(Block)*ast.length);
+  irgen.irs.base    = arena_push(arena, sizeof(Ir)*ast.length);
+  irgen.records.base   = arena_push(arena, sizeof(Record)*ast.length);
+  C8* mark = arena_mark(arena);
+  irgen.fun_stack.base   = arena_push(arena, ast.length * sizeof(Fun*));
+  irgen.block_stack.base = arena_push(arena, ast.length * sizeof(Block));
+  irgen.ir_stack.base    = arena_push(arena, ast.length * sizeof(Ir));
+  irgen.irid_stack.base  = arena_push(arena, ast.length * sizeof(Irid));
+  irgen.recordid_stack.base = arena_push(arena, ast.length * sizeof(Recordid));
+  irgen.headerids.base      = arena_push(arena, ast.length * sizeof(Blockid));
   irgen.fun_stack.length   = 0;
   irgen.block_stack.length = 0;
   irgen.ir_stack.length    = 0;
@@ -736,16 +729,12 @@ Funs irgen_ast(Arena* arena, Ast ast) {
     }
   }
 
-  free(irgen.headerids.base);
-  free(irgen.recordid_stack.base);
-  free(irgen.irid_stack.base);
-  free(irgen.ir_stack.base);
-  free(irgen.block_stack.base);
-  free(irgen.fun_stack.base);
+  arena_release_mark(arena, mark);
   return irgen.funs;
 }
 
-Cstr cstr_from_funs(Funs funs, C8* buffer) {
+Cstr cstr_from_funs(Arena* arena, Funs funs) {
+  C8* buffer = arena_push(arena, KB(64));
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
     Fun fun = irgen.funs.base[f];
@@ -790,21 +779,12 @@ Cstr cstr_from_funs(Funs funs, C8* buffer) {
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source);
-  I32 max_ast_length   = source_length + 2;
-  Ast_Node* ast_buffer = xmalloc(sizeof(Ast_Node) * 2*max_ast_length);
-  Ast ast              = ast_from_source(&arena, source, ast_buffer);
   Arena arena          = arena_init(KB(64) * source_length);
-  Funs funs            = irgen_ast(&arena, ast, funs_buffer, block_buffer, ir_buffer, record_buffer);
-                         free(ast.base);
-  C8* buffer           = xmalloc(MB(64));
-  Cstr result          = cstr_from_funs(funs, buffer);
-  free(funs_buffer);
-  free(block_buffer);
-  free(ir_buffer);
-  free(record_buffer);
+  Ast ast              = ast_from_source(&arena, source);
+  Funs funs            = irgen_ast(&arena, ast);
+  Cstr result          = cstr_from_funs(&arena, funs);
   test_at_source(result, expected, file_name, line, source);
-  free(buffer);
-  arena_deinit(&irgen.arena);
+  arena_free(&arena);
 }
 
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)

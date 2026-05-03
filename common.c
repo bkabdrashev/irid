@@ -36,62 +36,6 @@ typedef intptr_t  Smp; //   signed memory pointer
 #define GB(a) (MB(a)*1024llu)
 #define TB(a) (GB(a)*1024llu)
 
-typedef struct {
-  C8* base;
-  C8* top;
-  Umi   capacity;
-  I8    alignment;
-} Arena; 
-
-Arena arena_init(Umi capacity) {
-  Arena arena = {};
-  arena.base = malloc(capacity);
-  arena.top = arena.base;
-  arena.capacity = capacity;
-  arena.alignment = 8;
-  return arena;
-}
-
-void* arena_push(Arena* arena, Umi size) {
-  assert(arena->top + size <= arena->base + arena->capacity);
-  void* result = arena->top;
-  Umi first_bits_off_mask = ~(arena->alignment - 1);
-  Umi overshoot_up        = ((Umi)arena->top + size + arena->alignment - 1);
-  arena->top = (void*)(overshoot_up & first_bits_off_mask);
-  return result;
-}
-
-void* arena_push_zero(Arena* arena, Umi size) {
-  void* mem = arena_push(arena, size);
-  memset(mem, 0, size);
-  return mem;
-}
-
-void arena_release_all(Arena* arena) {
-  arena->top = arena->base;
-}
-
-void arena_deinit(Arena* arena) {
-  free(arena->base);
-}
-
-U64 hash_bytes(const void* ptr, U64 len) {
-  U64 x = 0xcbf29ce484222325;
-  C8* buf = (C8 *)ptr;
-  for (U64 i = 0; i < len; i++) {
-    x ^= buf[i];
-    x *= 0x100000001b3;
-    x ^= x >> 32;
-  }
-  return x;
-}
-
-U64 hash_u64(U64 x) {
-  x *= 0xff51afd7ed558ccd;
-  x ^= x >> 32;
-  return x;
-}
-
 void* xmalloc(Umi num_bytes) {
   void* ptr = malloc(num_bytes);
   if (!ptr) {
@@ -120,6 +64,88 @@ Umi power_of_2_up(Umi v) {
   v |= v >> 32;
   v++;
   return v;
+}
+
+typedef struct {
+  C8* base;
+  C8* top;
+  Umi   capacity;
+  I8    alignment;
+} Arena; 
+
+Arena arena_init(Umi capacity) {
+  Arena arena = {};
+  arena.base = xmalloc(capacity);
+  arena.top = arena.base;
+  arena.capacity = capacity;
+  arena.alignment = 8;
+  return arena;
+}
+
+void* arena_push(Arena* arena, Umi size) {
+  assert(arena->top + size <= arena->base + arena->capacity);
+  void* result = arena->top;
+  Umi first_bits_off_mask = ~(arena->alignment - 1);
+  Umi up                  = size + arena->alignment - 1;
+  Umi masked              = up & first_bits_off_mask;
+  Umi overshoot_up        = ((Umi)arena->top + masked);
+  arena->top = (void*)(overshoot_up);
+  return result;
+}
+
+void* arena_push_zero(Arena* arena, Umi size) {
+  void* mem = arena_push(arena, size);
+  memset(mem, 0, size);
+  return mem;
+}
+
+void arena_release_all(Arena* arena) {
+  arena->top = arena->base;
+}
+
+void arena_release_mark(Arena* arena, C8* mark) {
+  arena->top = mark;
+}
+
+C8* arena_mark(Arena* arena) {
+  return arena->top;
+}
+
+void arena_free(Arena* arena) {
+  free(arena->base);
+  arena->top = NULL;
+  arena->base = NULL;
+}
+
+void arena_test() {
+  Arena arena = arena_init(KB(64));
+  C8* buf0 = arena_push(&arena, 16);
+  assert(arena.base + 16 <= arena.top);
+  assert(buf0 + 16 <= arena.top);
+  C8* buf1 = arena_push(&arena, 32);
+  assert(arena.base + 16 + 32 <= arena.top);
+  assert(buf0 + 16 <= buf1);
+  C8* buf2 = arena_push(&arena, 64);
+  assert(arena.base + 16 + 32 + 64 <= arena.top);
+  assert(buf1 + 32 <= buf2);
+  arena_free(&arena);
+}
+
+U64 hash_bytes(const void* ptr, U64 len) {
+  U64 x = 0xcbf29ce484222325;
+  C8* buf = (C8 *)ptr;
+  for (U64 i = 0; i < len; i++) {
+    x ^= buf[i];
+    x *= 0x100000001b3;
+    x ^= x >> 32;
+  }
+  return x;
+}
+
+U64 hash_u64(U64 x) {
+  x *= 0xff51afd7ed558ccd;
+  x ^= x >> 32;
+  return x;
 }
 
 #define empty(slice) ((slice).length == 0)
