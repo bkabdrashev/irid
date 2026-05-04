@@ -92,6 +92,24 @@ Typeid typeid_of_irid(Irid irid) {
   return dense_map_get(sem.typeid_of_irids, irid);
 }
 
+Type type_of_irid(Irid irid) {
+  Typeid typeid = typeid_of_irid(irid);
+  Type type = get(sem.types, typeid);
+  return type;
+}
+
+Typeid typeid_of_var(Blockid blockid, Istr istr) {
+  Block* block = blockid_get(blockid);
+  Typeid typeid = hash_map_get(&block->out_var_typeids, istr);
+  return typeid;
+}
+
+Type type_of_var(Blockid blockid, Istr istr) {
+  Typeid typeid = typeid_of_var(blockid, istr);
+  Type type = get(sem.types, typeid);
+  return type;
+}
+
 void typeid_of_irid_put(Irid irid, Typeid typeid) {
   dense_map_put(&sem.typeid_of_irids, irid, typeid);
 }
@@ -573,6 +591,23 @@ void sem_ir(Blockid blockid, Irid irid) {
     Istr istr = irid_istr(irid);
     result = hash_map_get(&block->out_var_typeids, istr);
   } break;
+  case Ir_Kind_load: {
+    Irid one = irid_unary(irid);
+    Type one_type = type_of_irid(one);
+    if (one_type.kind == Type_Kind_ptr) {
+      Ptrid ptrid = one_type.ptrid;
+      for (I32 i = 0; i < ptrid->length; i++) {
+        Mem_Cell cell = ptrid->cells[i];
+        switch (cell.kind) {
+        case Mem_Kind_stack: {
+          Typeid var_typeid = typeid_of_var(blockid, cell.istr);
+          result = var_typeid;
+        } break;
+        default: assert(0);
+        }
+      }
+    }
+  } break;
   case Ir_Kind_ptr: {
     Irid one = irid_unary(irid);
     Ir_Kind one_kind = irid_kind(one);
@@ -722,8 +757,11 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         Typeid typeid = hash_map_get(&block.in_var_typeids, istr);
         Type type = get(sem.types, typeid);
         string_builder_push_istr(&sb, istr);
-        string_builder_push_cstr(&sb, ":");
+        string_builder_push_cstr(&sb, ": ");
         string_builder_push_type(&sb, type);
+        if (i+1 < block.in_var_typeids.len) {
+          string_builder_push_cstr(&sb, ", ");
+        }
       }
       string_builder_push_cstr(&sb, "}");
 
@@ -734,7 +772,11 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         Type type = get(sem.types, typeid);
         string_builder_push_istr(&sb, istr);
         string_builder_push_cstr(&sb, ":");
+
         string_builder_push_type(&sb, type);
+        if (i+1 < block.in_var_typeids.len) {
+          string_builder_push_cstr(&sb, ", ");
+        }
       }
       string_builder_push_cstr(&sb, "}");
       for (Irid irid = block.entryid; irid < block.leaveid; irid++) {
@@ -887,7 +929,7 @@ main {
 }
 */
 
-  test("a = @b", "");
+  test("b = 1; a = @b; a@", "");
 }
 
 #undef test
