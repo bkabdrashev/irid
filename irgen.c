@@ -233,7 +233,8 @@ Irid ir_push_position_offset(Irid record, I32 position) {
 }
 
 Ir_Kind irid_kind(Irid irid) {
-  return get(irgen.irs, irid).kind;
+  Ir_Kind kind = get(irgen.irs, irid).kind;
+  return kind;
 }
 
 Name_Offset irid_name_offset(Irid irid) {
@@ -302,62 +303,56 @@ Field recordid_get_by_position(Recordid recordid, I32 position) {
 }
 
 Block* blockid_get(Blockid blockid) {
-  return &irgen.block_stack.base[blockid];
+  return &irgen.blocks.base[blockid];
 }
 
 Branch blockid_branch(Blockid blockid) {
-  return irgen.block_stack.base[blockid].branch;
+  return irgen.blocks.base[blockid].branch;
 }
 
 Jump blockid_jump(Blockid blockid) {
-  return irgen.block_stack.base[blockid].jump;
+  return irgen.blocks.base[blockid].jump;
 }
 
-Blockid blockid_put_branch(Irid cond) {
+Blockid irgen_put_branch(Irid cond) {
   Fun* fun = top(irgen.fun_stack);
-  Block* block = blockid_get(fun->leaveid);
+  Block* block = &get(irgen.block_stack, fun->leaveid);
   block->branch.cond = cond;
   block->kind = Block_Kind_branch;
   return fun->leaveid;
 }
 
-Blockid blockid_put_jump() {
+Blockid irgen_put_jump() {
   Fun* fun = top(irgen.fun_stack);
-  Block* block = blockid_get(fun->leaveid);
+  Block* block = &get(irgen.block_stack, fun->leaveid);
   block->kind = Block_Kind_jump;
   return fun->leaveid;
 }
 
-void blockid_jump_link_to(Blockid blockid, Blockid jumpto) {
-  Block* block = blockid_get(blockid);
+void irgen_jump_link_to(Blockid blockid, Blockid jumpto) {
+  Block* block = &get(irgen.block_stack, blockid);
   block->jump.blockid = jumpto;
 }
 
-void blockid_nez_link_to(Blockid blockid, Blockid jumpto) {
-  Block* block = blockid_get(blockid);
+void irgen_nez_link_to(Blockid blockid, Blockid jumpto) {
+  Block* block = &get(irgen.block_stack, blockid);
   block->branch.nez.blockid = jumpto;
 }
 
-void blockid_eqz_link_to(Blockid blockid, Blockid jumpto) {
-  Block* block = blockid_get(blockid);
+void irgen_eqz_link_to(Blockid blockid, Blockid jumpto) {
+  Block* block = &get(irgen.block_stack, blockid);
   block->branch.eqz.blockid = jumpto;
 }
 
-Block* block_leave() {
+Block* irgen_block_leave() {
   Fun* fun = top(irgen.fun_stack);
   Block* block = &get(irgen.block_stack, fun->leaveid);
-  Irid first = irgen.irs.length;
-  for (Irid i = block->entryid; i < irgen.ir_stack.length; i++) {
-    Ir ir = get(irgen.ir_stack, i);
-    add(irgen.irs, ir);
-  }
-  block->entryid = first;
-  block->leaveid = irgen.irs.length;
+  block->leaveid = irgen.ir_stack.length - block->entryid;
   return block;
 }
 
-Blockid block_new() {
-  block_leave();
+Blockid irgen_block_new() {
+  irgen_block_leave();
   Fun* fun = top(irgen.fun_stack);
   Blockid blockid = irgen.block_stack.length;
   Block* block = &new(irgen.block_stack);
@@ -371,7 +366,7 @@ Fun* funid_get(Funid funid) {
   return &get(irgen.funs, funid);
 }
 
-Funid fun_enter(Astid astid) {
+Funid irgen_fun_enter(Astid astid) {
   Funid funid = irgen.funs.length;
   Fun*  fun = &new(irgen.funs);
   add(irgen.fun_stack, fun);
@@ -383,16 +378,16 @@ Funid fun_enter(Astid astid) {
     fun->entryid = blockid;
     fun->leaveid = blockid;
   }
-  fun->returnid = irgen.irid_nil;
+  fun->returnid = irgen.ir_stack.length;
   fun->varid = 0;
   return funid;
 }
 
-void fun_leave() {
+void irgen_fun_leave() {
   Fun* fun = top(irgen.fun_stack);
 
   {
-    Block* block = block_leave();
+    Block* block = irgen_block_leave();
     block->kind = Block_Kind_jump;
     Block last = { Block_Kind_none, .pred_count = 0, .entryid = 0, .leaveid = 0, .jump = {0} };
     fun->leaveid = irgen.block_stack.length;
@@ -401,38 +396,21 @@ void fun_leave() {
 
   {
     Blockid first = irgen.blocks.length;
+    Blockid irid = irgen.irs.length;
+    for (Irid irid = fun->returnid; irid < irgen.ir_stack.length; irid++) {
+      Ir ir = get(irgen.ir_stack, irid);
+      add(irgen.irs, ir);
+    }
     for (Blockid i = fun->entryid; i <= fun->leaveid; i++) {
       Block block = get(irgen.block_stack, i);
+      block.entryid = irid;
+      irid += block.leaveid;
+      block.leaveid = irid;
       add(irgen.blocks, block);
     }
     fun->entryid = first;
     fun->leaveid = irgen.blocks.length;
   }
-  {
-    // from_istr_init(&irgen.arena, &fun->syms.map, fun->varid);
-    // fun->syms.vals = arena_push_zero(&irgen.arena, sizeof(I32)*fun->syms.map.cap);
-    // fun->varid = 0;
-    // for (Blockid b = fun->entryid; b < fun->leaveid; b++) {
-    //   Block block = get(irgen.blocks, b);
-    //   for (Irid irid = block.entryid; irid < block.leaveid; irid++) {
-    //     Ir* ir = &get(irgen.irs, irid);
-    //     if (ir->kind == Ir_Kind_store_var || ir->kind == Ir_Kind_load_var) {
-    //       I32 i = from_istr_put_if_not_exist(&fun->syms.map, ir->istr);
-    //       if (fun->syms.map.keys[i].index) {
-    //         ir->varid = fun->syms.vals[i];
-    //       }
-    //       else {
-    //         fun->syms.vals[i] = fun->varid++;
-    //         ir->varid = fun->syms.vals[i];
-    //       }
-    //     }
-    //   }
-    // }
-  }
-}
-
-Fun* fun_get(Funid funid) {
-  return &irgen.funs.base[funid];
 }
 
 void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
@@ -571,11 +549,11 @@ Funs irgen_ast(Arena* arena, Ast ast) {
     Ast_Node node = get(irgen.ast, astid);
     switch (node.kind) {
     case Ast_Kind_source_enter: {
-      fun_enter(astid);
+      irgen_fun_enter(astid);
     } break;
     case Ast_Kind_source_split: {} break;
     case Ast_Kind_source_leave: {
-      fun_leave();
+      irgen_fun_leave();
     } break;
     case Ast_Kind_block_value_enter: {
     } break;
@@ -701,31 +679,31 @@ Funs irgen_ast(Arena* arena, Ast ast) {
     } break;
     case Ast_Kind_if_split: {
       Irid cond = pop(irgen.irid_stack);
-      Blockid headerid     = blockid_put_branch(cond);
-      Blockid nez_blockid  = block_new();
-      blockid_nez_link_to(headerid, nez_blockid);
+      Blockid headerid     = irgen_put_branch(cond);
+      Blockid nez_blockid  = irgen_block_new();
+      irgen_nez_link_to(headerid, nez_blockid);
       add(irgen.headerids, headerid);
     } break;
     case Ast_Kind_if_leave: {
       Blockid headerid    = pop(irgen.headerids);
-      Blockid blockid     = blockid_put_jump();
-      Blockid eqz_blockid = block_new();
-      blockid_eqz_link_to(headerid, eqz_blockid);
-      blockid_jump_link_to(blockid, eqz_blockid);
+      Blockid blockid     = irgen_put_jump();
+      Blockid eqz_blockid = irgen_block_new();
+      irgen_eqz_link_to(headerid, eqz_blockid);
+      irgen_jump_link_to(blockid, eqz_blockid);
     } break;
     case Ast_Kind_if_leave_else_enter: {
       Blockid headerid    = pop(irgen.headerids);
-      Blockid blockid     = blockid_put_jump();
-      Blockid eqz_blockid = block_new();
-      blockid_eqz_link_to(headerid, eqz_blockid);
+      Blockid blockid     = irgen_put_jump();
+      Blockid eqz_blockid = irgen_block_new();
+      irgen_eqz_link_to(headerid, eqz_blockid);
       add(irgen.headerids, blockid);
     } break;
     case Ast_Kind_else_leave: {
       Blockid nez_blockid = pop(irgen.headerids);
-      Blockid blockid     = blockid_put_jump();
-      Blockid end_blockid = block_new();
-      blockid_jump_link_to(nez_blockid, end_blockid);
-      blockid_jump_link_to(blockid, end_blockid);
+      Blockid blockid     = irgen_put_jump();
+      Blockid end_blockid = irgen_block_new();
+      irgen_jump_link_to(nez_blockid, end_blockid);
+      irgen_jump_link_to(blockid, end_blockid);
     } break;
     default:
       assert(0);
@@ -795,7 +773,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
-  test("(x = 1; y : 2)", "");
+  test("1+2", "");
 }
 
 #undef test
