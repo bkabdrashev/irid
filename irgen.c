@@ -63,9 +63,7 @@ struct Ir {
     Istr istr;
     Recordid recordid;
     Irid_Pair binary;
-    struct {
-      Irid one;
-    } unary;
+    Irid unary;
     Store_Var store_var;
     Position_Offset position;
     Name_Offset     name;
@@ -210,7 +208,7 @@ Irid ir_push_load_var(Istr istr) {
 }
 
 Irid ir_push_unary(Ir_Kind kind, Irid one) {
-  Ir ir = { kind, .unary = { .one = one } };
+  Ir ir = { kind, .unary = one };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -248,6 +246,10 @@ B8 irid_kind_equal(Irid irid, Ir_Kind kind) {
 
 Irid_Pair irid_binary(Irid irid) {
   return get(irgen.irs, irid).binary;
+}
+
+Irid irid_unary(Irid irid) {
+  return get(irgen.irs, irid).unary;
 }
 
 I64 irid_int(Irid irid) {
@@ -503,7 +505,7 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
   }
   else if (ir.kind & Ir_Flag_unary) {
     string_builder_push_cstr(sb, "r");
-    string_builder_push_i64(sb, ir.unary.one);
+    string_builder_push_i64(sb, ir.unary);
   }
 }
 

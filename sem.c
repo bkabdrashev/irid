@@ -19,9 +19,29 @@ struct Intsid_Pair {
   Intsid two;
 };
 
+typedef enum {
+  Mem_Kind_stack,
+} Mem_Kind;
+
+typedef struct {
+  Mem_Kind kind;
+  Intsid intsid_offset;
+  I32 field_depth;
+  union {
+    Istr istr;
+  };
+} Mem_Cell;
+
+typedef struct {
+  I32 length;
+  Mem_Cell cells[];
+} Pointer;
+typedef Pointer* Ptrid;
+
 typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_ints,
+  Type_Kind_ptr,
   Type_Kind_records,
 } Type_Kind;
 
@@ -30,6 +50,7 @@ struct Type {
   Type_Kind kind;
   union {
     Intsid intsid;
+    Ptrid  ptrid;
   };
 };
 
@@ -55,6 +76,7 @@ struct Sem {
   Blockids worklist;
 
   Hash_Map ints_set;
+  Hash_Map ptrs_set;
 };
 
 Typeid typeid_nil = 0;
@@ -78,6 +100,10 @@ I32 hash_intervals(Intervals* intervals) {
   return 0;
 }
 
+I32 hash_pointer(Pointer* ptr) {
+  return 0;
+}
+
 Intsid intsid_intersection(Intsid one, Intsid two) {
 /*
 [1 2] 
@@ -95,6 +121,7 @@ Intsid intsid_intersection(Intsid one, Intsid two) {
 
 Intsid intsid_merge(Intsid one, Intsid two) {
   Intsid new = arena_push_zero(sem.arena, sizeof(Intervals) + sizeof(I64_Pair) * (one->length + two->length));
+  new->length = 0;
   I32 len_one = one->length;
   I32 len_two = two->length;
   I32 o = 0; I32 t = 0;
@@ -144,8 +171,6 @@ Intsid intsid_merge(Intsid one, Intsid two) {
   return new;
 }
 
-
-
 I64 intsid_max(Intsid intsid) {
   return intsid->pairs[intsid->length-1].two;
 }
@@ -182,7 +207,7 @@ Typeid typeid_ints(Intervals* intervals) {
     }
     else {
       Typeid typeid = sem.ints_set.keys[i];
-      Intervals* saved = sem.types.base[typeid].intsid;
+      Intsid saved = sem.types.base[typeid].intsid;
       if (intervals->length == saved->length) {
         for (I32 j = 0; ;) {
           if (intervals->pairs[j].one != saved->pairs[j].one
@@ -208,6 +233,64 @@ Typeid typeid_int_interval(I64 min, I64 max) {
 
 Typeid typeid_int(I64 i64) {
   return typeid_int_interval(i64, i64);
+}
+
+Typeid typeid_ptr(Pointer* ptr) {
+  I32 i = hash_pointer(ptr);
+  for (;;) {
+    i &= sem.ptrs_set.cap - 1;
+    if (!sem.ptrs_set.keys[i]) {
+      Typeid typeid = sem.types.length++;
+      Pointer* new = arena_push(sem.arena,  sizeof(Pointer) + sizeof(Mem_Cell) * ptr->length);
+      new->length = ptr->length;
+      for (I32 j = 0; j < new->length; j++) {
+        new->cells[j] = ptr->cells[j];
+      }
+      sem.types.base[typeid].kind = Type_Kind_ptr;
+      sem.types.base[typeid].ptrid = new;
+      sem.ints_set.keys[i] = typeid;
+      return typeid;
+    }
+    else {
+      Typeid typeid = sem.ints_set.keys[i];
+      Ptrid saved = sem.types.base[typeid].ptrid;
+      if (ptr->length == saved->length) {
+        for (I32 j = 0; ;) {
+          if (ptr->cells[j].intsid_offset != saved->cells[j].intsid_offset
+          ||  ptr->cells[j].field_depth   != saved->cells[j].field_depth
+          ||  ptr->cells[j].kind          != saved->cells[j].kind) {
+            break;
+          }
+          if (ptr->cells[j].kind == Mem_Kind_stack) {
+            if (ptr->cells[j].istr != saved->cells[j].istr) {
+              break;
+            }
+          }
+          else {
+            assert(0);
+          }
+          j++;
+          if (j == saved->length) {
+            return typeid;
+          }
+        }
+      }
+    }
+    i++;
+  }
+}
+
+Typeid typeid_ptr_var(Istr istr) {
+  Typeid int_zero = typeid_int(0);
+  Intsid intsid_zero = get(sem.types, int_zero).intsid;
+  struct { I32 length; Mem_Cell cells[1]; } ptr = {};
+  ptr.length = 1;
+  ptr.cells[0].field_depth = 0;
+  ptr.cells[0].intsid_offset = intsid_zero;
+  ptr.cells[0].kind = Mem_Kind_stack;
+  ptr.cells[0].istr = istr;
+  Pointer* pointer = (Pointer*)&ptr;
+  return typeid_ptr(pointer);
 }
 
 Typeid typeid_join(Typeid one, Typeid two) {
@@ -490,6 +573,14 @@ void sem_ir(Blockid blockid, Irid irid) {
     Istr istr = irid_istr(irid);
     result = hash_map_get(&block->out_var_typeids, istr);
   } break;
+  case Ir_Kind_ptr: {
+    Irid one = irid_unary(irid);
+    Ir_Kind one_kind = irid_kind(one);
+    if (one_kind == Ir_Kind_load_var) {
+      Istr istr = irid_istr(one);
+      result = typeid_ptr_var(istr);
+    }
+  } break;
   default: assert(0);
   }
   typeid_of_irid_put(irid, result);
@@ -551,6 +642,7 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.typeid_of_irids = dense_map_init(arena, sizeof(Typeid)*irgen.irs.length);
 
   sem.ints_set         = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
+  sem.ptrs_set         = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
 
   sem.types.base = arena_push(arena, sizeof(Type)*irgen.irs.length);
   sem.types.base[0].kind = Type_Kind_none;
@@ -577,6 +669,25 @@ void string_builder_push_type(String_Builder* sb, Type type) {
         string_builder_push_i64(sb, one);
         string_builder_push_cstr(sb, "..");
         string_builder_push_i64(sb, two);
+      }
+      i++;
+      if (i >= type.intsid->length) {
+        break;
+      }
+      string_builder_push_cstr(sb, ", ");
+    }
+  } break;
+  case Type_Kind_ptr: {
+    for (I32 i = 0; ; ) {
+      Mem_Cell cell = type.ptrid->cells[i];
+      switch (cell.kind) {
+      case Mem_Kind_stack: {
+        string_builder_push_cstr(sb, "@");
+        string_builder_push_istr(sb, cell.istr);
+      } break;
+      default: 
+        string_builder_push_cstr(sb, "<ptr deadbeef>");
+      break;
       }
       i++;
       if (i >= type.intsid->length) {
@@ -776,7 +887,7 @@ main {
 }
 */
 
-  test("a = 1 + 2; if 4 do { a = 5 }; a+a", "");
+  test("a = @b", "");
 }
 
 #undef test
