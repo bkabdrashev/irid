@@ -51,6 +51,10 @@ struct Name_Offset { Irid of; Istr at; };
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Irid of; I32 at; };
 
+typedef struct Store_Var Store_Var;
+struct Store_Var { Istr istr; Irid irid; };
+
+
 typedef struct Ir Ir;
 struct Ir {
   Ir_Kind kind;
@@ -62,10 +66,7 @@ struct Ir {
     struct {
       Irid one;
     } unary;
-    struct {
-      Istr istr;
-      Irid irid;
-    } store_var;
+    Store_Var store_var;
     Position_Offset position;
     Name_Offset     name;
   };
@@ -132,7 +133,7 @@ struct Fun {
   Blockid entryid;
   Blockid leaveid;
   Irid    returnid;
-  I32     varid;
+  I32     var_count;
 };
 
 typedef struct Funs Funs;
@@ -251,6 +252,14 @@ Irid_Pair irid_binary(Irid irid) {
 
 I64 irid_int(Irid irid) {
   return get(irgen.irs, irid).i64;
+}
+
+Istr irid_istr(Irid irid) {
+  return get(irgen.irs, irid).istr;
+}
+
+Store_Var irid_store_var(Irid irid) {
+  return get(irgen.irs, irid).store_var;
 }
 
 I32 recordid_length(Recordid recordid) {
@@ -379,7 +388,7 @@ Funid irgen_fun_enter(Astid astid) {
     fun->leaveid = blockid;
   }
   fun->returnid = irgen.ir_stack.length;
-  fun->varid = 0;
+  fun->var_count = 0;
   return funid;
 }
 
@@ -668,7 +677,7 @@ Funs irgen_ast(Arena* arena, Ast ast) {
       Ir* ir = &get(irgen.ir_stack, lhs);
       if (ir->kind == Ir_Kind_load_var) {
         Fun* fun = top(irgen.fun_stack);
-        fun->varid++;
+        fun->var_count++;
         ir->kind = Ir_Kind_store_var;
         ir->store_var.irid = rhs;
       }
