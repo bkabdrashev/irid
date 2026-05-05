@@ -23,6 +23,8 @@ typedef enum Ir_Kind {
   Ir_Kind_gt  = Ast_Kind_gt_leave,
   Ir_Kind_ge  = Ast_Kind_ge_leave,
 
+  Ir_Kind_join = Ast_Kind_join_leave,
+
   Ir_Kind_neg = Ast_Kind_neg_leave,
 
   Ir_Kind_load      = Ast_Kind_load_leave,
@@ -486,9 +488,10 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
       }
     }
   break;
-  case Ir_Kind_add: string_builder_push_cstr(sb, "add "); break;
-  case Ir_Kind_mul: string_builder_push_cstr(sb, "mul "); break;
-  case Ir_Kind_sub: string_builder_push_cstr(sb, "sub "); break;
+  case Ir_Kind_add:  string_builder_push_cstr(sb, "add "); break;
+  case Ir_Kind_mul:  string_builder_push_cstr(sb, "mul "); break;
+  case Ir_Kind_sub:  string_builder_push_cstr(sb, "sub "); break;
+  case Ir_Kind_join: string_builder_push_cstr(sb, "join "); break;
   case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
   case Ir_Kind_load: string_builder_push_cstr(sb, "load "); break;
   case Ir_Kind_ptr:  string_builder_push_cstr(sb, "ptr "); break;
@@ -651,6 +654,7 @@ Funs irgen_ast(Arena* arena, Ast ast) {
         assert(0);
       }
     } break;
+    case Ast_Kind_join_leave: 
     case Ast_Kind_mul_leave: 
     case Ast_Kind_add_leave: {
       Irid two = pop(irgen.irid_stack);
@@ -784,7 +788,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
-  test("1+2", "");
+  test("1\\2", "");
 }
 
 #undef test

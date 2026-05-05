@@ -23,6 +23,7 @@ enum {
   Ast_Kind_ptr       = Token_Kind_at+1,
   Ast_Kind_load      = Token_Kind_at,
   Ast_Kind_dot       = Token_Kind_dot,
+  Ast_Kind_join      = Token_Kind_backslash,
   Ast_Kind_subscript = Token_Kind_brace_open,
   Ast_Kind_array     = Token_Kind_brace_open + 1,
   Ast_Kind_assign    = Token_Kind_equal,
@@ -48,32 +49,35 @@ typedef enum {
   Ast_Kind_none = 0,
   Ast_Kind_name         = Token_Kind_name & 0xff,
   Ast_Kind_int          = Token_Kind_int & 0xff,
-  Ast_Kind_add_enter    = Ast_Kind_add | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_add_split    = Ast_Kind_add | Ast_Flag_binary | Ast_Flag_split,
-  Ast_Kind_add_leave    = Ast_Kind_add | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_sub_enter    = Ast_Kind_sub | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_sub_split    = Ast_Kind_sub | Ast_Flag_binary | Ast_Flag_split,
-  Ast_Kind_sub_leave    = Ast_Kind_sub | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_mul_enter    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_mul_split    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_split,
-  Ast_Kind_mul_leave    = Ast_Kind_mul | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_eq_leave     = Ast_Kind_eq  | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_ne_leave     = Ast_Kind_ne  | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_lt_leave     = Ast_Kind_lt  | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_le_leave     = Ast_Kind_le  | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_gt_leave     = Ast_Kind_gt  | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_ge_leave     = Ast_Kind_ge  | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_dot_enter    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_enter,
-  Ast_Kind_dot_split    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_split,
-  Ast_Kind_dot_leave    = Ast_Kind_dot | Ast_Flag_binary | Ast_Flag_leave,
-  Ast_Kind_neg_enter    = Ast_Kind_neg | Ast_Flag_unary  | Ast_Flag_enter,
-  Ast_Kind_neg_leave    = Ast_Kind_neg | Ast_Flag_unary  | Ast_Flag_leave,
-  Ast_Kind_pos_enter    = Ast_Kind_pos | Ast_Flag_unary  | Ast_Flag_enter,
-  Ast_Kind_pos_leave    = Ast_Kind_pos | Ast_Flag_unary  | Ast_Flag_leave,
-  Ast_Kind_ptr_enter    = Ast_Kind_ptr | Ast_Flag_unary  | Ast_Flag_enter,
-  Ast_Kind_ptr_leave    = Ast_Kind_ptr | Ast_Flag_unary  | Ast_Flag_leave,
-  Ast_Kind_load_enter   = Ast_Kind_load| Ast_Flag_unary  | Ast_Flag_enter,
-  Ast_Kind_load_leave   = Ast_Kind_load| Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_add_enter    = Ast_Kind_add  | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_add_split    = Ast_Kind_add  | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_add_leave    = Ast_Kind_add  | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_sub_enter    = Ast_Kind_sub  | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_sub_split    = Ast_Kind_sub  | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_sub_leave    = Ast_Kind_sub  | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_mul_enter    = Ast_Kind_mul  | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_mul_split    = Ast_Kind_mul  | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_mul_leave    = Ast_Kind_mul  | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_eq_leave     = Ast_Kind_eq   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_ne_leave     = Ast_Kind_ne   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_lt_leave     = Ast_Kind_lt   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_le_leave     = Ast_Kind_le   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_gt_leave     = Ast_Kind_gt   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_ge_leave     = Ast_Kind_ge   | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_dot_enter    = Ast_Kind_dot  | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_dot_split    = Ast_Kind_dot  | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_dot_leave    = Ast_Kind_dot  | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_join_enter   = Ast_Kind_join | Ast_Flag_binary | Ast_Flag_enter,
+  Ast_Kind_join_split   = Ast_Kind_join | Ast_Flag_binary | Ast_Flag_split,
+  Ast_Kind_join_leave   = Ast_Kind_join | Ast_Flag_binary | Ast_Flag_leave,
+  Ast_Kind_neg_enter    = Ast_Kind_neg  | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_neg_leave    = Ast_Kind_neg  | Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_pos_enter    = Ast_Kind_pos  | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_pos_leave    = Ast_Kind_pos  | Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_ptr_enter    = Ast_Kind_ptr  | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_ptr_leave    = Ast_Kind_ptr  | Ast_Flag_unary  | Ast_Flag_leave,
+  Ast_Kind_load_enter   = Ast_Kind_load | Ast_Flag_unary  | Ast_Flag_enter,
+  Ast_Kind_load_leave   = Ast_Kind_load | Ast_Flag_unary  | Ast_Flag_leave,
   Ast_Kind_subscript_enter = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_enter,
   Ast_Kind_subscript_split = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_split,
   Ast_Kind_subscript_leave = Ast_Kind_subscript | Ast_Flag_binary | Ast_Flag_leave,
@@ -178,6 +182,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_ptr:          result = "ptr"; break;
   case Ast_Kind_load:         result = "load"; break;
   case Ast_Kind_dot:          result = "dot"; break;
+  case Ast_Kind_join:         result = "join"; break;
   case Ast_Kind_subscript:    result = "s[]"; break;
   case Ast_Kind_array:        result = "a[]"; break;
   case Ast_Kind_assign:       result = "="; break;
@@ -247,6 +252,7 @@ Cstr cstr_from_ast_kind_split(Ast_Kind ast_kind) {
   case Ast_Kind_sub:          result = "-"; break;
   case Ast_Kind_mul:          result = "*"; break;
   case Ast_Kind_dot:          result = "."; break;
+  case Ast_Kind_join:         result = "\\"; break;
   case Ast_Kind_subscript:    result = "[]"; break;
   case Ast_Kind_array:        result = "[]"; break;
   case Ast_Kind_assign:       result = "="; break;
@@ -384,6 +390,8 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
     return 3;
+  case Ast_Kind_join_leave:
+    return 7;
   case Ast_Kind_sub_leave:
   case Ast_Kind_add_leave:
     return 11;
@@ -412,6 +420,8 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
     return 3;
+  case Ast_Kind_join_leave:
+    return 8;
   case Ast_Kind_sub_leave:
   case Ast_Kind_add_leave:
     return 12;
@@ -545,6 +555,7 @@ void parse_expression(Parser* parser) {
 void parse_infix_or_suffix(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
+  case Token_Kind_backslash:
   case Token_Kind_plus: case Token_Kind_minus:
   case Token_Kind_star: case Token_Kind_dot: {
     Ast_Kind kind = (Ast_Kind)token.kind | Ast_Flag_binary;

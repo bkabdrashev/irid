@@ -40,6 +40,7 @@ typedef enum Token_Kind {
   Token_Kind_less               = 43,
   Token_Kind_greater_equal      = 44,
   Token_Kind_greater            = 45,
+  Token_Kind_backslash          = 46,
 } Token_Kind;
 
 typedef const char* Cstr;

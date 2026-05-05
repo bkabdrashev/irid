@@ -203,6 +203,10 @@ Tokens lex_source(Arena* arena, Cstr source) {
       token.kind = Token_Kind_comma;
       lexer.stream++;
     } break;
+    case '\\': {
+      token.kind = Token_Kind_backslash;
+      lexer.stream++;
+    } break;
     default: {
       lexer.stream++;
     } break;
@@ -317,6 +321,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_comma:
       string_builder_push_cstr(&sb, ",");
+    break;
+    case Token_Kind_backslash:
+      string_builder_push_cstr(&sb, "\\");
     break;
     case Token_Kind_if:
       string_builder_push_cstr(&sb, "if");
