@@ -426,6 +426,22 @@ Typeid typeid_intid_no_intersection(Intid one, Intid two) {
       range2.lo = range1.hi+1;
       range1 = one->pairs[o++];
     }
+    else if (range1.lo < range2.lo && range1.hi == range2.hi) {
+      // [1   3] [...  | [...
+      //   [2 3] [...  | [...
+      Range range = { .lo = range1.lo, .hi = range2.lo - 1 };
+      new_ranges->pairs[new_ranges->length++] = range;
+      range1 = one->pairs[o++];
+      range2 = two->pairs[t++];
+    }
+    else if (range1.lo > range2.lo && range1.hi == range2.hi) {
+      //   [2 3] [... | [...
+      // [1   3] [... | [...
+      Range range = { .lo = range2.lo, .hi = range1.lo - 1 };
+      new_ranges->pairs[new_ranges->length++] = range;
+      range1 = one->pairs[o++];
+      range2 = two->pairs[t++];
+    }
     else if (range1.lo < range2.lo && range1.hi < range2.hi) {
       // [1...5] [...  |    [...
       //    [3..8]     | [6..8]
@@ -989,7 +1005,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("b = 1\\0; if b == 0 do b el b", "");
+  test("b = 1\\0; if b == 1 do b el b", "");
 }
 
 #undef test
