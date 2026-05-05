@@ -5,6 +5,10 @@
 // #include "irgen.c"
 // #include "typeid.c"
 
+const char *__asan_default_options() {
+  return "abort_on_error=1";
+}
+
 int main(void) {
   istr_init(MB(64));
   istr_from_cstr_token_kind("if", Token_Kind_if);
