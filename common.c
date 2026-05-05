@@ -157,6 +157,8 @@ U64 hash_u64(U64 x) {
 #define top(slice) ((slice).base[(slice).length-1])
 #define get(slice, index) ((slice).base[(index)])
 #define put(slice, index, value) ((slice).base[(index)] = (value))
+#define min(x, y) ((x) <= (y) ? (x) : (y))
+#define max(x, y) ((x) >= (y) ? (x) : (y))
 
 typedef struct Hash_Map Hash_Map;
 struct Hash_Map {

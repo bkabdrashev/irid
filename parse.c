@@ -390,6 +390,8 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
     return 3;
+  case Ast_Kind_eq_leave:
+    return 5;
   case Ast_Kind_join_leave:
     return 7;
   case Ast_Kind_sub_leave:
@@ -420,6 +422,8 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple_enter:
   case Ast_Kind_tuple_leave:
     return 3;
+  case Ast_Kind_eq_leave:
+    return 6;
   case Ast_Kind_join_leave:
     return 8;
   case Ast_Kind_sub_leave:
@@ -555,6 +559,12 @@ void parse_expression(Parser* parser) {
 void parse_infix_or_suffix(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
+  case Token_Kind_bang_equal:
+  case Token_Kind_equal_equal:
+  case Token_Kind_less_equal:
+  case Token_Kind_less:
+  case Token_Kind_greater_equal:
+  case Token_Kind_greater:
   case Token_Kind_backslash:
   case Token_Kind_plus: case Token_Kind_minus:
   case Token_Kind_star: case Token_Kind_dot: {

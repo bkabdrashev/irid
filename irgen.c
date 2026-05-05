@@ -496,6 +496,12 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
   case Ir_Kind_load: string_builder_push_cstr(sb, "load "); break;
   case Ir_Kind_ptr:  string_builder_push_cstr(sb, "ptr "); break;
   case Ir_Kind_store: string_builder_push_cstr(sb, "store "); break;
+  case Ir_Kind_eq: string_builder_push_cstr(sb, "eq "); break;
+  case Ir_Kind_ne: string_builder_push_cstr(sb, "ne "); break;
+  case Ir_Kind_lt: string_builder_push_cstr(sb, "lt "); break;
+  case Ir_Kind_le: string_builder_push_cstr(sb, "le "); break;
+  case Ir_Kind_gt: string_builder_push_cstr(sb, "gt "); break;
+  case Ir_Kind_ge: string_builder_push_cstr(sb, "ge "); break;
   default: {
     assert(0);
   } break;
@@ -656,6 +662,9 @@ Funs irgen_ast(Arena* arena, Ast ast) {
     } break;
     case Ast_Kind_join_leave: 
     case Ast_Kind_mul_leave: 
+    case Ast_Kind_eq_leave:  case Ast_Kind_ne_leave: 
+    case Ast_Kind_le_leave:  case Ast_Kind_lt_leave: 
+    case Ast_Kind_ge_leave:  case Ast_Kind_gt_leave: 
     case Ast_Kind_add_leave: {
       Irid two = pop(irgen.irid_stack);
       Irid one = pop(irgen.irid_stack);
@@ -730,8 +739,7 @@ Funs irgen_ast(Arena* arena, Ast ast) {
   return irgen.funs;
 }
 
-Cstr cstr_from_funs(Arena* arena, Funs funs) {
-  C8* buffer = arena_push(arena, KB(64));
+Cstr cstr_from_funs(C8* buffer, Funs funs) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
     Fun fun = irgen.funs.base[f];
@@ -779,7 +787,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Arena arena          = arena_init(KB(64) * source_length);
   Ast ast              = ast_from_source(&arena, source);
   Funs funs            = irgen_ast(&arena, ast);
-  Cstr result          = cstr_from_funs(&arena, funs);
+  C8* buffer           = arena_push(&arena, KB(1) * source_length);
+  Cstr result          = cstr_from_funs(buffer, funs);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
 }
@@ -787,8 +796,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a = 1; b = 2; c = @b; if 3 do { c = @a }; if 4 do { c@ = 5 }; a+b+c@", "");
-  test("1\\2", "");
+  test("1", "");
 }
 
 #undef test

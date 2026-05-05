@@ -152,6 +152,10 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case '=': {
       token.kind = Token_Kind_equal;
       lexer.stream++;
+      if (*lexer.stream == '=') {
+        token.kind = Token_Kind_equal_equal;
+        lexer.stream++;
+      }
     } break;
     case ':': {
       token.kind = Token_Kind_colon;

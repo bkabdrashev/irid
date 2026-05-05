@@ -1,16 +1,16 @@
 typedef I32 Typeid;
 typedef Istr Varid;
 
-typedef struct I64_Pair I64_Pair;
-struct I64_Pair {
-  I64 one;
-  I64 two;
+typedef struct Interval Interval;
+struct Interval {
+  I64 lo;
+  I64 hi;
 };
 
 typedef struct Intervals Intervals;
 struct Intervals {
   I32 length;
-  I64_Pair pairs[];
+  Interval pairs[];
 };
 typedef Intervals* Intsid;
 
@@ -63,6 +63,7 @@ struct Types {
 
 typedef struct Sem_Tasks Sem_Tasks;
 struct Sem_Tasks {
+  Hash_Map* out_vars;
   Typeid* typeids;
   Varid*  varids; 
   I32     length;
@@ -120,6 +121,12 @@ I32 hash_intervals(Intervals* intervals) {
   return 0;
 }
 
+Intervals* sem_intervals_init(I32 max_len) {
+  Intervals* result = arena_push(sem.temp_arena, sizeof(Intervals) + max_len * sizeof(Interval));
+  result->length = 0;
+  return result;
+}
+
 I32 hash_pointer(Pointer* ptr) {
   return 0;
 }
@@ -140,31 +147,30 @@ Intsid intsid_intersection(Intsid one, Intsid two) {
 }
 
 Intsid intsid_merge(Intsid one, Intsid two) {
-  Intsid new = arena_push(sem.temp_arena, sizeof(Intervals) + sizeof(I64_Pair) * (one->length + two->length));
-  new->length = 0;
+  Intervals* new_ints = sem_intervals_init(one->length + two->length);
   I32 len_one = one->length;
   I32 len_two = two->length;
   I32 o = 0; I32 t = 0;
-  I64_Pair start;
-  if (one->pairs[o].one < two->pairs[t].one) start = one->pairs[o++];
+  Interval start;
+  if (one->pairs[o].lo < two->pairs[t].lo) start = one->pairs[o++];
   else start = two->pairs[t++];
   while (o < len_one && t < len_two) {
-    I64_Pair next;
-    if (one->pairs[o].one < two->pairs[t].one) next = one->pairs[o++];
+    Interval next;
+    if (one->pairs[o].lo < two->pairs[t].lo) next = one->pairs[o++];
     else next = two->pairs[t++];
 
-    if (start.two == I64_MAX || start.two + 1 >= next.one) {
-      if (start.two < next.two) start.two = next.two;
+    if (start.hi == I64_MAX || start.hi + 1 >= next.lo) {
+      if (start.hi < next.hi) start.hi = next.hi;
     }
     else {
-      new->pairs[new->length++] = start;
+      new_ints->pairs[new_ints->length++] = start;
       start = next;
     }
   }
   if (o < len_one) {
-    while (o < len_one && (start.two == I64_MAX || start.two + 1 >= one->pairs[o].one)) {
-      if (start.two < one->pairs[o].two) {
-        start.two = one->pairs[o].two;
+    while (o < len_one && (start.hi == I64_MAX || start.hi + 1 >= one->pairs[o].lo)) {
+      if (start.hi < one->pairs[o].hi) {
+        start.hi = one->pairs[o].hi;
         o++;
         break;
       }
@@ -172,33 +178,33 @@ Intsid intsid_merge(Intsid one, Intsid two) {
     }
   }
   else {
-    while (t < len_two && (start.two == I64_MAX || start.two + 1 >= two->pairs[t].one)) {
-      if (start.two < two->pairs[t].two) {
-        start.two = two->pairs[t].two;
+    while (t < len_two && (start.hi == I64_MAX || start.hi + 1 >= two->pairs[t].lo)) {
+      if (start.hi < two->pairs[t].hi) {
+        start.hi = two->pairs[t].hi;
         t++;
         break;
       }
       t++;
     }
   }
-  new->pairs[new->length++] = start;
+  new_ints->pairs[new_ints->length++] = start;
   for (; o < len_one; o++) {
-    new->pairs[new->length++] = one->pairs[o];
+    new_ints->pairs[new_ints->length++] = one->pairs[o];
   }
   for (; t < len_two; t++) {
-    new->pairs[new->length++] = two->pairs[t];
+    new_ints->pairs[new_ints->length++] = two->pairs[t];
   }
-  return new;
+  return new_ints;
 }
 
 I64 intsid_max(Intsid intsid) {
-  return intsid->pairs[intsid->length-1].two;
+  return intsid->pairs[intsid->length-1].hi;
 }
 
 B8 intsid_have(Intsid intsid, I64 i64) {
   for (I32 i = 0; i < intsid->length; i++) {
-    I64_Pair pair = intsid->pairs[i];
-    if (pair.one >= i64 && i64 <= pair.two) {
+    Interval pair = intsid->pairs[i];
+    if (pair.lo >= i64 && i64 <= pair.hi) {
       return true;
     }
   }
@@ -206,7 +212,7 @@ B8 intsid_have(Intsid intsid, I64 i64) {
 }
 
 I64 intsid_min(Intsid intsid) {
-  return intsid->pairs[0].one;
+  return intsid->pairs[0].lo;
 }
 
 Typeid typeid_ints(Intervals* intervals) {
@@ -215,7 +221,7 @@ Typeid typeid_ints(Intervals* intervals) {
     i &= sem.ints_set.cap - 1;
     if (!sem.ints_set.keys[i]) {
       Typeid typeid = sem.types.length++;
-      Intervals* new = arena_push(sem.perm_arena,  sizeof(Intervals) + sizeof(I64_Pair) * intervals->length);
+      Intervals* new = arena_push(sem.perm_arena,  sizeof(Intervals) + sizeof(Interval) * intervals->length);
       new->length = intervals->length;
       for (I32 j = 0; j < new->length; j++) {
         new->pairs[j] = intervals->pairs[j];
@@ -230,8 +236,8 @@ Typeid typeid_ints(Intervals* intervals) {
       Intsid saved = sem.types.base[typeid].intsid;
       if (intervals->length == saved->length) {
         for (I32 j = 0; ;) {
-          if (intervals->pairs[j].one != saved->pairs[j].one
-          ||  intervals->pairs[j].two != saved->pairs[j].two) {
+          if (intervals->pairs[j].lo != saved->pairs[j].lo
+          ||  intervals->pairs[j].hi != saved->pairs[j].hi) {
             break;
           }
           j++;
@@ -246,7 +252,7 @@ Typeid typeid_ints(Intervals* intervals) {
 }
 
 Typeid typeid_int_interval(I64 min, I64 max) {
-  struct { I32 length; I64_Pair pairs[1]; } pair = { .length = 1, .pairs[0].one = min, .pairs[0].two = max };
+  struct { I32 length; Interval pairs[1]; } pair = { .length = 1, .pairs[0].lo = min, .pairs[0].hi = max };
   Intervals* intervals = (Intervals*)&pair;
   return typeid_ints(intervals);
 }
@@ -382,43 +388,108 @@ B8 typeid_kind_of_irid_binary_operands_equal(Irid irid, Type_Kind type_kind) {
   return typeid_kind(pair.one) == type_kind && typeid_kind(pair.two) == type_kind;
 }
 
-Typeid typeid_int_intersection(Intervals* one, Intervals* two) {
-  // Type type_one = get(sem.types, one);
-  // Type type_two = get(sem.types, two);
-  assert(0);
-  return typeid_ints(one);
+Typeid typeid_int_intersection(Intsid one, Intsid two) {
+  Intervals* new_ints = sem_intervals_init(max(one->length, two->length));
+  I32 o = 0; I32 t = 0;
+  while (o < one->length && t < two->length) {
+    I64 lo = max(one->pairs[o].lo, two->pairs[t].lo);
+    I64 hi = min(one->pairs[o].hi, two->pairs[t].hi);
+    if (lo <= hi) {
+      Interval pair = { .lo = lo, .hi = hi };
+      new_ints->pairs[new_ints->length++] = pair;
+    }
+    if (one->pairs[o].hi < two->pairs[t].hi) {
+      o++;
+    }
+    else {
+      t++;
+    }
+  }
+  return typeid_ints(new_ints);
+}
+
+Typeid typeid_int_no_intersection(Intsid one, Intsid two) {
+  Intervals* new_ints = sem_intervals_init(max(one->length, two->length));
+  I32 o = 0; I32 t = 0;
+  Interval int1 = one->pairs[o];
+  Interval int2 = two->pairs[t];
+  while (o < one->length && t < two->length) {
+    if (int1.hi < int2.lo) {
+      // [1,2] [...    | [...
+      //       [3, 4]  | [3, 4]
+      new_ints->pairs[new_ints->length++] = int1;
+      int1 = one->pairs[o++];
+    }
+    else if (int1.lo > int2.hi) {
+      //       [3, 4] [.... | [3 4]
+      // [1,2] [...         | [...
+      new_ints->pairs[new_ints->length++] = int2;
+      int2 = two->pairs[t++];
+    }
+    else if (int1.lo == int2.lo && int1.hi == int2.hi) {
+      int1 = one->pairs[o++];
+      int2 = two->pairs[t++];
+    }
+    else if (int1.lo == int2.lo && int1.hi > int2.hi) {
+      // [1     8] [... | [4  8]
+      // [1 3] [...     |    [...
+      int1.lo = int2.hi+1;
+      int2 = two->pairs[t++];
+    }
+    else if (int1.lo == int2.lo && int1.hi < int2.hi) {
+      // [1 3] [...     |    [...
+      // [1     8] [... | [4  8]
+      int2.lo = int1.hi+1;
+      int1 = one->pairs[o++];
+    }
+    else if (int1.lo < int2.lo && int1.hi < int2.hi) {
+      // [1...5] [...  |    [...
+      //    [3..8]     | [6..8]
+      int1.hi = int2.lo-1;
+      new_ints->pairs[new_ints->length++] = int1;
+      int2.lo = int1.hi+1;
+      int1 = one->pairs[o++];
+    }
+    else if (int1.lo > int2.lo && int1.hi > int2.hi) {
+      //    [3..8]     | [6..8]
+      // [1...5] [...  |    [...
+      int2.hi = int1.lo-1;
+      new_ints->pairs[new_ints->length++] = int2;
+      int1.lo = int2.hi+1;
+      int2 = two->pairs[t++];
+    }
+    else if (int1.lo < int2.lo && int1.hi > int2.hi) {
+      // [1         8]  | [4..8]
+      //    [2 3] [...  |   [...
+      Interval temp_int = { .lo = int1.lo, .hi = int2.lo - 1 };
+      new_ints->pairs[new_ints->length++] = temp_int;
+      int1.lo = int2.hi+1;
+      int2 = two->pairs[t++];
+    }
+    else if (int1.lo > int2.lo && int1.hi < int2.hi) {
+      //    [2 3] [...  |   [...
+      // [1         8]  | [4..8]
+      Interval temp_int = { .lo = int2.lo, .hi = int1.lo - 1 };
+      new_ints->pairs[new_ints->length++] = temp_int;
+      int2.lo = int1.hi+1;
+      int1 = one->pairs[o++];
+    }
+  }
+  for (; o < one->length; o++) {
+    int1 = one->pairs[o];
+    new_ints->pairs[new_ints->length++] = int1;
+  }
+  for (; t < two->length; t++) {
+    int2 = two->pairs[t];
+    new_ints->pairs[new_ints->length++] = int2;
+  }
+  return typeid_ints(new_ints);
 }
 
 void typeid_of_irid_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_typeid);
 void typeid_narrow_record(Sem_Tasks* tasks, Name_Offset name_offset, Typeid new_typeid_of_field) {
   Typeid old_typeid_of_record = typeid_of_irid(name_offset.of);
   assert(typeid_kind_equal(old_typeid_of_record, Type_Kind_records));
-  // Recordsid recordsid = old_typeid_of_record.recordsid;
-  // Set_Record records = recordsid_get_set_records(recordsid);
-  // Set_Record new_records = {};
-  // For_Set_Record (fields, records) {
-  //   Set_Field new_fields = set_field_init(set_field_length(fields));
-  //   b32 is_meet_not_empty = false;
-  //   For_Set_Field (field, fields) {
-  //     if (field.name == field_access.name) {
-  //       Typeid meet = typeid_meet(new_typeid_of_field, field.typeid);
-  //       is_meet_not_empty = typeid_is_empty(meet);
-  //       b32 is_meet_empty = !is_meet_not_empty;
-  //       if (is_meet_empty) break;
-  //       Field new_field = { .name = field.name, .typeid = meet, .offset=field.offset };
-  //       set_field_put(new_fields, new_field);
-  //     }
-  //     else {
-  //       set_field_put(new_fields, field);
-  //     }
-  //   }
-  //   if (is_meet_not_empty) {
-  //     set_record_put(new_records, new_fields);
-  //   }
-  // }
-  // Typeid new_typeid_of_record = typeid_record(new_records);
-  // Typeid old_typeid_of_record = typeid_of_irid(name_offset);
-  // typeid_of_irid_narrow(typeid_tasks, name_offset.record, old_typeid_of_record);
 }
 
 void sem_tasks_push(Sem_Tasks* tasks, Irid irid, Typeid old_typeid) {
@@ -431,10 +502,14 @@ void sem_tasks_push_var(Sem_Tasks* tasks, Varid varid, Typeid old) {
 }
 
 void typeid_of_irid_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_typeid) {
-  Typeid old_typeid = typeid_of_irid(irid);
-  sem_tasks_push(tasks, irid, old_typeid);
-  typeid_of_irid_put(irid, new_typeid);
-  if (irid_kind_equal(irid, Ir_Kind_name_offset)) {
+  if (irid_kind_equal(irid, Ir_Kind_load_var)) {
+    Istr istr = irid_istr(irid);
+    Typeid old_typeid = hash_map_get(tasks->out_vars, istr);
+    if (hash_map_change_if_exists(tasks->out_vars, istr, new_typeid)) {
+      sem_tasks_push_var(tasks, istr, old_typeid);
+    }
+  }
+  else if (irid_kind_equal(irid, Ir_Kind_name_offset)) {
     Name_Offset offset = irid_name_offset(irid);
     typeid_narrow_record(tasks, offset, new_typeid);
   }
@@ -446,15 +521,16 @@ void typeid_of_irid_binary_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_typeid
   typeid_of_irid_narrow(tasks, binary.two, new_typeid_two);
 }
 
-Sem_Tasks typeid_narrow_int_eq(Irid irid) {
+void sem_typeid_narrow_int_eq(Sem_Tasks* tasks, Irid irid) {
   Type_Pair pair = type_of_irid_binary(irid);
+  Typeid new_typeid = typeid_int_intersection(pair.one.intsid, pair.two.intsid);
+  typeid_of_irid_binary_narrow(tasks, irid, new_typeid, new_typeid);
+}
 
-  Sem_Tasks tasks = {};
-  Typeid new_typeid  = typeid_int_intersection(pair.one.intsid, pair.two.intsid);
-
-  typeid_of_irid_binary_narrow(&tasks, irid, new_typeid, new_typeid);
-
-  return tasks;
+void sem_typeid_narrow_int_ne(Sem_Tasks* tasks, Irid irid) {
+  Type_Pair pair = type_of_irid_binary(irid);
+  Typeid new_typeid = typeid_int_no_intersection(pair.one.intsid, pair.two.intsid);
+  typeid_of_irid_binary_narrow(tasks, irid, new_typeid, new_typeid);
 }
 
 Typeid typeid_narrow_eqz(Typeid typeid) {
@@ -479,16 +555,15 @@ Typeid typeid_narrow_nez(Typeid typeid) {
   switch (type.kind) {
   case Type_Kind_ints: {
     Intsid intsid = type.intsid;
-    Intervals* new_ints = arena_push(sem.temp_arena, sizeof(Intervals) + sizeof(I64_Pair) * intsid->length);
-    new_ints->length = 0;
+    Intervals* new_ints = sem_intervals_init(intsid->length);
     for (I32 i = 0; i < type.intsid->length; i++) {
-      if (intsid->pairs[i].one <= 0 && 0 <= intsid->pairs[i].two) {
-        if (intsid->pairs[i].one == 0 && 0 != intsid->pairs[i].two) {
-          I64_Pair pair = { .one = intsid->pairs[i].one+1, .two = intsid->pairs[i].two };
+      if (intsid->pairs[i].lo <= 0 && 0 <= intsid->pairs[i].hi) {
+        if (intsid->pairs[i].lo == 0 && 0 != intsid->pairs[i].hi) {
+          Interval pair = { .lo = intsid->pairs[i].lo+1, .hi = intsid->pairs[i].hi };
           new_ints->pairs[new_ints->length++] = pair;
         }
-        else if (intsid->pairs[i].one != 0 && 0 == intsid->pairs[i].two) {
-          I64_Pair pair = { .one = intsid->pairs[i].one, .two = intsid->pairs[i].two-1 };
+        else if (intsid->pairs[i].lo != 0 && 0 == intsid->pairs[i].hi) {
+          Interval pair = { .lo = intsid->pairs[i].lo, .hi = intsid->pairs[i].hi-1 };
           new_ints->pairs[new_ints->length++] = pair;
         }
         i++;
@@ -508,17 +583,12 @@ Typeid typeid_narrow_nez(Typeid typeid) {
   return typeid;
 }
 
-Sem_Tasks sem_narrow_nez(Blockid blockid) {
-  Block* block = blockid_get(blockid);
-  Sem_Tasks tasks = {};
-  tasks.length = 0;
-  tasks.varids = arena_push(sem.temp_arena, sizeof(Varid) * block->out_var_typeids.len);
-  tasks.typeids = arena_push(sem.temp_arena, sizeof(Typeid) * block->out_var_typeids.len);
+void sem_narrow_nez(Sem_Tasks* tasks, Blockid blockid) {
   Irid condition = blockid_branch(blockid).cond;
   switch (irid_kind(condition)) {
   case Ir_Kind_eq: {
     if (typeid_kind_of_irid_binary_operands_equal(condition, Type_Kind_ints)) {
-      tasks = typeid_narrow_int_eq(condition);
+      sem_typeid_narrow_int_eq(tasks, condition);
     }
     else {
       assert(0);
@@ -545,32 +615,31 @@ Sem_Tasks sem_narrow_nez(Blockid blockid) {
   case Ir_Kind_ge: assert(0);
   case Ir_Kind_load_var: {
     Istr istr = irid_istr(condition);
-    Typeid old = hash_map_get(&block->out_var_typeids, istr);
-    Typeid new = typeid_narrow_nez(old);
-    if (hash_map_change_if_exists(&block->out_var_typeids, istr, new)) {
-      sem_tasks_push_var(&tasks, istr, old);
+    Typeid old_typeid = hash_map_get(tasks->out_vars, istr);
+    Typeid new_typeid = typeid_narrow_nez(old_typeid);
+    if (hash_map_change_if_exists(tasks->out_vars, istr, new_typeid)) {
+      sem_tasks_push_var(tasks, istr, old_typeid);
     }
   } break;
   default: {
     Typeid old_typeid = typeid_of_irid(condition);
     Typeid new_typeid = typeid_narrow_eqz(old_typeid);
     typeid_of_irid_put(condition, new_typeid);
-    sem_tasks_push(&tasks, condition, old_typeid);
+    sem_tasks_push(tasks, condition, old_typeid);
   } break;
   }
-  return tasks;
 }
 
-Sem_Tasks sem_narrow_eqz(Blockid blockid) {
-  Block* block = blockid_get(blockid);
-  Sem_Tasks tasks = {};
-  tasks.length = 0;
-  tasks.varids = arena_push(sem.temp_arena, sizeof(Varid) * block->out_var_typeids.len);
-  tasks.typeids = arena_push(sem.temp_arena, sizeof(Typeid) * block->out_var_typeids.len);
+void sem_narrow_eqz(Sem_Tasks* tasks, Blockid blockid) {
   Irid condition = blockid_branch(blockid).cond;
   switch (irid_kind(condition)) {
   case Ir_Kind_eq: {
-    assert(0);
+    if (typeid_kind_of_irid_binary_operands_equal(condition, Type_Kind_ints)) {
+      sem_typeid_narrow_int_ne(tasks, condition);
+    }
+    else {
+      assert(0);
+    }
   } break;
   case Ir_Kind_ne: {
     assert(0);
@@ -583,20 +652,19 @@ Sem_Tasks sem_narrow_eqz(Blockid blockid) {
   case Ir_Kind_ge: assert(0); // log_todo("Ir_Kind_ge narrow nez");
   case Ir_Kind_load_var: {
     Istr istr = irid_istr(condition);
-    Typeid old = hash_map_get(&block->out_var_typeids, istr);
+    Typeid old = hash_map_get(tasks->out_vars, istr);
     Typeid new = typeid_narrow_eqz(old);
-    if (hash_map_change_if_exists(&block->out_var_typeids, istr, new)) {
-      sem_tasks_push_var(&tasks, istr, old);
+    if (hash_map_change_if_exists(tasks->out_vars, istr, new)) {
+      sem_tasks_push_var(tasks, istr, old);
     }
   } break;
   default: {
     Typeid old_typeid = typeid_of_irid(condition);
     Typeid new_typeid = typeid_narrow_eqz(old_typeid);
     typeid_of_irid_put(condition, new_typeid);
-    sem_tasks_push(&tasks, condition, old_typeid);
+    sem_tasks_push(tasks, condition, old_typeid);
   } break;
   }
-  return tasks;
 }
 
 void sem_worklist_push(Blockid blockid) {
@@ -665,6 +733,12 @@ void sem_ir(Blockid blockid, Irid irid) {
       result = typeid_int_interval(min, max);
     }
   } break;
+  case Ir_Kind_eq: {
+    if (typeid_kind_of_irid_binary_operands_equal(irid, Type_Kind_ints)) {
+      Intsid_Pair pair = intsid_pair_of_irid(irid);
+      result = typeid_int_interval(0, 1);
+    }
+  } break;
   case Ir_Kind_store_var: {
     Block* block = blockid_get(blockid);
     Store_Var store_var = irid_store_var(irid);
@@ -709,12 +783,11 @@ void sem_ir(Blockid blockid, Irid irid) {
   typeid_of_irid_put(irid, result);
 }
 
-void sem_unnarrow(Blockid blockid, Sem_Tasks tasks) {
-  Block* block = blockid_get(blockid);
+void sem_unnarrow(Sem_Tasks tasks) {
   for (I32 i = 0; i < tasks.length; i++) {
     Istr   var = tasks.varids[i];
     Typeid old = tasks.typeids[i];
-    hash_map_put(&block->out_var_typeids, var, old);
+    hash_map_put(tasks.out_vars, var, old);
   }
 }
 
@@ -725,17 +798,24 @@ void sem_block(Blockid blockid) {
   }
 
   if (block->kind == Block_Kind_branch) {
+    Sem_Tasks tasks = {};
+    tasks.out_vars = &blockid_get(blockid)->out_var_typeids;
+    tasks.length = 0;
+    tasks.varids = arena_push(sem.temp_arena, sizeof(Varid) * tasks.out_vars->len);
+    tasks.typeids = arena_push(sem.temp_arena, sizeof(Typeid) * tasks.out_vars->len);
     { // condition is not equal to zero branch
-      Sem_Tasks undo_narrow = sem_narrow_nez(blockid);
+      sem_narrow_nez(&tasks, blockid);
       Jump jump = blockid_branch(blockid).nez;
       sem_jump(blockid, jump.blockid);
-      sem_unnarrow(blockid, undo_narrow);
+      sem_unnarrow(tasks);
+      tasks.length = 0;
     }
     { // condition is equal to zero branch
-      Sem_Tasks undo_narrow = sem_narrow_eqz(blockid);
+      sem_narrow_eqz(&tasks, blockid);
       Jump jump = blockid_branch(blockid).eqz;
       sem_jump(blockid, jump.blockid);
-      sem_unnarrow(blockid, undo_narrow);
+      sem_unnarrow(tasks);
+      tasks.length = 0;
     }
   }
   else if (block->kind == Block_Kind_jump) {
@@ -792,8 +872,8 @@ void string_builder_push_type(String_Builder* sb, Type type) {
   break;
   case Type_Kind_ints: {
     for (I32 i = 0; ; ) {
-      I64 one = type.intsid->pairs[i].one;
-      I64 two = type.intsid->pairs[i].two;
+      I64 one = type.intsid->pairs[i].lo;
+      I64 two = type.intsid->pairs[i].hi;
       if (one == two) {
         string_builder_push_i64(sb, one);
       }
@@ -925,7 +1005,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("b=0\\1; if b do b el b", "");
+  test("b = 1\\0; if b == 0 do b el b", "");
 }
 
 #undef test
