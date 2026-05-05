@@ -177,6 +177,21 @@ Hash_Map hash_map_init(Arena* arena, Umi capacity) {
   return map;
 }
 
+B8 hash_map_change_if_exists(Hash_Map* map, I32 key, I32 val) {
+  I32 i = hash_u64(key);
+  for (;;) {
+    i &= map->cap - 1;
+    if (!map->keys[i]) {
+      return false;
+    }
+    else if (map->keys[i] == key) {
+      map->vals[i] = val;
+      return true;
+    }
+    i++;
+  }
+}
+
 void hash_map_put(Hash_Map* map, I32 key, I32 val) {
   I32 i = hash_u64(key);
   for (;;) {
