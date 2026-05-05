@@ -562,7 +562,11 @@ Sem_Tasks sem_narrow_nez(Blockid blockid) {
 }
 
 Sem_Tasks sem_narrow_eqz(Blockid blockid) {
+  Block* block = blockid_get(blockid);
   Sem_Tasks tasks = {};
+  tasks.length = 0;
+  tasks.varids = arena_push(sem.temp_arena, sizeof(Varid) * block->out_var_typeids.len);
+  tasks.typeids = arena_push(sem.temp_arena, sizeof(Typeid) * block->out_var_typeids.len);
   Irid condition = blockid_branch(blockid).cond;
   switch (irid_kind(condition)) {
   case Ir_Kind_eq: {
@@ -577,6 +581,14 @@ Sem_Tasks sem_narrow_eqz(Blockid blockid) {
   case Ir_Kind_le: assert(0); // log_todo("Ir_Kind_le narrow nez");
   case Ir_Kind_gt: assert(0); // log_todo("Ir_Kind_gt narrow nez");
   case Ir_Kind_ge: assert(0); // log_todo("Ir_Kind_ge narrow nez");
+  case Ir_Kind_load_var: {
+    Istr istr = irid_istr(condition);
+    Typeid old = hash_map_get(&block->out_var_typeids, istr);
+    Typeid new = typeid_narrow_eqz(old);
+    if (hash_map_change_if_exists(&block->out_var_typeids, istr, new)) {
+      sem_tasks_push_var(&tasks, istr, old);
+    }
+  } break;
   default: {
     Typeid old_typeid = typeid_of_irid(condition);
     Typeid new_typeid = typeid_narrow_eqz(old_typeid);
@@ -913,7 +925,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("b=0\\1; if b do b+b", "");
+  test("b=0\\1; if b do b el b", "");
 }
 
 #undef test
