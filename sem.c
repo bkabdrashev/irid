@@ -1005,7 +1005,8 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("b = 1\\0; if b == 1 do b el b", "");
+  // BUG, TODO: no intersection is stricly not correct
+  test("a = 1\\2\\3; b = 2\\1\\0; if a == b do a+b el a+b", "");
 }
 
 #undef test
