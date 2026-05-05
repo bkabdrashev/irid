@@ -459,13 +459,13 @@ Typeid typeid_intid_no_intersection(Intid one, Intid two) {
       range1 = one->pairs[o++];
     }
   }
-  for (; o < one->length; o++) {
-    range1 = one->pairs[o];
+  while (o < one->length) {
     new_ranges->pairs[new_ranges->length++] = range1;
+    range1 = one->pairs[o++];
   }
-  for (; t < two->length; t++) {
-    range2 = two->pairs[t];
+  while (t < two->length) {
     new_ranges->pairs[new_ranges->length++] = range2;
+    range2 = two->pairs[t++];
   }
   return typeid_ints(new_ranges);
 }
