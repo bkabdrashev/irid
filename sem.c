@@ -107,6 +107,11 @@ Typeid typeid_of_var(Blockid blockid, Varid varid) {
   return typeid;
 }
 
+void typeid_of_var_put(Blockid blockid, Varid varid, Typeid typeid) {
+  Block* block = blockid_get(blockid);
+  hash_map_put(&block->out_var_typeids, varid, typeid);
+}
+
 Type type_of_var(Blockid blockid, Varid varid) {
   Typeid typeid = typeid_of_var(blockid, varid);
   Type type = get(sem.types, typeid);
@@ -751,6 +756,10 @@ void sem_ir(Blockid blockid, Irid irid) {
     I64 i64 = irid_int(irid);
     result  = typeid_int(i64);
   } break;
+  case Ir_Kind_var: {
+    Istr istr = irid_istr(irid);
+    result = typeid_ptr_var(istr);
+  } break;
   case Ir_Kind_join: {
     Typeid_Pair pair = typeid_of_irid_binary(irid);
     result = typeid_join(pair.one, pair.two);
@@ -801,14 +810,37 @@ void sem_ir(Blockid blockid, Irid irid) {
         }
       }
     }
+    else {
+      assert(0);
+    }
+  } break;
+  case Ir_Kind_store: {
+    Irid_Pair binary = irid_binary(irid);
+    Type   lhs = type_of_irid(binary.one);
+    Typeid rhs = typeid_of_irid(binary.two);
+    if (lhs.kind == Type_Kind_ptr) {
+      Ptrid ptrid = lhs.ptrid;
+      for (I32 i = 0; i < ptrid->length; i++) {
+        Mem_Cell cell = ptrid->cells[i];
+        switch (cell.kind) {
+        case Mem_Kind_stack: {
+          typeid_of_var_put(blockid, cell.varid, rhs);
+          result = rhs;
+        } break;
+        default: assert(0);
+        }
+      }
+    }
+    else {
+      assert(0);
+    }
   } break;
   case Ir_Kind_ptr: {
     Irid one = irid_unary(irid);
     Ir_Kind one_kind = irid_kind(one);
     if (one_kind == Ir_Kind_load) {
-      assert(0);
-      Istr istr = irid_istr(one);
-      result = typeid_ptr_var(istr);
+      Irid addr = irid_unary(one);
+      result = typeid_of_irid(addr);
     }
   } break;
   default: assert(0);
@@ -1038,7 +1070,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a = (1; 2)", "");
+  test("a = 1; b = @a; b@ = 2; a = 3; a+b@", "");
 }
 
 #undef test
