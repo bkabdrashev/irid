@@ -821,8 +821,6 @@ Ast parse_tokens(Arena* arena, Tokens tokens) {
 
 Ast ast_from_source(Arena* arena, Cstr source) {
   Tokens tokens  = lex_source(arena, source);
-  Cstr cstr = cstr_from_slice_token(arena, tokens);
-  printf("tokens: %s\n", cstr);
   Ast ast        = parse_tokens(arena, tokens);
   return ast;
 }

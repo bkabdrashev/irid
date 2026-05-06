@@ -45,13 +45,18 @@ Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
 ```
 
 - [ ] Pointer types can incorporate pointer location:
-  ```irid
-  a = 10
-  b = 20
-  c = @a or @b // can only points to a or b
-  ```
+```irid
+a = 10
+b = 20
+c = @a or @b // can only points to a or b
+```
 
-- [ ] Define constants and use them at the same time `[$n]I32 (1,2,3,4)` // n=4
+- [ ] Define constants and use them at the same time
+```irid
+[$n]I32 (1,2,3,4) // n: 4
+[$n]$T (1,2,3,4)  // n: 4; T: 1..4
+($T, $S) (1, 2)   // T: 1; S: 2
+````
 
 - [ ] $ syntax for defining templates/variables based on pattern
 ```irid
@@ -219,3 +224,49 @@ zap : () -> (x:I32; y:I32) { // error since the second returned value have to sw
   if () re (y=3, x=4)
 }
 ```
+
+- [ ] Function types 
+```irid
+// Both are function types
+(@I32) -> I32
+(@I32\nil) -> {
+  re I32
+}
+// Both are function literals
+(ptr:@I32) -> ptr@
+(ptr: @I32\nil) -> {
+  if ptr re ptr@
+  re 0
+}
+// Both are (function type and function literal)
+(@I32) -> 1
+(ptr:@I32) -> {
+  re ptr@ * 0;
+}
+// Both are function literal
+(ptr:@I32) -> {
+  ptr@ = 1
+  re ptr@
+}
+(ptr:@I32\nil) -> {
+  re ptr@ * 0
+}
+```
+
+- [ ] Optional do
+```irid
+if 1 do 2
+if 3 do br 4
+if 5 br 6
+```
+
+- [ ] Packages 
+```irid
+package Vec, Str
+
+str_from_vec:(v: Vec) -> Str {
+  return str_from_i32(v.x) " " str_from_i32(v.y)
+}
+```
+
+- [ ] Prefix Join  `a = [2]\0\1\2`
