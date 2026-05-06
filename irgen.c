@@ -28,10 +28,9 @@ typedef enum Ir_Kind {
   Ir_Kind_neg = Ast_Kind_neg_leave,
 
   Ir_Kind_load      = Ast_Kind_load_leave,
+  Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_ptr       = Ast_Kind_ptr_leave,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
-  Ir_Kind_load_var  = 129,
-  Ir_Kind_store_var = 130,
 
   Ir_Kind_record          = 131,
   Ir_Kind_position_offset = 132,
@@ -53,10 +52,6 @@ struct Name_Offset { Irid of; Istr at; };
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Irid of; I32 at; };
 
-typedef struct Store_Var Store_Var;
-struct Store_Var { Istr istr; Irid irid; };
-
-
 typedef struct Ir Ir;
 struct Ir {
   Ir_Kind kind;
@@ -66,7 +61,6 @@ struct Ir {
     Recordid recordid;
     Irid_Pair binary;
     Irid unary;
-    Store_Var store_var;
     Position_Offset position;
     Name_Offset     name;
   };
@@ -78,7 +72,7 @@ struct Record {
   Istr* names;
   Irid* assigned;
   Irid* declared;
-  Hash_Map   positions;
+  Hash_Map positions;
 };
 
 typedef struct Field Field;
@@ -203,8 +197,8 @@ Irid ir_push_int(I64 i64) {
   return irid;
 }
 
-Irid ir_push_load_var(Istr istr) {
-  Ir ir = { Ir_Kind_load_var, .istr = istr };
+Irid ir_push_var(Istr istr) {
+  Ir ir = { Ir_Kind_var, .istr = istr };
   Irid irid = push(irgen.ir_stack, ir);
   return irid;
 }
@@ -262,8 +256,8 @@ Istr irid_istr(Irid irid) {
   return get(irgen.irs, irid).istr;
 }
 
-Store_Var irid_store_var(Irid irid) {
-  return get(irgen.irs, irid).store_var;
+Istr irid_recordid(Irid irid) {
+  return get(irgen.irs, irid).recordid;
 }
 
 I32 recordid_length(Recordid recordid) {
@@ -313,6 +307,11 @@ Field recordid_get_by_position(Recordid recordid, I32 position) {
   field.declared = record.declared[position];
   field.position = position;
   return field;
+}
+
+Record recordid_get(Recordid recordid) {
+  Record record = get(irgen.records, recordid);
+  return record;
 }
 
 Block* blockid_get(Blockid blockid) {
@@ -438,17 +437,9 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
     string_builder_push_cstr(sb, "int ");
     string_builder_push_i64(sb, ir.i64);
   break;
-  case Ir_Kind_load_var:
-    string_builder_push_cstr(sb, "load var \"");
+  case Ir_Kind_var:
+    string_builder_push_cstr(sb, "var ");
     string_builder_push_istr(sb, ir.istr);
-    string_builder_push_cstr(sb, "\"");
-  break;
-  case Ir_Kind_store_var:
-    string_builder_push_cstr(sb, "store var \"");
-    string_builder_push_istr(sb, ir.store_var.istr);
-    string_builder_push_cstr(sb, "\" = ");
-    string_builder_push_cstr(sb, "r");
-    string_builder_push_i64(sb, ir.store_var.irid);
   break;
   case Ir_Kind_position_offset:
     string_builder_push_cstr(sb, "position offset ");
@@ -627,7 +618,10 @@ Funs irgen_ast(Arena* arena, Ast ast) {
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_name: {
-      Irid irid = ir_push_load_var(node.istr);
+      Fun* fun = top(irgen.fun_stack);
+      fun->var_count++;
+      Irid var  = ir_push_var(node.istr);
+      Irid irid = ir_push_unary(Ir_Kind_load, var);
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_ptr_leave: 
@@ -649,12 +643,17 @@ Funs irgen_ast(Arena* arena, Ast ast) {
         Irid irid = ir_push_unary(Ir_Kind_load, two);
         add(irgen.irid_stack, irid);
       }
-      else if (ir->kind == Ir_Kind_load_var) {
-        ir->kind = Ir_Kind_name_offset;
-        ir->name.at = ir->istr;
-        ir->name.of = one;
-        Irid irid = ir_push_unary(Ir_Kind_load, two);
-        add(irgen.irid_stack, irid);
+      else if (ir->kind == Ir_Kind_load) {
+        Ir* ir_ptr = &get(irgen.ir_stack, ir->unary);
+        if (ir_ptr->kind == Ir_Kind_var) {
+          ir_ptr->kind = Ir_Kind_name_offset;
+          ir_ptr->name.at = ir_ptr->istr;
+          ir_ptr->name.of = one;
+          add(irgen.irid_stack, two);
+        }
+        else {
+          assert(0);
+        }
       }
       else {
         assert(0);
@@ -690,13 +689,7 @@ Funs irgen_ast(Arena* arena, Ast ast) {
       Irid lhs = pop(irgen.irid_stack);
       Irid rhs = pop(irgen.irid_stack);
       Ir* ir = &get(irgen.ir_stack, lhs);
-      if (ir->kind == Ir_Kind_load_var) {
-        Fun* fun = top(irgen.fun_stack);
-        fun->var_count++;
-        ir->kind = Ir_Kind_store_var;
-        ir->store_var.irid = rhs;
-      }
-      else if (ir->kind == Ir_Kind_load) {
+      if (ir->kind == Ir_Kind_load) {
         ir->kind = Ir_Kind_store;
         ir->binary.two = rhs;
       }
@@ -796,7 +789,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1", "");
+  test("a.b.c + 1", "");
 }
 
 #undef test

@@ -43,7 +43,7 @@ typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_int,
   Type_Kind_ptr,
-  Type_Kind_records,
+  Type_Kind_record,
 } Type_Kind;
 
 typedef struct Type Type;
@@ -274,8 +274,8 @@ Typeid typeid_ptr(Pointer* ptr) {
       if (ptr->length == saved->length) {
         for (I32 j = 0; ;) {
           if (ptr->cells[j].intid_offset != saved->cells[j].intid_offset
-          ||  ptr->cells[j].field_depth   != saved->cells[j].field_depth
-          ||  ptr->cells[j].kind          != saved->cells[j].kind) {
+          ||  ptr->cells[j].field_depth  != saved->cells[j].field_depth
+          ||  ptr->cells[j].kind         != saved->cells[j].kind) {
             break;
           }
           if (ptr->cells[j].kind == Mem_Kind_stack) {
@@ -308,6 +308,11 @@ Typeid typeid_ptr_var(Varid varid) {
   ptr.cells[0].varid = varid;
   Pointer* pointer = (Pointer*)&ptr;
   return typeid_ptr(pointer);
+}
+
+Typeid typeid_record(Recordid recordid) {
+  Record record = recordid_get(recordid);
+  return 0;
 }
 
 Typeid typeid_join(Typeid one, Typeid two) {
@@ -528,7 +533,7 @@ Typeid typeid_intid_exclude(Intid intid, I64 val) {
 void sem_typeid_of_irid_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_typeid);
 void sem_narrow_record(Sem_Tasks* tasks, Name_Offset name_offset, Typeid new_typeid_of_field) {
   Typeid old_typeid_of_record = typeid_of_irid(name_offset.of);
-  assert(typeid_kind_equal(old_typeid_of_record, Type_Kind_records));
+  assert(typeid_kind_equal(old_typeid_of_record, Type_Kind_record));
 }
 
 void sem_tasks_push(Sem_Tasks* tasks, Irid irid, Typeid old_typeid) {
@@ -541,7 +546,8 @@ void sem_tasks_push_var(Sem_Tasks* tasks, Varid varid, Typeid old) {
 }
 
 void sem_typeid_of_irid_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_typeid) {
-  if (irid_kind_equal(irid, Ir_Kind_load_var)) {
+  if (irid_kind_equal(irid, Ir_Kind_load)) {
+    assert(0);
     Istr istr = irid_istr(irid);
     Typeid old_typeid = hash_map_get(tasks->out_vars, istr);
     if (hash_map_change_if_exists(tasks->out_vars, istr, new_typeid)) {
@@ -640,7 +646,8 @@ void sem_narrow_nez(Sem_Tasks* tasks, Blockid blockid) {
   case Ir_Kind_le: assert(0);
   case Ir_Kind_gt: assert(0);
   case Ir_Kind_ge: assert(0);
-  case Ir_Kind_load_var: {
+  case Ir_Kind_load: {
+    assert(0);
     Istr istr = irid_istr(condition);
     Typeid old_typeid = hash_map_get(tasks->out_vars, istr);
     Typeid new_typeid = typeid_narrow_nez(old_typeid);
@@ -677,7 +684,8 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Blockid blockid) {
   case Ir_Kind_le: assert(0); // log_todo("Ir_Kind_le narrow nez");
   case Ir_Kind_gt: assert(0); // log_todo("Ir_Kind_gt narrow nez");
   case Ir_Kind_ge: assert(0); // log_todo("Ir_Kind_ge narrow nez");
-  case Ir_Kind_load_var: {
+  case Ir_Kind_load: {
+    assert(0);
     Istr istr = irid_istr(condition);
     Typeid old = hash_map_get(tasks->out_vars, istr);
     Typeid new = typeid_narrow_eqz(old);
@@ -766,19 +774,16 @@ void sem_ir(Blockid blockid, Irid irid) {
       result = typeid_int_interval(0, 1);
     }
   } break;
-  case Ir_Kind_store_var: {
-    Block* block = blockid_get(blockid);
-    Store_Var store_var = irid_store_var(irid);
-    Typeid typeid = typeid_of_irid(store_var.irid);
-    Typeid old_typeid = hash_map_get(&block->out_var_typeids, store_var.istr);
-    Typeid new_typeid = typeid_join(old_typeid, typeid);
-    hash_map_put(&block->out_var_typeids, store_var.istr, typeid);
-    result = typeid;
+  case Ir_Kind_record: {
+    Recordid recordid = irid_recordid(irid);
+    result = typeid_record(recordid);
   } break;
-  case Ir_Kind_load_var: {
-    Block* block = blockid_get(blockid);
-    Istr istr = irid_istr(irid);
-    result = hash_map_get(&block->out_var_typeids, istr);
+  case Ir_Kind_name_offset: {
+    Name_Offset name_offset = irid_name_offset(irid);
+    Ir_Kind ir_kind = irid_kind(name_offset.of);
+    Type of_type = type_of_irid(name_offset.of);
+    if (of_type.kind == Type_Kind_record) {
+    }
   } break;
   case Ir_Kind_load: {
     Irid one = irid_unary(irid);
@@ -800,7 +805,8 @@ void sem_ir(Blockid blockid, Irid irid) {
   case Ir_Kind_ptr: {
     Irid one = irid_unary(irid);
     Ir_Kind one_kind = irid_kind(one);
-    if (one_kind == Ir_Kind_load_var) {
+    if (one_kind == Ir_Kind_load) {
+      assert(0);
       Istr istr = irid_istr(one);
       result = typeid_ptr_var(istr);
     }
@@ -935,7 +941,7 @@ void string_builder_push_type(String_Builder* sb, Type type) {
       string_builder_push_cstr(sb, ", ");
     }
   } break;
-  case Type_Kind_records:
+  case Type_Kind_record:
     string_builder_push_cstr(sb, "<records>");
   break;
   }
@@ -1032,7 +1038,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a = 1\\2\\3; b = 2; if a == b do a+b el a+b", "");
+  test("a = (1; 2)", "");
 }
 
 #undef test
