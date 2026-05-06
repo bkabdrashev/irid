@@ -20,6 +20,15 @@ struct Intid_Pair {
   Intid two;
 };
 
+typedef struct Type_Records Type_Records;
+struct Type_Records {
+  I32      length;
+  Typeid*  assigned;
+  Typeid*  declared;
+  Istr*    names;
+  Hash_Map positions;
+};
+
 typedef enum {
   Mem_Kind_stack,
 } Mem_Kind;
@@ -73,6 +82,7 @@ typedef struct Sem Sem;
 struct Sem {
   Arena* temp_arena;
   Arena* perm_arena;
+  Funs   funs;
   Dense_Map typeid_of_irids;
   Types types;
   Dense_Map workset;
@@ -912,6 +922,7 @@ void sem_funs(Arena* arena, Funs funs) {
   Arena temp = arena_init(arena->capacity);
   sem.perm_arena = arena;
   sem.temp_arena = &temp;
+  sem.funs = funs;
   sem.worklist.base = arena_push(arena, sizeof(Blockid)*irgen.blocks.length);
   sem.worklist.length = 0;
   sem.workset         = dense_map_init(arena, sizeof(Blockid)*irgen.blocks.length);
@@ -1057,7 +1068,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source);
-  Arena arena          = arena_init(KB(64) * source_length);
+  Arena arena          = arena_init(KB(64) * (source_length+64));
   Ast ast              = ast_from_source(&arena, source);
   Funs funs            = irgen_ast(&arena, ast);
                          sem_funs(&arena, funs);
@@ -1070,7 +1081,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a = 1; b = @a; b@ = 2; a = 3; a+b@", "");
+  test("a=(x=1)", "");
 }
 
 #undef test

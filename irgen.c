@@ -68,10 +68,10 @@ struct Ir {
 
 typedef struct Record Record;
 struct Record {
-  I32   length;
-  Istr* names;
-  Irid* assigned;
-  Irid* declared;
+  I32      length;
+  Irid*    assigned;
+  Irid*    declared;
+  Istr*    names;
   Hash_Map positions;
 };
 
@@ -175,7 +175,8 @@ struct Fun_Stack {
 typedef struct Irgen Irgen;
 struct Irgen {
   Ast     ast;
-  Arena*  arena;
+  Arena*  perm_arena;
+  Arena*  temp_arena;
   Funs    funs;
   Blocks  blocks;
   Records records;
@@ -268,10 +269,10 @@ I32 recordid_length(Recordid recordid) {
 Recordid recordid_new(I32 length) {
   Record record = {};
   record.length = length;
-  record.names    = arena_push_zero(irgen.arena, length*sizeof(Istr));
-  record.assigned = arena_push_zero(irgen.arena, length*sizeof(Irid));
-  record.declared = arena_push_zero(irgen.arena, length*sizeof(Irid));
-  record.positions = hash_map_init(irgen.arena, length);
+  record.names    = arena_push_zero(irgen.perm_arena, length*sizeof(Istr));
+  record.assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Irid));
+  record.declared = arena_push_zero(irgen.perm_arena, length*sizeof(Irid));
+  record.positions = hash_map_init(irgen.perm_arena, length);
   Recordid recordid = push(irgen.records, record);
   return recordid;
 }
@@ -528,29 +529,30 @@ void irgen_print() {
 }
 
 Funs irgen_ast(Arena* arena, Ast ast) {
+  Arena temp = arena_init(arena->capacity);
   irgen.ast = ast;
-  irgen.arena       = arena;
-  irgen.funs.base   = arena_push(arena, sizeof(Fun)*ast.length);
-  irgen.blocks.base = arena_push(arena, sizeof(Block)*ast.length);
-  irgen.irs.base    = arena_push(arena, sizeof(Ir)*ast.length);
-  irgen.records.base   = arena_push(arena, sizeof(Record)*ast.length);
-  C8* mark = arena_mark(arena);
-  irgen.fun_stack.base   = arena_push(arena, ast.length * sizeof(Fun*));
-  irgen.block_stack.base = arena_push(arena, ast.length * sizeof(Block));
-  irgen.ir_stack.base    = arena_push(arena, ast.length * sizeof(Ir));
-  irgen.irid_stack.base  = arena_push(arena, ast.length * sizeof(Irid));
-  irgen.recordid_stack.base = arena_push(arena, ast.length * sizeof(Recordid));
-  irgen.headerids.base      = arena_push(arena, ast.length * sizeof(Blockid));
-  irgen.fun_stack.length   = 0;
-  irgen.block_stack.length = 0;
-  irgen.ir_stack.length    = 0;
-  irgen.irid_stack.length  = 0;
-  irgen.recordid_stack.length = 0;
-  irgen.headerids.length      = 0;
+  irgen.perm_arena = arena;
+  irgen.temp_arena = &temp;
+  irgen.funs.base      = arena_push(irgen.perm_arena, sizeof(Fun)*ast.length);
   irgen.funs.length    = 0;
+  irgen.blocks.base    = arena_push(irgen.perm_arena, sizeof(Block)*ast.length);
   irgen.blocks.length  = 0;
+  irgen.irs.base       = arena_push(irgen.perm_arena, sizeof(Ir)*ast.length);
   irgen.irs.length     = 0;
+  irgen.records.base   = arena_push(irgen.perm_arena, sizeof(Record)*ast.length);
   irgen.records.length = 0;
+  irgen.fun_stack.base        = arena_push(irgen.temp_arena, ast.length * sizeof(Fun*));
+  irgen.fun_stack.length      = 0;
+  irgen.block_stack.base      = arena_push(irgen.temp_arena, ast.length * sizeof(Block));
+  irgen.block_stack.length    = 0;
+  irgen.ir_stack.base         = arena_push(irgen.temp_arena, ast.length * sizeof(Ir));
+  irgen.ir_stack.length       = 0;
+  irgen.irid_stack.base       = arena_push(irgen.temp_arena, ast.length * sizeof(Irid));
+  irgen.irid_stack.length     = 0;
+  irgen.recordid_stack.base   = arena_push(irgen.temp_arena, ast.length * sizeof(Recordid));
+  irgen.recordid_stack.length = 0;
+  irgen.headerids.base        = arena_push(irgen.temp_arena, ast.length * sizeof(Blockid));
+  irgen.headerids.length      = 0;
   irgen.irid_nil = (Irid){ 0 };
   Ir nil = {0, {0}};
   add(irgen.ir_stack, nil);
@@ -728,7 +730,7 @@ Funs irgen_ast(Arena* arena, Ast ast) {
     }
   }
 
-  arena_release_mark(arena, mark);
+  arena_free(irgen.temp_arena);
   return irgen.funs;
 }
 
@@ -789,7 +791,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a.b.c + 1", "");
+  // test("a=(x=1)", "");
 }
 
 #undef test
