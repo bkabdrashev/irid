@@ -296,8 +296,15 @@ void recordid_push_declare_name(Recordid recordid, Istr name, I32 position) {
   record->names[position] = name;
 }
 Field field_nil = {istr_nil, 0, 0, 0};
-Field record_get_by_name(Istr name) {
-  return field_nil;
+Field recordid_get_by_name(Recordid recordid, Istr name) {
+  Record record = get(irgen.records, recordid);
+  Field field = {};
+  I32 position = hash_map_get(&record.positions, name);
+  field.name     = record.names[position];
+  field.assigned = record.assigned[position];
+  field.declared = record.declared[position];
+  field.position = position;
+  return field;
 }
 
 Field recordid_get_by_position(Recordid recordid, I32 position) {

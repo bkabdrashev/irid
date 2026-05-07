@@ -377,9 +377,31 @@ Type_Field type_recordid_get_by_position(Type_Recordid recordid, I32 position) {
   field.name     = record.names[position];
   field.assigned = record.assigned[position];
   field.declared = record.declared[position];
-  field.declared = record.offsets[position];
+  field.offset   = record.offsets[position];
   field.position = position;
   return field;
+}
+
+Type_Field type_recordid_get_by_name(Type_Recordid recordid, Istr name) {
+  Type_Record record = get(sem.records, recordid);
+  Type_Field field = {};
+  I32 position = hash_map_get(&record.positions, name);
+  field.name     = record.names[position];
+  field.assigned = record.assigned[position];
+  field.declared = record.declared[position];
+  field.offset   = record.offsets[position];
+  field.position = position;
+  return field;
+}
+
+Type_Field recordid_set_get_by_name(Recordid_Set recordid_set, Istr name) {
+  Type_Field result = {};
+  for (I32 i = 0; i < recordid_set->len; i++) {
+    Type_Recordid type_recordid = recordid_set->list[i];
+    Type_Field field = type_recordid_get_by_name(type_recordid, name);
+    field.assigned
+    field.offset
+  }
 }
 
 I32 hash_recordid_set(Hash_Set recordid_set) {
@@ -973,6 +995,9 @@ void sem_ir(Blockid blockid, Irid irid) {
     Ir_Kind ir_kind = irid_kind(name_offset.of);
     Type of_type = type_of_irid(name_offset.of);
     if (of_type.kind == Type_Kind_record) {
+      Recordid_Set recordid_set = of_type.recordid_set;
+      Type_Field field = recordid_set_get_by_name(recordid_set, name_offset.at);
+      result = field.assigned;
     }
   } break;
   case Ir_Kind_load: {
@@ -1280,7 +1305,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a=(x=1\\3\\4; y=4)", "");
+  test("a=(x=1); a.x", "");
 }
 
 #undef test
