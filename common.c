@@ -54,6 +54,36 @@ void* xcalloc(Umi size, Umi length) {
   return ptr;
 }
 
+U64 bit_width(U64 x) {
+  U64 w = 0;
+  if (x >= (1ULL << 32)) { w += 32; x >>= 32; }
+  if (x >= (1ULL << 16)) { w += 16; x >>= 16; }
+  if (x >= (1ULL << 8))  { w += 8;  x >>= 8;  }
+  if (x >= (1ULL << 4))  { w += 4;  x >>= 4;  }
+  if (x >= (1ULL << 2))  { w += 2;  x >>= 2;  }
+  if (x >= (1ULL << 1))  { w += 1;           }
+  return w + 1;
+}
+
+I32 bits_needed(I64 min, I64 max) {
+  // if (min == max) return 0;
+
+  if (min >= 0) {
+    return bit_width((U64)max);
+  }
+
+  if (max <= 0) {
+    U64 x = (U64)(-min);
+    return bit_width(x - 1) + 1;
+  }
+
+  unsigned a = (unsigned)max;
+  unsigned b = (unsigned)(-min);
+  unsigned w = bit_width(a);
+  unsigned v = bit_width(b - 1);
+  return (w > v ? w : v) + 1;
+}
+
 Umi power_of_2_up(Umi v) {
   v--;
   v |= v >> 1;
@@ -67,8 +97,8 @@ Umi power_of_2_up(Umi v) {
 }
 
 Umi align_up(Umi val, Umi alignment) {
-  Umi first_bits_off_mask = ~(alignment - 1);
   Umi over_up             = val + alignment - 1;
+  Umi first_bits_off_mask = ~(alignment - 1);
   Umi masked              = over_up & first_bits_off_mask;
   return masked;
 }
