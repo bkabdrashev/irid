@@ -1,5 +1,7 @@
 typedef I32 Typeid;
 typedef Istr Varid;
+typedef I32 Type_Recordid;
+typedef Hash_Set* Recordid_Set;
 
 typedef struct Range Range;
 struct Range {
@@ -20,13 +22,29 @@ struct Intid_Pair {
   Intid two;
 };
 
-typedef struct Type_Records Type_Records;
-struct Type_Records {
+typedef struct Type_Record Type_Record;
+struct Type_Record {
   I32      length;
+  I32*     offsets;
   Typeid*  assigned;
   Typeid*  declared;
   Istr*    names;
   Hash_Map positions;
+};
+
+typedef struct Type_Field Type_Field;
+struct Type_Field {
+  Istr   name;
+  I32    position;
+  I32    offset;
+  Typeid assigned;
+  Typeid declared;
+};
+
+typedef struct Type_Records Type_Records;
+struct Type_Records {
+  Type_Record* base;
+  I32          length;
 };
 
 typedef enum {
@@ -43,6 +61,8 @@ typedef struct {
 } Mem_Cell;
 
 typedef struct {
+  // TODO: consider optimization where Mem_Stack, Mem_Global, Mem_Heap, Mem_Unkown, Mem_Null
+  //       are used instead Mem_Kind. DOD
   I32 length;
   Mem_Cell cells[];
 } Pointer;
@@ -58,9 +78,12 @@ typedef enum Type_Kind {
 typedef struct Type Type;
 struct Type {
   Type_Kind kind;
+  I32 align;
+  I32 bit_size;
   union {
     Intid intid;
     Ptrid ptrid;
+    Recordid_Set recordid_set;
   };
 };
 
@@ -85,11 +108,14 @@ struct Sem {
   Funs   funs;
   Dense_Map typeid_of_irids;
   Types types;
+  Type_Records records;
   Dense_Map workset;
   Blockids worklist;
 
   Hash_Map ints_set;
   Hash_Map ptrs_set;
+  Hash_Map record_set;
+  Hash_Map recordids_set;
 };
 
 Typeid typeid_nil = 0;
@@ -130,6 +156,21 @@ Type type_of_var(Blockid blockid, Varid varid) {
 
 void typeid_of_irid_put(Irid irid, Typeid typeid) {
   dense_map_put(&sem.typeid_of_irids, irid, typeid);
+}
+
+I32 typeid_align(Typeid typeid) {
+  Type type = get(sem.types, typeid);
+  return type.align;
+}
+
+I32 typeid_size(Typeid typeid) {
+  Type type = get(sem.types, typeid);
+  return type.bit_size;
+}
+
+I32 typeid_align_up(Typeid typeid, I32 offset) {
+  I32 align = typeid_align(typeid);
+  return align_up(offset, align);
 }
 
 I32 hash_ranges(Ranges* ranges) {
@@ -325,9 +366,139 @@ Typeid typeid_ptr_var(Varid varid) {
   return typeid_ptr(pointer);
 }
 
+I32 type_recordid_length(Type_Recordid recordid) {
+  Type_Record record = get(sem.records, recordid);
+  return record.length;
+}
+
+Type_Field type_recordid_get_by_position(Type_Recordid recordid, I32 position) {
+  Type_Record record = get(sem.records, recordid);
+  Type_Field field = {};
+  field.name     = record.names[position];
+  field.assigned = record.assigned[position];
+  field.declared = record.declared[position];
+  field.declared = record.offsets[position];
+  field.position = position;
+  return field;
+}
+
+I32 hash_recordid_set(Hash_Set recordid_set) {
+  return 0;
+}
+
+Typeid typeid_recordid_set(Hash_Set recordid_set) {
+  I32 i = hash_recordid_set(recordid_set);
+  for (;;) {
+    i &= sem.recordids_set.cap - 1;
+    if (!sem.recordids_set.keys[i]) {
+      Typeid typeid = sem.types.length++;
+      Hash_Set* new_recordid_set = arena_push(sem.perm_arena,  sizeof(Hash_Set));
+      *new_recordid_set = hash_set_copy(sem.perm_arena, recordid_set);
+      Type type = {};
+      type.kind = Type_Kind_record;
+      type.recordid_set = new_recordid_set;
+      sem.types.base[typeid] = type;
+      return typeid;
+    }
+    else {
+      Typeid typeid = sem.recordids_set.keys[i];
+      Recordid_Set saved = get(sem.types, typeid).recordid_set;
+      if (hash_set_is_equal(recordid_set, *saved)) {
+        return typeid;
+      }
+    }
+    i++;
+  }
+}
+
+Typeid typeid_type_recordid(Type_Recordid type_recordid) {
+  I32 keys[1] = {type_recordid};
+  I32 list[1] = {type_recordid};
+  Hash_Set hash_set = {};
+  hash_set.cap = 1;
+  hash_set.len = 1;
+  hash_set.list = list;
+  hash_set.keys = keys;
+  return typeid_recordid_set(hash_set);
+}
+
+I32 hash_type_record(Type_Record type_record) {
+  return 0;
+}
+
+Type_Recordid typeid_type_record(Type_Record type_record) {
+  I32 i = hash_type_record(type_record);
+  for (;;) {
+    i &= sem.record_set.cap - 1;
+    if (!sem.record_set.keys[i]) {
+      Type_Recordid type_recordid = sem.records.length++;
+      Type_Record save_record = {};
+      save_record.length    = type_record.length;
+      save_record.offsets   = arena_push(sem.perm_arena, sizeof(I32)    * type_record.length);
+      save_record.assigned  = arena_push(sem.perm_arena, sizeof(Typeid) * type_record.length);
+      save_record.declared  = arena_push(sem.perm_arena, sizeof(Typeid) * type_record.length);
+      save_record.names     = type_record.names;
+      save_record.positions = type_record.positions;
+
+      for (I32 i = 0; i < type_record.length; i++) {
+        save_record.offsets[i]  = type_record.offsets[i];
+        save_record.assigned[i] = type_record.assigned[i];
+        save_record.declared[i] = type_record.declared[i];
+      }
+      sem.records.base[type_recordid] = save_record;
+      return type_recordid;
+    }
+    else {
+      Type_Recordid saved_recordid = sem.record_set.keys[i];
+      Type_Record   saved_record   = get(sem.records, saved_recordid);
+      if (type_record.length == saved_record.length) {
+        B8 is_equal = true;
+        for (I32 j = 0; j < type_record.length; j++) {
+          if (type_record.assigned[j] != saved_record.assigned[j]) {
+            is_equal = false;
+            break;
+          }
+          if (type_record.declared[j] != saved_record.declared[j]) {
+            is_equal = false;
+            break;
+          }
+          if (type_record.names[j] != saved_record.names[j]) {
+            is_equal = false;
+            break;
+          }
+        }
+        is_equal &= hash_map_is_equal(type_record.positions, saved_record.positions);
+        if (is_equal) {
+          return saved_recordid;
+        }
+      }
+    }
+    i++;
+  }
+}
+
 Typeid typeid_record(Recordid recordid) {
   Record record = recordid_get(recordid);
-  return 0;
+  Type_Record type_record = {};
+  type_record.length = record.length;
+  C8* mark = arena_mark(sem.temp_arena);
+  type_record.offsets  = arena_push(sem.temp_arena, sizeof(I32)    * record.length);
+  type_record.assigned = arena_push(sem.temp_arena, sizeof(Typeid) * record.length);
+  type_record.declared = arena_push(sem.temp_arena, sizeof(Typeid) * record.length);
+  type_record.names = record.names;
+  type_record.positions = record.positions;
+
+  I32 offset = 0;
+  for (I32 i = 0; i < record.length; i++) {
+    Typeid typeid = typeid_of_irid(record.assigned[i]);
+    offset = typeid_align_up(typeid, offset);
+    type_record.assigned[i] = typeid;
+    type_record.offsets[i] = offset;
+    offset += typeid_size(typeid);
+  }
+  Type_Recordid type_recordid = typeid_type_record(type_record);
+  arena_release_mark(sem.temp_arena, mark);
+  return typeid_type_recordid(type_recordid);
 }
 
 Typeid typeid_join(Typeid one, Typeid two) {
@@ -821,7 +992,6 @@ void sem_ir(Blockid blockid, Irid irid) {
       }
     }
     else {
-      assert(0);
     }
   } break;
   case Ir_Kind_store: {
@@ -930,6 +1100,11 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.ints_set         = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
   sem.ptrs_set         = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
+  sem.record_set       = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
+  sem.recordids_set    = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
+
+  sem.records.base = arena_push(arena, sizeof(Type_Record)*irgen.irs.length);
+  sem.records.length = 0;
 
   sem.types.base = arena_push(arena, sizeof(Type)*irgen.irs.length);
   sem.types.base[0].kind = Type_Kind_none;
@@ -941,13 +1116,14 @@ void sem_funs(Arena* arena, Funs funs) {
   arena_free(&temp);
 }
 
-void string_builder_push_type(String_Builder* sb, Type type) {
+void string_builder_push_type(String_Builder* sb, Typeid typeid) {
+  Type type = get(sem.types, typeid);
   switch (type.kind) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "<none>");
   break;
   case Type_Kind_int: {
-    for (I32 i = 0; ; ) {
+    for (I32 i = 0; i < type.intid->length; i++ ) {
       I64 one = type.intid->pairs[i].lo;
       I64 two = type.intid->pairs[i].hi;
       if (one == two) {
@@ -958,15 +1134,13 @@ void string_builder_push_type(String_Builder* sb, Type type) {
         string_builder_push_cstr(sb, "..");
         string_builder_push_i64(sb, two);
       }
-      i++;
-      if (i >= type.intid->length) {
-        break;
+      if (i+1 < type.intid->length) {
+        string_builder_push_cstr(sb, "\\");
       }
-      string_builder_push_cstr(sb, ", ");
     }
   } break;
   case Type_Kind_ptr: {
-    for (I32 i = 0; ; ) {
+    for (I32 i = 0; i < type.intid->length; i++) {
       Mem_Cell cell = type.ptrid->cells[i];
       switch (cell.kind) {
       case Mem_Kind_stack: {
@@ -977,16 +1151,44 @@ void string_builder_push_type(String_Builder* sb, Type type) {
         string_builder_push_cstr(sb, "<ptr deadbeef>");
       break;
       }
-      i++;
-      if (i >= type.intid->length) {
-        break;
+      if (i+1 < type.intid->length) {
+        string_builder_push_cstr(sb, "\\");
       }
-      string_builder_push_cstr(sb, ", ");
     }
   } break;
-  case Type_Kind_record:
-    string_builder_push_cstr(sb, "<records>");
-  break;
+  case Type_Kind_record: {
+    Hash_Set* recordid_set = type.recordid_set;
+    for (I32 i = 0; i < recordid_set->len; i++) {
+      Type_Recordid key = recordid_set->list[i];
+      string_builder_push_cstr(sb, "record'");
+      string_builder_push_i64(sb, key);
+      string_builder_push_cstr(sb, "(");
+      for (I32 pos = 0; pos < type_recordid_length(key); pos++) {
+        Type_Field field = type_recordid_get_by_position(key, pos);
+        if (field.name) {
+          string_builder_push_istr(sb, field.name);
+          if (field.declared != irgen.irid_nil) {
+            string_builder_push_cstr(sb, ":");
+            string_builder_push_type(sb, field.declared);
+          }
+          if (field.assigned != irgen.irid_nil) {
+            string_builder_push_cstr(sb, "=");
+            string_builder_push_type(sb, field.assigned);
+          }
+        }
+        else {
+          string_builder_push_type(sb, field.assigned);
+        }
+        if (pos+1 < type_recordid_length(key)) {
+          string_builder_push_cstr(sb, ", ");
+        }
+      }
+      string_builder_push_cstr(sb, ")");
+      if (i+1 < recordid_set->len) {
+        string_builder_push_cstr(sb, "\\");
+      }
+    }
+  } break;
   }
 }
 
@@ -1008,10 +1210,9 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       for (I32 i = 0; i < block.in_var_typeids.len; i++) {
         Istr istr = block.in_var_typeids.list[i];
         Typeid typeid = hash_map_get(&block.in_var_typeids, istr);
-        Type type = get(sem.types, typeid);
         string_builder_push_istr(&sb, istr);
         string_builder_push_cstr(&sb, ": ");
-        string_builder_push_type(&sb, type);
+        string_builder_push_type(&sb, typeid);
         if (i+1 < block.in_var_typeids.len) {
           string_builder_push_cstr(&sb, "; ");
         }
@@ -1022,11 +1223,10 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       for (I32 i = 0; i < block.out_var_typeids.len; i++) {
         Istr istr = block.out_var_typeids.list[i];
         Typeid typeid = hash_map_get(&block.out_var_typeids, istr);
-        Type type = get(sem.types, typeid);
         string_builder_push_istr(&sb, istr);
         string_builder_push_cstr(&sb, ": ");
 
-        string_builder_push_type(&sb, type);
+        string_builder_push_type(&sb, typeid);
         if (i+1 < block.out_var_typeids.len) {
           string_builder_push_cstr(&sb, "; ");
         }
@@ -1037,8 +1237,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         string_builder_push_ir(&sb, irid, ir);
         string_builder_push_cstr(&sb, " : ");
         Typeid typeid = dense_map_get(sem.typeid_of_irids, irid);
-        Type type = get(sem.types, typeid);
-        string_builder_push_type(&sb, type);
+        string_builder_push_type(&sb, typeid);
       }
       switch (block.kind) {
       case Block_Kind_none:
@@ -1081,7 +1280,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a=(x=1)", "");
+  test("a=(x=1\\3\\4; y=4)", "");
 }
 
 #undef test

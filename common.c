@@ -66,6 +66,13 @@ Umi power_of_2_up(Umi v) {
   return v;
 }
 
+Umi align_up(Umi val, Umi alignment) {
+  Umi first_bits_off_mask = ~(alignment - 1);
+  Umi over_up             = val + alignment - 1;
+  Umi masked              = over_up & first_bits_off_mask;
+  return masked;
+}
+
 typedef struct {
   C8* base;
   C8* top;
@@ -85,11 +92,8 @@ Arena arena_init(Umi capacity) {
 void* arena_push(Arena* arena, Umi size) {
   assert(arena->top + size <= arena->base + arena->capacity);
   void* result = arena->top;
-  Umi first_bits_off_mask = ~(arena->alignment - 1);
-  Umi up                  = size + arena->alignment - 1;
-  Umi masked              = up & first_bits_off_mask;
-  Umi overshoot_up        = ((Umi)arena->top + masked);
-  arena->top = (void*)(overshoot_up);
+  Umi aligned_up = (Umi)arena->top + align_up(size, arena->alignment);
+  arena->top  = (void*)(aligned_up);
   return result;
 }
 
@@ -160,6 +164,62 @@ U64 hash_u64(U64 x) {
 #define min(x, y) ((x) <= (y) ? (x) : (y))
 #define max(x, y) ((x) >= (y) ? (x) : (y))
 
+typedef struct Hash_Set Hash_Set;
+struct Hash_Set {
+  I32  cap;
+  I32  len;
+  I32* list;
+  I32* keys;
+};
+
+Hash_Set hash_set_init(Arena* arena, Umi capacity) {
+  Hash_Set set = {}; 
+  set.cap  = 2*power_of_2_up(capacity);
+  set.len  = 0;
+  set.keys = arena_push_zero(arena, sizeof(I32)*set.cap);
+  set.list = arena_push_zero(arena, sizeof(I32)*capacity);
+  return set;
+}
+
+Hash_Set hash_set_copy(Arena* arena, Hash_Set set) {
+  Hash_Set new_set = {}; 
+  I32 size = sizeof(I32)*new_set.cap;
+  new_set.cap  = set.cap;
+  new_set.len  = set.len;
+  new_set.keys = arena_push(arena, size);
+  new_set.list = arena_push(arena, set.len);
+  memcpy(new_set.keys, set.keys, size);
+  memcpy(new_set.list, set.list, set.len);
+
+  return new_set;
+}
+
+B8 hash_set_exists(Hash_Set* set, I32 key) {
+  I32 i = hash_u64(key);
+  for (;;) {
+    i &= set->cap - 1;
+    if (!set->keys[i]) {
+      return false;
+    }
+    else if (set->keys[i] == key) {
+      return true;
+    }
+    i++;
+  }
+}
+
+B8 hash_set_is_equal(Hash_Set one, Hash_Set two) {
+  if (one.len != two.len) return false;
+  for (I32 i = 0; i < one.len; i++) {
+    I32 key = one.list[i];
+    B8 exists = hash_set_exists(&two, key);
+    if (!exists) {
+      return false;
+    }
+  }
+  return true;
+}
+
 typedef struct Hash_Map Hash_Map;
 struct Hash_Map {
   I32  cap;
@@ -177,6 +237,22 @@ Hash_Map hash_map_init(Arena* arena, Umi capacity) {
   map.list = arena_push_zero(arena, sizeof(I32)*capacity);
   map.vals = arena_push_zero(arena, sizeof(I32)*map.cap);
   return map;
+}
+
+Hash_Map hash_map_copy(Arena* arena, Hash_Map map) {
+  Hash_Map new_map = {}; 
+  I32 size = sizeof(I32)*new_map.cap;
+  new_map.cap  = map.cap;
+  new_map.len  = map.len;
+  new_map.keys = arena_push(arena, size);
+  new_map.list = arena_push(arena, map.len);
+  new_map.vals = arena_push(arena, size);
+
+  memcpy(new_map.keys, map.keys, size);
+  memcpy(new_map.vals, map.vals, size);
+  memcpy(new_map.list, map.list, map.len);
+
+  return new_map;
 }
 
 B8 hash_map_change_if_exists(Hash_Map* map, I32 key, I32 val) {
@@ -224,6 +300,19 @@ I32 hash_map_get(Hash_Map* map, I32 key) {
     }
     i++;
   }
+}
+
+B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
+  if (one.len != two.len) return false;
+  for (I32 i = 0; i < one.len; i++) {
+    I32 key = one.list[i];
+    I32 one_val = hash_map_get(&one, key);
+    I32 two_val = hash_map_get(&two, key);
+    if (one_val != two_val) {
+      return false;
+    }
+  }
+  return true;
 }
 
 typedef struct Dense_Map Dense_Map;
