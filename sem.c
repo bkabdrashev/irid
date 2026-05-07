@@ -25,6 +25,8 @@ struct Intid_Pair {
 typedef struct Type_Record Type_Record;
 struct Type_Record {
   I32      length;
+  I32      bit_size;
+  I32      bit_align;
   I32*     offsets;
   Typeid*  assigned;
   Typeid*  declared;
@@ -193,12 +195,6 @@ I32 typeid_align(Typeid typeid) {
 I32 typeid_size(Typeid typeid) {
   Type type = get(sem.types, typeid);
   return type.bit_size;
-}
-
-I32 typeid_align_up(Typeid typeid, I32 offset) {
-  I32 align = typeid_align(typeid);
-  if (!align) return offset;
-  else return align_up(offset, align);
 }
 
 I32 hash_ranges(Ranges* ranges) {
@@ -418,9 +414,9 @@ Type_Field type_recordid_get_by_name(Type_Recordid recordid, Istr name) {
 
 Type_Field type_recordid_get_by_offset(Type_Recordid recordid, I32 offset) {
   Type_Record record = get(sem.records, recordid);
-  for (I32 i = 0; i+1 < record.length; i++) {
-    if (record.offsets[i] >= offset && offset < record.offsets[i+1]) {
-      return type_recordid_get_by_position(recordid, i);
+  for (I32 i = 1; i < record.length; i++) {
+    if (offset < record.offsets[i]) {
+      return type_recordid_get_by_position(recordid, i-1);
     }
   }
   return type_recordid_get_by_position(recordid, record.length-1);
@@ -441,6 +437,16 @@ Typeid typeid_recordid_set(Hash_Set recordid_set) {
       Type type = {};
       type.kind = Type_Kind_record;
       type.recordid_set = new_recordid_set;
+      Type_Recordid type_recordid = recordid_set.list[0];
+      Type_Record type_record = get(sem.records, type_recordid);
+      type.bit_align = type_record.bit_align;
+      type.bit_size  = type_record.bit_size;
+      for (I32 j = 1; j < recordid_set.len; j++) {
+        Type_Recordid type_recordid = recordid_set.list[1];
+        Type_Record type_record = get(sem.records, type_recordid);
+        type.bit_align = max(type.bit_align, type_record.bit_size);
+        type.bit_size  = max(type.bit_size, type_record.bit_align);
+      }
       sem.types.base[typeid] = type;
       return typeid;
     }
@@ -483,6 +489,8 @@ Type_Recordid typeid_type_record(Type_Record type_record) {
       save_record.declared  = arena_push(sem.perm_arena, sizeof(Typeid) * type_record.length);
       save_record.names     = type_record.names;
       save_record.positions = type_record.positions;
+      save_record.bit_size  = type_record.bit_size;
+      save_record.bit_align = type_record.bit_align;
 
       for (I32 i = 0; i < type_record.length; i++) {
         save_record.offsets[i]  = type_record.offsets[i];
@@ -535,11 +543,14 @@ Typeid typeid_record(Recordid recordid) {
   I32 offset = 0;
   for (I32 i = 0; i < record.length; i++) {
     Typeid typeid = typeid_of_irid(record.assigned[i]);
-    offset = typeid_align_up(typeid, offset);
+    I32 align = typeid_align(typeid);
+    offset = align_up(offset, align);
+    type_record.bit_align = max(type_record.bit_align, align);
     type_record.assigned[i] = typeid;
     type_record.offsets[i]  = offset;
     offset += typeid_size(typeid);
   }
+  type_record.bit_size = align_up(offset, type_record.bit_align);
   Type_Recordid type_recordid = typeid_type_record(type_record);
   arena_release_mark(sem.temp_arena, mark);
   return typeid_type_recordid(type_recordid);
@@ -1387,7 +1398,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a=(x=1\\2; y=0; z=0\\1); a.z", "");
+  test("a=(b=(c=1; d=2); e=(f=3;g=4)); a.e.g", "");
 }
 
 #undef test
