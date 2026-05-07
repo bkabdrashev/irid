@@ -41,6 +41,8 @@ struct Type_Field {
   Typeid declared;
 };
 
+Type_Field type_field_nil = {istr_nil, 0, 0, 0, 0};
+
 typedef struct Type_Records Type_Records;
 struct Type_Records {
   Type_Record* base;
@@ -53,7 +55,8 @@ typedef enum {
 
 typedef struct {
   Mem_Kind kind;
-  Intid intid_offset;
+  Range offset_range;
+  I32 field_offset;
   I32 field_depth;
   union {
     Varid varid;
@@ -183,6 +186,12 @@ Ranges* sem_ranges_init(I32 max_len) {
   return result;
 }
 
+Pointer* sem_pointer_init(I32 max_len) {
+  Pointer* result = arena_push(sem.temp_arena, sizeof(Pointer) + max_len * sizeof(Mem_Cell));
+  result->length = 0;
+  return result;
+}
+
 I32 hash_pointer(Pointer* ptr) {
   return 0;
 }
@@ -231,6 +240,17 @@ Typeid typeid_int_interval(I64 min, I64 max) {
 
 Typeid typeid_int(I64 i64) {
   return typeid_int_interval(i64, i64);
+}
+
+Typeid typeid_intid_offset(Intid intid, I64 offset) {
+  Ranges* ranges = sem_ranges_init(intid->length);
+  ranges->length = intid->length;
+  for (I32 i = 0; i < intid->length; i++) {
+    Range offset_pair = { .lo = intid->pairs[i].lo + offset, .hi = intid->pairs[i].hi + offset };
+    ranges->pairs[i] = offset_pair;
+  }
+
+  return typeid_ints(ranges);
 }
 
 Typeid typeid_intid_merge(Intid one, Intid two) {
@@ -329,7 +349,8 @@ Typeid typeid_ptr(Pointer* ptr) {
       Ptrid saved = sem.types.base[typeid].ptrid;
       if (ptr->length == saved->length) {
         for (I32 j = 0; ;) {
-          if (ptr->cells[j].intid_offset != saved->cells[j].intid_offset
+          if (ptr->cells[j].offset_range.lo != saved->cells[j].offset_range.lo
+          ||  ptr->cells[j].offset_range.hi != saved->cells[j].offset_range.hi
           ||  ptr->cells[j].field_depth  != saved->cells[j].field_depth
           ||  ptr->cells[j].kind         != saved->cells[j].kind) {
             break;
@@ -354,12 +375,11 @@ Typeid typeid_ptr(Pointer* ptr) {
 }
 
 Typeid typeid_ptr_var(Varid varid) {
-  Typeid int_zero = typeid_int(0);
-  Intid intsid_zero = get(sem.types, int_zero).intid;
+  Range zero_range = { .lo = 0, .hi = 0 };
   struct { I32 length; Mem_Cell cells[1]; } ptr = {};
   ptr.length = 1;
   ptr.cells[0].field_depth = 0;
-  ptr.cells[0].intid_offset = intsid_zero;
+  ptr.cells[0].offset_range = zero_range;
   ptr.cells[0].kind = Mem_Kind_stack;
   ptr.cells[0].varid = varid;
   Pointer* pointer = (Pointer*)&ptr;
@@ -376,7 +396,7 @@ Type_Field type_recordid_get_by_position(Type_Recordid recordid, I32 position) {
   Type_Field field = {};
   field.name     = record.names[position];
   field.assigned = record.assigned[position];
-  field.declared = record.declared[position];
+  field.declared = 0; // TODO: declared type
   field.offset   = record.offsets[position];
   field.position = position;
   return field;
@@ -384,24 +404,18 @@ Type_Field type_recordid_get_by_position(Type_Recordid recordid, I32 position) {
 
 Type_Field type_recordid_get_by_name(Type_Recordid recordid, Istr name) {
   Type_Record record = get(sem.records, recordid);
-  Type_Field field = {};
   I32 position = hash_map_get(&record.positions, name);
-  field.name     = record.names[position];
-  field.assigned = record.assigned[position];
-  field.declared = record.declared[position];
-  field.offset   = record.offsets[position];
-  field.position = position;
-  return field;
+  return type_recordid_get_by_position(recordid, position);
 }
 
-Type_Field recordid_set_get_by_name(Recordid_Set recordid_set, Istr name) {
-  Type_Field result = {};
-  for (I32 i = 0; i < recordid_set->len; i++) {
-    Type_Recordid type_recordid = recordid_set->list[i];
-    Type_Field field = type_recordid_get_by_name(type_recordid, name);
-    field.assigned
-    field.offset
+Type_Field type_recordid_get_by_offset(Type_Recordid recordid, I32 offset) {
+  Type_Record record = get(sem.records, recordid);
+  for (I32 i = 0; i < record.length; i++) {
+    if (offset == record.offsets[i]) {
+      return type_recordid_get_by_position(recordid, i);
+    }
   }
+  return type_field_nil;
 }
 
 I32 hash_recordid_set(Hash_Set recordid_set) {
@@ -573,6 +587,18 @@ Type_Pair type_of_irid_binary(Irid irid) {
   return result;
 }
 
+Typeid typeid_of_irid_unary(Irid irid) {
+  Irid irid_one = irid_unary(irid);
+  Typeid result = typeid_of_irid(irid_one);
+  return result;
+}
+
+Type type_of_irid_unary(Irid irid) {
+  Typeid typeid = typeid_of_irid_unary(irid);
+  Type result = get(sem.types, typeid);
+  return result;
+}
+
 Intid_Pair intid_pair_of_irid_binary(Irid irid) {
   Typeid_Pair typeids = typeid_of_irid_binary(irid);
   Intid_Pair result = {};
@@ -738,6 +764,26 @@ Typeid typeid_intid_exclude(Intid intid, I64 val) {
   return typeid_ints(new_ints);
 }
 
+Type_Field recordid_set_get_by_offset(Recordid_Set recordid_set, I32 offset) {
+  for (I32 i = 0; i < recordid_set->len; i++) {
+    Type_Recordid type_recordid = recordid_set->list[i];
+    Type_Field field = type_recordid_get_by_offset(type_recordid, offset);
+  }
+}
+
+I32 recordid_set_get_offset_by_name(Recordid_Set recordid_set, Istr name) {
+  Type_Recordid type_recordid = recordid_set->list[0];
+  I32 offset = type_recordid_get_by_name(type_recordid, name).offset;
+  for (I32 i = 1; i < recordid_set->len; i++) {
+    Type_Recordid type_recordid = recordid_set->list[i];
+    Type_Field field = type_recordid_get_by_name(type_recordid, name);
+    if (offset != field.offset) {
+      return -1;
+    }
+  }
+  return offset;
+}
+
 void sem_typeid_of_irid_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_typeid);
 void sem_narrow_record(Sem_Tasks* tasks, Name_Offset name_offset, Typeid new_typeid_of_field) {
   Typeid old_typeid_of_record = typeid_of_irid(name_offset.of);
@@ -816,7 +862,7 @@ Typeid typeid_narrow_nez(Typeid typeid) {
   Type type = get(sem.types, typeid);
   switch (type.kind) {
   case Type_Kind_int: {
-    Intid intsid = type.intid;
+    Intid intid = type.intid;
     return typeid_intid_exclude(type.intid, 0);
   } break;
   default: break;
@@ -994,10 +1040,23 @@ void sem_ir(Blockid blockid, Irid irid) {
     Name_Offset name_offset = irid_name_offset(irid);
     Ir_Kind ir_kind = irid_kind(name_offset.of);
     Type of_type = type_of_irid(name_offset.of);
-    if (of_type.kind == Type_Kind_record) {
+    if (ir_kind == Ir_Kind_load) {
       Recordid_Set recordid_set = of_type.recordid_set;
-      Type_Field field = recordid_set_get_by_name(recordid_set, name_offset.at);
-      result = field.assigned;
+      I32 offset = recordid_set_get_offset_by_name(recordid_set, name_offset.at);
+      Ptrid ptrid = type_of_irid_unary(name_offset.of).ptrid;
+      assert(ptrid->length == 1); // TODO: non-trival cases
+      assert(ptrid->cells[0].kind == Mem_Kind_stack);
+      Pointer* ptr = sem_pointer_init(ptrid->length);
+      ptr->length = ptrid->length;
+      for (I32 i = 0; i < ptrid->length; i++) {
+        Mem_Cell cell = ptrid->cells[i];
+        Range offset_range = { .lo = cell.offset_range.lo + offset, .hi = cell.offset_range.hi + offset };
+        ptr->cells[i].offset_range = offset_range;
+        ptr->cells[i].field_depth = cell.field_depth + 1;
+        ptr->cells[i].kind = cell.kind;
+        ptr->cells[i].varid = cell.varid; // TODO: other mem kinds
+      }
+      result = typeid_ptr(ptr);
     }
   } break;
   case Ir_Kind_load: {
@@ -1010,6 +1069,11 @@ void sem_ir(Blockid blockid, Irid irid) {
         switch (cell.kind) {
         case Mem_Kind_stack: {
           Typeid var_typeid = typeid_of_var(blockid, cell.varid);
+          for (I32 d = 0; d < cell.field_depth; d++) {
+            Type var_type = get(sem.types, var_typeid);
+            assert(var_type.kind == Type_Kind_record);
+            Type_Field field = recordid_set_get_by_offset(var_type.recordid_set, cell.field_offset);
+          }
           result = var_typeid;
         } break;
         default: assert(0);
