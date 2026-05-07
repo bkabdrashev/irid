@@ -569,6 +569,14 @@ Typeid typeid_join(Typeid one, Typeid two) {
   else if (type_one.kind == Type_Kind_int && type_two.kind == Type_Kind_int) {
     result = typeid_intid_merge(type_one.intid, type_two.intid);
   }
+  else if (type_one.kind == Type_Kind_record && type_two.kind == Type_Kind_record) {
+    Recordid_Set recordid_set_one = type_one.recordid_set;
+    Recordid_Set recordid_set_two = type_two.recordid_set;
+    C8* mark = arena_mark(sem.temp_arena);
+    Hash_Set join_recordid_set = hash_set_join(sem.temp_arena, recordid_set_one, recordid_set_two);
+    result = typeid_recordid_set(join_recordid_set);
+    arena_release_mark(sem.temp_arena, mark);
+  }
   else {
     assert(0);
   }
@@ -1398,7 +1406,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a=(b=(c=1; d=2); e=(f=3;g=4)); a.e.g", "");
+  test("a=(x=1)\\(x=2); a.x", "");
 }
 
 #undef test

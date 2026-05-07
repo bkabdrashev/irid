@@ -224,6 +224,33 @@ Hash_Set hash_set_copy(Arena* arena, Hash_Set set) {
   return new_set;
 }
 
+B8 hash_set_put(Hash_Set* set, I32 key) {
+  I32 i = hash_u64(key);
+  for (;;) {
+    i &= set->cap - 1;
+    if (!set->keys[i]) {
+      set->keys[i] = key;
+      set->list[set->len++] = key;
+      return true;
+    }
+    else if (set->keys[i] == key) {
+      return false;
+    }
+    i++;
+  }
+}
+
+Hash_Set hash_set_join(Arena* arena, Hash_Set* one, Hash_Set* two) {
+  Hash_Set new_set = hash_set_init(arena, one->len + two->len); 
+  for (I32 i = 0; i < one->len; i++) {
+    hash_set_put(&new_set, one->list[i]);
+  }
+  for (I32 i = 0; i < two->len; i++) {
+    hash_set_put(&new_set, two->list[i]);
+  }
+  return new_set;
+}
+
 B8 hash_set_exists(Hash_Set* set, I32 key) {
   I32 i = hash_u64(key);
   for (;;) {
