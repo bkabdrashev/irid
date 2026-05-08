@@ -336,18 +336,18 @@ Typeid typeid_ptr(Pointer* ptr) {
     i &= sem.ptrs_set.cap - 1;
     if (!sem.ptrs_set.keys[i]) {
       Typeid typeid = sem.types.length++;
-      Pointer* new = arena_push(sem.perm_arena,  sizeof(Pointer) + sizeof(Mem_Cell) * ptr->length);
-      new->length = ptr->length;
-      for (I32 j = 0; j < new->length; j++) {
-        new->cells[j] = ptr->cells[j];
+      Pointer* new_ptr = arena_push(sem.perm_arena,  sizeof(Pointer) + sizeof(Mem_Cell) * ptr->length);
+      new_ptr->length = ptr->length;
+      for (I32 j = 0; j < new_ptr->length; j++) {
+        new_ptr->cells[j] = ptr->cells[j];
       }
       sem.types.base[typeid].kind = Type_Kind_ptr;
-      sem.types.base[typeid].ptrid = new;
+      sem.types.base[typeid].ptrid = new_ptr;
       sem.ptrs_set.keys[i] = typeid;
       return typeid;
     }
     else {
-      Typeid typeid = sem.ints_set.keys[i];
+      Typeid typeid = sem.ptrs_set.keys[i];
       Ptrid saved = sem.types.base[typeid].ptrid;
       if (ptr->length == saved->length) {
         for (I32 j = 0; ;) {
@@ -1408,7 +1408,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a=(x=1)\\(x=2); a.x", "");
+  test("a=(x=1; y=3); b=@a; b@.x = 2", "");
 }
 
 #undef test
