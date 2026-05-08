@@ -213,13 +213,13 @@ Hash_Set hash_set_init(Arena* arena, Umi capacity) {
 
 Hash_Set hash_set_copy(Arena* arena, Hash_Set set) {
   Hash_Set new_set = {}; 
-  I32 size = sizeof(I32)*new_set.cap;
+  I32 size = sizeof(I32)*set.cap;
   new_set.cap  = set.cap;
   new_set.len  = set.len;
   new_set.keys = arena_push(arena, size);
-  new_set.list = arena_push(arena, set.len);
+  new_set.list = arena_push(arena, sizeof(I32) * set.len);
   memcpy(new_set.keys, set.keys, size);
-  memcpy(new_set.list, set.list, set.len);
+  memcpy(new_set.list, set.list, sizeof(I32) * set.len);
 
   return new_set;
 }

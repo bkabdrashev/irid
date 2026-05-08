@@ -343,7 +343,7 @@ Typeid typeid_ptr(Pointer* ptr) {
       }
       sem.types.base[typeid].kind = Type_Kind_ptr;
       sem.types.base[typeid].ptrid = new;
-      sem.ints_set.keys[i] = typeid;
+      sem.ptrs_set.keys[i] = typeid;
       return typeid;
     }
     else {
@@ -444,10 +444,11 @@ Typeid typeid_recordid_set(Hash_Set recordid_set) {
       for (I32 j = 1; j < recordid_set.len; j++) {
         Type_Recordid type_recordid = recordid_set.list[1];
         Type_Record type_record = get(sem.records, type_recordid);
-        type.bit_align = max(type.bit_align, type_record.bit_size);
-        type.bit_size  = max(type.bit_size, type_record.bit_align);
+        type.bit_align = max(type.bit_align, type_record.bit_align);
+        type.bit_size  = max(type.bit_size, type_record.bit_size);
       }
       sem.types.base[typeid] = type;
+      sem.recordids_set.keys[i] = typeid;
       return typeid;
     }
     else {
@@ -462,10 +463,10 @@ Typeid typeid_recordid_set(Hash_Set recordid_set) {
 }
 
 Typeid typeid_type_recordid(Type_Recordid type_recordid) {
-  I32 keys[1] = {type_recordid};
+  I32 keys[2] = {type_recordid};
   I32 list[1] = {type_recordid};
   Hash_Set hash_set = {};
-  hash_set.cap = 1;
+  hash_set.cap = 2;
   hash_set.len = 1;
   hash_set.list = list;
   hash_set.keys = keys;
@@ -498,6 +499,7 @@ Type_Recordid typeid_type_record(Type_Record type_record) {
         save_record.declared[i] = type_record.declared[i];
       }
       sem.records.base[type_recordid] = save_record;
+      sem.record_set.keys[i] = type_recordid;
       return type_recordid;
     }
     else {
@@ -1225,7 +1227,7 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.recordids_set    = hash_map_init(arena, sizeof(Typeid)*irgen.irs.length);
 
   sem.records.base = arena_push(arena, sizeof(Type_Record)*irgen.irs.length);
-  sem.records.length = 0;
+  sem.records.length = 1;
 
   sem.types.base = arena_push(arena, sizeof(Type)*irgen.irs.length);
   sem.types.base[0].kind = Type_Kind_none;
