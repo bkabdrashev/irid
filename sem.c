@@ -1127,6 +1127,8 @@ void sem_ir(Blockid blockid, Irid irid) {
         Mem_Cell cell = ptrid->cells[i];
         switch (cell.kind) {
         case Mem_Kind_stack: {
+            // TODO: Have to recreate whole record with slightly updated field, which
+            //       seems wasteful. Lazy update maybe better option.
           typeid_of_var_put(blockid, cell.varid, rhs);
           result = rhs;
         } break;
