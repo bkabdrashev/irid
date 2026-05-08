@@ -5,19 +5,19 @@
 
 - [ ] When element sizes in a record are equal then this record is an array:
 ```irid
-a = ((U32, U32), U64) // implicit [2]([2]U32 or U64)
+a = ((U32, U32), U64) // implicit [2]([2]\U32\U64)
 ```
 
 - [ ] Values that could be assign only to certain type. Example: type bool, values: false/true. Need to think syntax/semantics of it.
 
-- [ ] `a = [2]I32` is implicitly `a = I32< and (len : 2)`
+- [ ] `a = [2]I32` is implicitly `a = @I32 and (len : 2)`
 ```irid
-(I32, I32) implicit this -> (this< as I32<) and (len : 2)
+(I32, I32) implicit this -> (@this as @I32) and (len : 2)
 ```
 
 - [ ] `foo : (a=1) -> a; foo(a:1)`
 
-- [ ] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
+- [x] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
 
 - [ ] Ranges `..`
 
@@ -48,7 +48,7 @@ Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
 ```irid
 a = 10
 b = 20
-c = @a or @b // can only points to a or b
+c = @a\@b // can only points to a or b
 ```
 
 - [ ] Define constants and use them at the same time
@@ -106,38 +106,8 @@ entity.get(e)    // doesn't implicit call since expected type is handle
 foo : (1 -> 2) and (3 -> 4)
 foo(1) // 2
 foo(3) // 4
-foo(1 or 3) // 2 or 4
+foo(1\3) // 2\4
 ```
-
-- [ ] Implicit function parameter. This could be confusing, but some langauges provide implicit context or rely on globals. This could be a nice feature that create thead locals on the stack and passes implicitly to functions. This achieves global-like convinience but is also thread safe.
-```irid
-parse_int : () -> {
-  import parser from stack;
-  scan_int(parser.lex);
-}
-
-main:() -> {
-  parser = Parser
-  parse_int()
-}
-```
-There could be a problem with shadowing:
-```irid
-parse_int : () -> {
-  import parser from stack; // should report shadowing error
-  scan_int(parser.lex);
-}
-
-parse_exp:() -> {
-  parser = Parser
-  parse_int()
-}
-main:() -> {
-  parser = Parser
-  parse_exp()
-}
-```
-Maybe instead of this feature closures should be considered.
 
 - [ ] Narrow a name for that scope
 ```irid
@@ -148,14 +118,14 @@ Vec2 = 3, 4
 Vec2.x + Vec.y // 7
 ```
 
-- [ ] {} syntax for creating records with matching field names. This conflicts with expressoin block syntax.
+- [ ] {} syntax for creating records with matching field names. This conflicts with expression block syntax.
 ```irid
 x = 1
 y = 2
 vec = { x, y } // (x = x; y = y)
 ```
 
-- [ ] named block syntax name:{}. This requires declaration have strict order.
+- [ ] named block syntax name={}.
 ```irid
 outer = {
   inner = {
@@ -163,6 +133,18 @@ outer = {
   }
 }
 outer + outer
+```
+
+- [ ] pointers to named blocks
+```irid
+one = {
+  two = {
+    if 1 do ptr = @one el ptr = @two
+    br ptr@
+  }
+  print "after two"
+}
+print "after two"
 ```
 
 - [ ] br with if/el/wh
@@ -192,7 +174,7 @@ a = wh 1 {
 - [ ] type assertion
 ```irid
 b = 10
-a = i32'b
+a = I32'b
 ```
 
 - [ ] methods syntax
@@ -209,23 +191,23 @@ c = a.dot b // 3 + 8
 ```irid
 foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
   if () re 1
-  if () re 2.0
+  el    re 2.0
 }
-bar : () -> I32 { // not error since both values are converted via the same I32 
+bar : () -> I32 { // not error since both values are converted via the same I32
   if () re 1.0
-  if () re 2.0
+  el    re 2.0
 }
 baz : () -> (x:I32; y:I32) { // not error
   if () re (1, 2)
-  if () re (x=3, y=4)
+  el    re (x=3, y=4)
 }
 zap : () -> (x:I32; y:I32) { // error since the second returned value have to swap 3 and 4
   if () re (1, 2)
-  if () re (y=3, x=4)
+  el    re (y=3, x=4)
 }
 ```
 
-- [ ] Function types 
+- [ ] Function types
 ```irid
 // Both are function types
 (@I32) -> I32
@@ -260,7 +242,7 @@ if 3 do br 4
 if 5 br 6
 ```
 
-- [ ] Packages 
+- [ ] Packages
 ```irid
 package Vec, Str
 
@@ -270,3 +252,44 @@ str_from_vec:(v: Vec) -> Str {
 ```
 
 - [ ] Prefix Join  `a = [2]\0\1\2`
+
+- [ ] Linear types
+```irid
+ptr = malloc(100) // ptr is pointer to dynamic memory #1 with size 100
+free(ptr)         // dynamic memory #1 that is freed
+ptr@              // compile-time error, memory #1 is freed
+```
+
+```irid
+ptra = malloc(100)       // ptra is a pointer to dynamic memory #1 with size 100
+ptrb = ptra              // ptrb is a pointer to dynamic memory #1
+if () do ptra = malloc(200) // ptra is a pointer to dynamic memory #2 with size 200
+free(ptra)               // dynamic memory #1 or dynamic memory #2 is freed
+free(ptrb)               // error, memory #1 may have been freed
+```
+
+```irid
+ptra = malloc(100)       // ptra is a pointer to dynamic memory #1 with size 100
+ptrb = ptra              // ptrb is a pointer to dynamic memory #1
+if () do {
+  ptra = malloc(200)     // ptra is a pointer to dynamic memory #2 with size 200
+  free(ptra)             // memory #2 is freed
+}
+free(ptrb)               // memory #1 is freed
+```
+
+- [ ] Python-like identation based if/while blocks, that are not lexical scopes
+```irid
+if () do
+  a = 1
+el
+  a = 3
+a // 1\3
+```
+
+- [ ] Declarations can be used out-of-order.
+```irid
+A : (xy:Vec2)
+b = B(1; 2)
+B : (x:I32; y:I32)
+```
