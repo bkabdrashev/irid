@@ -641,24 +641,24 @@ Funs irgen_ast(Arena* arena, Ast ast) {
       add(irgen.irid_stack, irid);
     } break;
     case Ast_Kind_dot_leave: {
-      Irid two = pop(irgen.irid_stack);
-      Irid one = pop(irgen.irid_stack);
-      Ir* ir = &get(irgen.ir_stack, two);
-      if (ir->kind == Ir_Kind_int) {
-        ir->kind = Ir_Kind_position_offset;
-        ir->position.at = ir->i64;
-        ir->position.of = one;
-        ir->kind = Ir_Kind_position_offset;
-        Irid irid = ir_push_unary(Ir_Kind_load, two);
+      Irid rhs = pop(irgen.irid_stack);
+      Irid lhs = pop(irgen.irid_stack);
+      Ir* rhs_ir = &get(irgen.ir_stack, rhs);
+      if (rhs_ir->kind == Ir_Kind_int) {
+        rhs_ir->kind = Ir_Kind_position_offset;
+        rhs_ir->position.at = rhs_ir->i64;
+        rhs_ir->position.of = lhs;
+        rhs_ir->kind = Ir_Kind_position_offset;
+        Irid irid = ir_push_unary(Ir_Kind_load, rhs);
         add(irgen.irid_stack, irid);
       }
-      else if (ir->kind == Ir_Kind_load) {
-        Ir* ir_ptr = &get(irgen.ir_stack, ir->unary);
+      else if (rhs_ir->kind == Ir_Kind_load) {
+        Ir* ir_ptr = &get(irgen.ir_stack, rhs_ir->unary);
         if (ir_ptr->kind == Ir_Kind_var) {
           ir_ptr->kind = Ir_Kind_name_offset;
           ir_ptr->name.at = ir_ptr->istr;
-          ir_ptr->name.of = one;
-          add(irgen.irid_stack, two);
+          ir_ptr->name.of = lhs;
+          add(irgen.irid_stack, rhs);
         }
         else {
           assert(0);
@@ -798,8 +798,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a=(x=1)", "");
+  test("a.x", "");
 }
 
 #undef test
-

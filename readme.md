@@ -10,9 +10,19 @@ a = ((U32, U32), U64) // implicit [2]([2]\U32\U64)
 
 - [ ] Values that could be assign only to certain type. Example: type bool, values: false/true. Need to think syntax/semantics of it.
 
-- [ ] `a = [2]I32` is implicitly `a = @I32 and (len : 2)`
+- [ ] Flexible arrays
 ```irid
-(I32, I32) implicit this -> (@this as @I32) and (len : 2)
+arr = [2]I32(2, 3) // stores (len:2) and @(2, 3)
+fo i in arr.len do
+  arr[i] = 1
+```
+
+- [ ] Custom header
+```irid
+arr = (cap: 4; len=2) and @(I32, I32, I32, I32)
+fo i in arr.len do
+  arr[i] = i
+arr[arr.len++] = 0
 ```
 
 - [ ] `foo : (a=1) -> a; foo(a:1)`

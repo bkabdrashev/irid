@@ -1412,11 +1412,15 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void sem_test(void) {
 /*
 TODO:
-Different pointer to records representation.
-Maybe having interned types is not that important.
-a = (x=1; y=3)
-a.x = 2 // sucks to create new (x=2; y=3) type here
-        // better just update .x only of (x=2,y=3)
+  r = (x=1; y=3)
+  if ... do
+    r.x = 2
+    r.y = 4
+  r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
+///////////////////
+  r = (x=1; y=3)
+  if ... do r = (x=2; y=4)
+  r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 */
   test("a=(x=1; y=3); b=@a; b@.x = 2", "");
 }
