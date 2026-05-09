@@ -633,8 +633,8 @@ Funs irgen_ast(Arena* arena, Ast ast) {
       Irid irid = ir_push_unary(Ir_Kind_load, var);
       add(irgen.irid_stack, irid);
     } break;
-    case Ast_Kind_ptr_leave: 
-    case Ast_Kind_load_leave: 
+    case Ast_Kind_ptr_leave:
+    case Ast_Kind_load_leave:
     case Ast_Kind_neg_leave: {
       Irid one = pop(irgen.irid_stack);
       Irid irid = ir_push_unary((Ir_Kind)node.kind, one);
@@ -668,11 +668,11 @@ Funs irgen_ast(Arena* arena, Ast ast) {
         assert(0);
       }
     } break;
-    case Ast_Kind_join_leave: 
-    case Ast_Kind_mul_leave: 
-    case Ast_Kind_eq_leave:  case Ast_Kind_ne_leave: 
-    case Ast_Kind_le_leave:  case Ast_Kind_lt_leave: 
-    case Ast_Kind_ge_leave:  case Ast_Kind_gt_leave: 
+    case Ast_Kind_join_leave:
+    case Ast_Kind_mul_leave:
+    case Ast_Kind_eq_leave:  case Ast_Kind_ne_leave:
+    case Ast_Kind_le_leave:  case Ast_Kind_lt_leave:
+    case Ast_Kind_ge_leave:  case Ast_Kind_gt_leave:
     case Ast_Kind_add_leave: {
       Irid two = pop(irgen.irid_stack);
       Irid one = pop(irgen.irid_stack);

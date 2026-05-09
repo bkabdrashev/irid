@@ -108,7 +108,7 @@ typedef struct {
   C8* top;
   Umi   capacity;
   I8    alignment;
-} Arena; 
+} Arena;
 
 Arena arena_init(Umi capacity) {
   Arena arena = {};
@@ -203,7 +203,7 @@ struct Hash_Set {
 };
 
 Hash_Set hash_set_init(Arena* arena, Umi capacity) {
-  Hash_Set set = {}; 
+  Hash_Set set = {};
   set.cap  = 2*power_of_2_up(capacity);
   set.len  = 0;
   set.keys = arena_push_zero(arena, sizeof(I32)*set.cap);
@@ -212,7 +212,7 @@ Hash_Set hash_set_init(Arena* arena, Umi capacity) {
 }
 
 Hash_Set hash_set_copy(Arena* arena, Hash_Set set) {
-  Hash_Set new_set = {}; 
+  Hash_Set new_set = {};
   I32 size = sizeof(I32)*set.cap;
   new_set.cap  = set.cap;
   new_set.len  = set.len;
@@ -241,7 +241,7 @@ B8 hash_set_put(Hash_Set* set, I32 key) {
 }
 
 Hash_Set hash_set_join(Arena* arena, Hash_Set* one, Hash_Set* two) {
-  Hash_Set new_set = hash_set_init(arena, one->len + two->len); 
+  Hash_Set new_set = hash_set_init(arena, one->len + two->len);
   for (I32 i = 0; i < one->len; i++) {
     hash_set_put(&new_set, one->list[i]);
   }
@@ -287,7 +287,7 @@ struct Hash_Map {
 };
 
 Hash_Map hash_map_init(Arena* arena, Umi capacity) {
-  Hash_Map map = {}; 
+  Hash_Map map = {};
   map.cap  = 2*power_of_2_up(capacity);
   map.len  = 0;
   map.keys = arena_push_zero(arena, sizeof(I32)*map.cap);
@@ -297,7 +297,7 @@ Hash_Map hash_map_init(Arena* arena, Umi capacity) {
 }
 
 Hash_Map hash_map_copy(Arena* arena, Hash_Map map) {
-  Hash_Map new_map = {}; 
+  Hash_Map new_map = {};
   I32 size = sizeof(I32)*new_map.cap;
   new_map.cap  = map.cap;
   new_map.len  = map.len;
@@ -378,7 +378,7 @@ struct Dense_Map {
 };
 
 Dense_Map dense_map_init(Arena* arena, Umi capacity) {
-  Dense_Map map = {}; 
+  Dense_Map map = {};
   map.base   = arena_push_zero(arena, sizeof(I32)*capacity);
   return map;
 }

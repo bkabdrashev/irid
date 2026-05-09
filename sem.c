@@ -102,7 +102,7 @@ typedef struct Sem_Tasks Sem_Tasks;
 struct Sem_Tasks {
   Hash_Map* out_vars;
   Typeid* typeids;
-  Varid*  varids; 
+  Varid*  varids;
   I32     length;
 };
 
@@ -1272,7 +1272,7 @@ void string_builder_push_type(String_Builder* sb, Typeid typeid) {
         string_builder_push_cstr(sb, "@");
         string_builder_push_istr(sb, cell.varid);
       } break;
-      default: 
+      default:
         string_builder_push_cstr(sb, "<ptr deadbeef>");
       break;
       }
@@ -1410,8 +1410,15 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+/*
+TODO:
+Different pointer to records representation.
+Maybe having interned types is not that important.
+a = (x=1; y=3)
+a.x = 2 // sucks to create new (x=2; y=3) type here
+        // better just update .x only of (x=2,y=3)
+*/
   test("a=(x=1; y=3); b=@a; b@.x = 2", "");
 }
 
 #undef test
-

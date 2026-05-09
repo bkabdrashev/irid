@@ -183,7 +183,7 @@ B8 test_str(Cstr one, Cstr two) {
     return false;
   }
   for (Umi u = 0; u < o; u++) {
-    if (one[u] != two[u]) {          
+    if (one[u] != two[u]) {
       printf("Test error '%c' vs '%c' at %zu:\n%s\nvs\n%s\n", one[u], two[u], u, one, two);
       return false;
     }

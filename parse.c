@@ -161,7 +161,7 @@ typedef struct {
       Astid leave;
     } unary;
   };
-} Ast_Node; 
+} Ast_Node;
 
 typedef struct {
   Ast_Node* base;
