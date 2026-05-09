@@ -109,6 +109,24 @@ foo(3) // 4
 foo(1\3) // 2\4
 ```
 
+- [ ] dynamic pattern matching
+```irid
+foo : (1 -> 2) and (3 -> 4)
+1 match foo
+```
+
+- [ ] static assignment pattern resolution
+```irid
+(x:1; y) and (x:2; z) = 1, 2
+y // 2
+z // undefined
+```
+
+- [ ] dynamic assignment pattern resolution
+```irid
+1, 2 match (x:1; y) and (x:2; z)
+```
+
 - [ ] Narrow a name for that scope
 ```irid
 Vec2 : (x:I32; y:I32)
