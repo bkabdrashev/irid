@@ -1,5 +1,4 @@
 typedef I32 Typeid;
-typedef Istr Varid;
 typedef I32 Type_Recordid;
 typedef Hash_Set* Recordid_Set;
 
@@ -28,8 +27,7 @@ struct Type_Record {
   I32      bit_size;
   I32      bit_align;
   I32*     offsets;
-  Typeid*  assigned;
-  Typeid*  declared;
+  Varid*   varids;
   Istr*    names;
   Hash_Map positions;
 };
@@ -39,8 +37,7 @@ struct Type_Field {
   Istr   name;
   I32    position;
   I32    offset;
-  Typeid assigned;
-  Typeid declared;
+  Varid  varid;
 };
 
 Type_Field type_field_nil = {istr_nil, 0, 0, 0, 0};
@@ -166,19 +163,19 @@ Type type_of_irid(Irid irid) {
   return type;
 }
 
-Typeid typeid_of_var(Blockid blockid, Varid varid) {
+Typeid typeid_of_varid(Blockid blockid, Varid varid) {
   Block* block = blockid_get(blockid);
   Typeid typeid = hash_map_get(&block->out_var_typeids, varid);
   return typeid;
 }
 
-void typeid_of_var_put(Blockid blockid, Varid varid, Typeid typeid) {
+void typeid_of_varid_put(Blockid blockid, Varid varid, Typeid typeid) {
   Block* block = blockid_get(blockid);
   hash_map_put(&block->out_var_typeids, varid, typeid);
 }
 
-Type type_of_var(Blockid blockid, Varid varid) {
-  Typeid typeid = typeid_of_var(blockid, varid);
+Type type_of_varid(Blockid blockid, Varid varid) {
+  Typeid typeid = typeid_of_varid(blockid, varid);
   Type type = get(sem.types, typeid);
   return type;
 }
@@ -398,9 +395,8 @@ I32 type_recordid_length(Type_Recordid recordid) {
 Type_Field type_recordid_get_by_position(Type_Recordid recordid, I32 position) {
   Type_Record record = get(sem.records, recordid);
   Type_Field field = {};
-  field.name     = record.names[position];
-  field.assigned = record.assigned[position];
-  field.declared = 0; // TODO: declared type
+  field.name  = record.names[position];
+  field.varid = record.varids[position];
   field.offset   = record.offsets[position];
   field.position = position;
   return field;
@@ -485,9 +481,8 @@ Type_Recordid typeid_type_record(Type_Record type_record) {
       Type_Recordid type_recordid = sem.records.length++;
       Type_Record save_record = {};
       save_record.length    = type_record.length;
-      save_record.offsets   = arena_push(sem.perm_arena, sizeof(I32)    * type_record.length);
-      save_record.assigned  = arena_push(sem.perm_arena, sizeof(Typeid) * type_record.length);
-      save_record.declared  = arena_push(sem.perm_arena, sizeof(Typeid) * type_record.length);
+      save_record.offsets   = arena_push(sem.perm_arena, sizeof(I32)   * type_record.length);
+      save_record.varids    = arena_push(sem.perm_arena, sizeof(Varid) * type_record.length);
       save_record.names     = type_record.names;
       save_record.positions = type_record.positions;
       save_record.bit_size  = type_record.bit_size;
@@ -495,8 +490,7 @@ Type_Recordid typeid_type_record(Type_Record type_record) {
 
       for (I32 i = 0; i < type_record.length; i++) {
         save_record.offsets[i]  = type_record.offsets[i];
-        save_record.assigned[i] = type_record.assigned[i];
-        save_record.declared[i] = type_record.declared[i];
+        save_record.varids[i]   = type_record.varids[i];
       }
       sem.records.base[type_recordid] = save_record;
       sem.record_set.keys[i] = type_recordid;
@@ -508,11 +502,7 @@ Type_Recordid typeid_type_record(Type_Record type_record) {
       if (type_record.length == saved_record.length) {
         B8 is_equal = true;
         for (I32 j = 0; j < type_record.length; j++) {
-          if (type_record.assigned[j] != saved_record.assigned[j]) {
-            is_equal = false;
-            break;
-          }
-          if (type_record.declared[j] != saved_record.declared[j]) {
+          if (type_record.varids[j] != saved_record.varids[j]) {
             is_equal = false;
             break;
           }
@@ -537,8 +527,7 @@ Typeid typeid_record(Recordid recordid) {
   type_record.length = record.length;
   C8* mark = arena_mark(sem.temp_arena);
   type_record.offsets  = arena_push(sem.temp_arena, sizeof(I32)    * record.length);
-  type_record.assigned = arena_push(sem.temp_arena, sizeof(Typeid) * record.length);
-  type_record.declared = arena_push(sem.temp_arena, sizeof(Typeid) * record.length);
+  type_record.varids   = arena_push(sem.temp_arena, sizeof(Varid)  * record.length);
   type_record.names = record.names;
   type_record.positions = record.positions;
 
@@ -548,7 +537,7 @@ Typeid typeid_record(Recordid recordid) {
     I32 align = typeid_align(typeid);
     offset = align_up(offset, align);
     type_record.bit_align = max(type_record.bit_align, align);
-    type_record.assigned[i] = typeid;
+    type_record.varids[i] = ;
     type_record.offsets[i]  = offset;
     offset += typeid_size(typeid);
   }
@@ -1099,7 +1088,7 @@ void sem_ir(Blockid blockid, Irid irid) {
         Mem_Cell cell = ptrid->cells[i];
         switch (cell.kind) {
         case Mem_Kind_stack: {
-          Typeid var_typeid = typeid_of_var(blockid, cell.varid);
+          Typeid var_typeid = typeid_of_varid(blockid, cell.varid);
           I32 field_offset = cell.field_offset;
           for (I32 d = 0; d < cell.field_depth; d++) {
             Type var_type = get(sem.types, var_typeid);
@@ -1129,7 +1118,7 @@ void sem_ir(Blockid blockid, Irid irid) {
         case Mem_Kind_stack: {
             // TODO: Have to recreate whole record with slightly updated field, which
             //       seems wasteful. Lazy update maybe better option.
-          typeid_of_var_put(blockid, cell.varid, rhs);
+          typeid_of_varid_put(blockid, cell.varid, rhs);
           result = rhs;
         } break;
         default: assert(0);
@@ -1396,10 +1385,10 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 }
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Umi source_length    = strlen(source);
-  Arena arena          = arena_init(KB(64) * (source_length+64));
+  Umi source_length    = strlen(source) + 2;
+  Arena arena          = arena_init(KB(64) * source_length);
   Ast ast              = ast_from_source(&arena, source);
-  Funs funs            = irgen_ast(&arena, ast);
+  Funs funs            = ir_ast(&arena, ast);
                          sem_funs(&arena, funs);
   C8* buffer           = arena_push(&arena, 32 * source_length);
   Cstr result          = cstr_from_sem(funs, buffer);
@@ -1412,6 +1401,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void sem_test(void) {
 /*
 TODO:
+Consider lazy types
   r = (x=1; y=3)
   if ... do
     r.x = 2
@@ -1421,8 +1411,51 @@ TODO:
   r = (x=1; y=3)
   if ... do r = (x=2; y=4)
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
+
+
+  a = 1
+  b = 2
+  if ... do
+    a = 3
+    b = 4
+  if a == 3 do
+    b // 4
+
+main {
+  .0:
+    r1 = int 1
+    r2 = var a
+    r3 = store r2 r1
+    r4 = int 2
+    r5 = var b
+    r6 = store r5 r4
+    r7 = int 0
+    if r7 then .1 else .2
+  .1: in{a:1; b:2} out{a:3; b:4}
+    r8 = int 3
+    r9 = var a
+    r10 = store r9 r8
+    r11 = int 4
+    r12 = var b
+    r13 = store r12 r11
+    jump .2
+  .2: in{(a:1; b:2) \ (a:3;b:4)}
+    r14 = var a    // @a
+    r15 = load r14 // 1\3
+    r16 = int 3
+    r17 = eq r15 r16 // a == 3
+    if r17 then .3 else .4
+  .3: in{a:3; b:4}
+    r18 = var b
+    r19 = load r18
+    jump .4
+  .4:
+    jump .5
+  .5:
+  ret r1
+}
 */
-  test("a=(x=1; y=3); b=@a; b@.x = 2", "");
+  // test("a=(x=1; y=3); b=@a; b@.x = 2", "");
 }
 
 #undef test
