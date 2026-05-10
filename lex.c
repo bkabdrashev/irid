@@ -57,19 +57,30 @@ Tokens lex_source(Arena* arena, Cstr source) {
   while (*lexer.stream) {
     Token token = {0};
     switch (*lexer.stream) {
-    case '\v' :
     case ' ':
       lexer.stream++;
-      lexer.indent += 1;
     continue;
     case '\t':
       lexer.stream++;
-      lexer.indent += 8;
     continue;
     case '\n': case '\r':
       lexer.indent = 0;
-      lexer.stream++;
       lexer.wasnewline = true;
+      while (true) {
+        lexer.stream++;
+        if (*lexer.stream == '\n' || *lexer.stream == '\r') {
+          lexer.indent = 0;
+        }
+        else if (*lexer.stream == ' ') {
+          lexer.indent += 1;
+        }
+        else if (*lexer.stream == '\t') {
+          lexer.indent += 8;
+        }
+        else {
+          break;
+        }
+      }
     continue;
     case '0': case '1': case '2': case '3': case '4':
     case '5': case '6': case '7': case '8': case '9': {

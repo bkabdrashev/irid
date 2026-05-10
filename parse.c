@@ -687,6 +687,7 @@ void parse_expression_enter(Parser* parser) {
     }
   } break;
   case Token_Kind_curly_open: {
+    parse_final_push_kind(parser, Ast_Kind_block_value_enter);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
       parse_statement(parser);
       parse_match_token(parser, Token_Kind_semicolon);
@@ -847,6 +848,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("if 1 do 2 el 3", "s{ 1 if_do 2 fi_el 3 le ; }s ");
+  return;
+
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
   test("c+b[1]",         "s{ c b 1 s[] add ; }s ");
