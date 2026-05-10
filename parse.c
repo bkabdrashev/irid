@@ -736,6 +736,16 @@ Astid parse_convert_to_pattern(Parser* parser, Astid astid) {
   return astid-1;
 }
 
+void parse_indented_block(Parser* parser, I16 indent) {
+  while (true) {
+    parse_statement(parser);
+    Token next_token = get(parser->tokens, parser->tok);
+    if (next_token.indent <= indent) {
+      break;
+    }
+  }
+}
+
 void parse_statement(Parser* parser) {
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
@@ -753,10 +763,11 @@ void parse_statement(Parser* parser) {
     parse_final_push_kind(parser, Ast_Kind_if_split);
 
     parse_expect_token(parser, Token_Kind_do);
-    parse_statement(parser);
+    parse_indented_block(parser, token.indent);
     if (parse_match_token(parser, Token_Kind_else)) {
       parse_final_push_kind(parser, Ast_Kind_if_leave_else_enter);
-      parse_statement(parser);
+      Token else_token = get(parser->tokens, parser->tok-1);
+      parse_indented_block(parser, else_token.indent);
       parse_final_push_kind(parser, Ast_Kind_else_leave);
     }
     else {
@@ -767,7 +778,7 @@ void parse_statement(Parser* parser) {
     parse_expression(parser);
     parse_final_push_kind(parser, Ast_Kind_while_split);
     parse_expect_token(parser, Token_Kind_do);
-    parse_statement(parser);
+    parse_indented_block(parser, token.indent);
     parse_final_push_kind(parser, Ast_Kind_while_leave);
   } break;
   // case Token_Kind_for:

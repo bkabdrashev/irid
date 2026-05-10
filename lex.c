@@ -6,6 +6,7 @@ typedef enum {
 typedef struct {
   Token_Kind kind;
   Token_Flag flag;
+  I16 indent;
   union {
     I64  i64;
     U64  value;
@@ -22,6 +23,7 @@ typedef struct {
   Cstr source;
   Cstr stream;
   B8   wasnewline;
+  I16  indent;
 } Lexer;
 
 void tokens_push(Tokens* tokens, Token item) {
@@ -49,15 +51,23 @@ Tokens lex_source(Arena* arena, Cstr source) {
   lexer.source = source;
   lexer.stream = source;
   lexer.wasnewline = true;
-  tokens_push(&slice_token, (Token){Token_Kind_source_enter, 0, {0}});
+  lexer.indent = 0;
+  tokens_push(&slice_token, (Token){Token_Kind_source_enter, 0, 0, {0}});
 
   while (*lexer.stream) {
     Token token = {0};
     switch (*lexer.stream) {
-    case ' ': case '\t': case '\v' :
+    case '\v' :
+    case ' ':
       lexer.stream++;
+      lexer.indent += 1;
     continue;
-    case '\n': case '\r': 
+    case '\t':
+      lexer.stream++;
+      lexer.indent += 8;
+    continue;
+    case '\n': case '\r':
+      lexer.indent = 0;
       lexer.stream++;
       lexer.wasnewline = true;
     continue;
@@ -220,6 +230,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
       Token* top = tokens_top(&slice_token);
       top->flag |= Token_Flag_willnewline;
     }
+    token.indent = lexer.indent;
 
     // NOTE: checks whether rhs should be disabled
     lexer.wasnewline = false;
@@ -353,5 +364,3 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
   Cstr str = string_builder_end(&sb);
   return str;
 }
-
-
