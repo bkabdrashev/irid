@@ -174,12 +174,6 @@ struct Fun_Stack {
   I32   length;
 };
 
-typedef struct Scope_Stack Scope_Stack;
-struct Scope_Stack {
-  Hash_Map* base;
-  I32       length;
-};
-
 typedef struct Irgen Irgen;
 struct Irgen {
   Ast     ast;
