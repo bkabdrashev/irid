@@ -8,8 +8,8 @@ typedef struct {
   Token_Flag flag;
   I16 indent;
   union {
+    U64  bits;
     I64  i64;
-    U64  value;
     Istr istr;
   };
 } Token;

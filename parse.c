@@ -134,8 +134,17 @@ struct Scope_Stack {
   I32 length;
 };
 
+typedef struct Ast Ast;
+struct Ast {
+  I32 length;
+  Ast_Node* base[];
+};
+
 typedef struct {
-  Ast final;
+  Arena* perm_arena;
+  Arena* temp_arena;
+
+  Ast* final;
 
   Scopes scopes;
   Scope_Stack scope_stack;
@@ -226,15 +235,6 @@ B8 parse_expect_token(Parser* parser, Token_Kind kind) {
   return false;
 }
 
-void parse_print(Parser* parser, Cstr cstr) {
-  printf("%s\n", cstr);
-  printf("ast final: ");
-  ast_print(parser->arena, parser->final);
-  printf("ast stack: ");
-  ast_print(parser->arena, parser->stack);
-  printf("\n");
-}
-
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat);
 Ast_Node* parse_statement(Parser* parser);
 
@@ -256,7 +256,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     if (precedence > precedence_to_beat) {
       I32 right_precedence = parse_right_precedence(kind);
       Ast_Node* rhs = parse_new_expression(parser, right_precedence);
-      node = arena_push(parser->arena, sizeof(Ast_Node));
+      node = arena_push(parser->perm_arena, sizeof(Ast_Node));
       node->kind = kind;
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
@@ -271,7 +271,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     if (precedence > precedence_to_beat) {
       Ast_Node* rhs = parse_new_expression(parser, 0);
       parse_expect_token(parser, Token_Kind_brace_close);
-      node = arena_push(parser->arena, sizeof(Ast_Node));
+      node = arena_push(parser->perm_arena, sizeof(Ast_Node));
       node->kind = kind;
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
@@ -281,7 +281,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     Ast_Kind kind = Ast_Kind_load;
     I32 precedence = parse_left_precedence(kind);
     if (precedence > precedence_to_beat) {
-      node = arena_push(parser->arena, sizeof(Ast_Node));
+      node = arena_push(parser->perm_arena, sizeof(Ast_Node));
       node->kind = kind;
       node->unary = lhs;
     }
@@ -294,7 +294,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       if (precedence > precedence_to_beat) {
         I32 right_precedence = parse_right_precedence(kind);
         Ast_Node* rhs = parse_new_expression(parser, right_precedence);
-        node = arena_push(parser->arena, sizeof(Ast_Node));
+        node = arena_push(parser->perm_arena, sizeof(Ast_Node));
         node->kind = kind;
         node->binary.lhs = lhs;
         node->binary.rhs = rhs;
@@ -315,13 +315,15 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     Ast_Kind kind = Ast_Flag_unary | (((Ast_Kind)token.kind+1) & 0xff);
     I32 precedence = parse_right_precedence(kind);
     Ast_Node* unary = parse_new_expression(parser, precedence);
-    node = arena_push(parser->arena, sizeof(Ast_Node));
+    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
     node->kind = kind;
     node->unary = unary;
   } break;
   case Token_Kind_int: case Token_Kind_name: {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
-    Ast_Node node = { .kind = kind, .bits = token.value };
+    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+    node->kind = kind;
+    node->bits = token.bits;
     // parse_final_push(parser, node);
   } break;
   case Token_Kind_if: {
@@ -346,6 +348,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     parser->tok--;
   break;
   }
+  return node;
 }
 
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat) {
@@ -365,12 +368,9 @@ void parse_indented_block(Parser* parser, I16 indent) {
 }
 
 Ast_Node* parse_statement(Parser* parser) {
+  Ast_Node* node;
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
-  case Token_Kind_source_enter: {
-    // parse_final_push_kind(parser, Ast_Kind_source_enter);
-    // parse_final_push_kind(parser, Ast_Kind_source_leave);
-  } break;
   case Token_Kind_if: {
     assert(0);
   } break;
@@ -394,7 +394,7 @@ Ast_Node* parse_statement(Parser* parser) {
   } break;
   default: {
     parser->tok--;
-    Ast_Node* node = parse_new_expression(parser, 0);
+    node = parse_new_expression(parser, 0);
     if (parse_match_token(parser, Token_Kind_equal)) {
       assert(0);
     }
@@ -403,30 +403,35 @@ Ast_Node* parse_statement(Parser* parser) {
     }
   }
   }
-}
-
-Ast_Node* parse_tokens(Arena* arena, Tokens tokens) {
-  Parser parser = {0};
-  parser.arena  = arena;
-  parser.tokens = tokens;
-  parser.tok    = 0;
-  while (!parse_match_token(&parser, Token_Kind_source_leave)) {
-    Ast_Node* node = parse_statement(&parser);
-    parse_match_token(&parser, Token_Kind_semicolon);
-  }
   return node;
 }
 
-Ast ast_from_source(Arena* arena, Cstr source) {
-  Tokens tokens  = lex_source(arena, source);
-  Ast ast        = parse_tokens(arena, tokens);
-  return ast;
+Ast* parse_tokens(Arena* perm_arena, Tokens tokens) {
+  Arena temp_arena = arena_init(KB(4) * perm_arena->capacity);
+  Parser parser = {0};
+  parser.perm_arena = perm_arena;
+  parser.temp_arena = &temp_arena;
+  Ast* temp_ast = arena_push_zero(&temp_arena, sizeof(Ast));
+  parser.tokens = tokens;
+  parser.tok    = 1;
+  while (!parse_match_token(&parser, Token_Kind_source_leave)) {
+    Ast_Node* node = parse_statement(&parser);
+    parse_match_token(&parser, Token_Kind_semicolon);
+    temp_ast->base[temp_ast->length++] = node;
+  }
+  I32 final_length = sizeof(Ast) + temp_ast->length * sizeof(Ast_Node);
+  parser.final = arena_push(perm_arena, final_length);
+  memcpy(parser.final, temp_ast, final_length);
+  return parser.final;
 }
 
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Arena arena = arena_init(KB(4) * strlen(source));
-  Ast ast = ast_from_source(&arena, source);
-  Cstr result = cstr_from_ast(&arena, ast);
+  I32 source_length = strlen(source) + 2;
+  Arena arena   = arena_init(KB(4) * source_length);
+  Tokens tokens = lex_source(&arena, source);
+  Ast* ast      = parse_tokens(&arena, tokens);
+  C8* buffer    = arena_push(&arena, 4*source_length);
+  Cstr result   = cstr_from_ast(buffer, ast->base[0]);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
 }
@@ -434,7 +439,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("1",              "s{ 1 ; }s ");
+  test("1",              "1");
   return;
 
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
