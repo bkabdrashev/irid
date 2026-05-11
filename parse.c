@@ -151,7 +151,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, op_cstr);
     string_builder_push_ast_node(sb, node->unary);
   } break;
-  case Ast_Kind_add:
+  case Ast_Kind_add: case Ast_Kind_sub:
+  case Ast_Kind_eq: case Ast_Kind_ne:
+  case Ast_Kind_lt: case Ast_Kind_le:
+  case Ast_Kind_gt: case Ast_Kind_ge:
   case Ast_Kind_mul: {
     string_builder_push_cstr(sb, "(");
     string_builder_push_ast_node(sb, node->binary.lhs);
