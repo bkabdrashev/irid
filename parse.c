@@ -47,7 +47,30 @@ typedef enum Ast_Kind {
   Ast_Kind_call,
 } Ast_Kind;
 
+typedef struct {
+  I32* base;
+  I32 length;
+} I32s;
+
+typedef struct Scopes Scopes;
+struct Scopes {
+  Hash_Map* base;
+  I32 length;
+};
+
+typedef struct Scope_Stack Scope_Stack;
+struct Scope_Stack {
+  Hash_Map** base;
+  I32 length;
+};
+
 typedef struct Ast_Node Ast_Node;
+typedef struct Ast Ast;
+struct Ast {
+  I32 length;
+  Ast_Node* base[];
+};
+
 struct Ast_Node {
   Ast_Kind kind;
   union {
@@ -59,6 +82,7 @@ struct Ast_Node {
       Ast_Node* rhs;
     } binary;
     Ast_Node* unary;
+    Ast* list;
   };
 };
 
@@ -68,10 +92,10 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_none:         result = "none"; break;
   case Ast_Kind_name:         result = "name"; break;
   case Ast_Kind_int:          result = "int"; break;
-  case Ast_Kind_add:          result = "add"; break;
+  case Ast_Kind_add:          result = "+"; break;
   case Ast_Kind_sub:          result = "sub"; break;
-  case Ast_Kind_mul:          result = "mul"; break;
-  case Ast_Kind_neg:          result = "neg"; break;
+  case Ast_Kind_mul:          result = "*"; break;
+  case Ast_Kind_neg:          result = "-"; break;
   case Ast_Kind_pos:          result = "pos"; break;
   case Ast_Kind_ptr:          result = "ptr"; break;
   case Ast_Kind_load:         result = "load"; break;
@@ -99,46 +123,54 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   return result;
 }
 
-Cstr cstr_from_ast(C8* buffer, Ast_Node* node) {
-  String_Builder sb = string_builder_begin(buffer);
+void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   switch (node->kind) {
   case Ast_Kind_none: {
     Cstr cstr = cstr_from_ast_kind(node->kind);
-    string_builder_push_cstr(&sb, cstr);
+    string_builder_push_cstr(sb, cstr);
   } break;
   case Ast_Kind_name:
-    string_builder_push_istr(&sb, node->istr);
+    string_builder_push_istr(sb, node->istr);
   break;
   case Ast_Kind_int:
-    string_builder_push_i64(&sb, node->i64);
+    string_builder_push_i64(sb, node->i64);
   break;
+  case Ast_Kind_record:
+    string_builder_push_cstr(sb, "(");
+    for (I32 i = 0; i < node->list->length; i++) {
+      string_builder_push_ast_node(sb, node->list->base[i]);
+      string_builder_push_cstr(sb, ";");
+      if (i+1 < node->list->length) {
+        string_builder_push_cstr(sb, " ");
+      }
+    }
+    string_builder_push_cstr(sb, ")");
+  break;
+  case Ast_Kind_neg: {
+    Cstr op_cstr = cstr_from_ast_kind(node->kind);
+    string_builder_push_cstr(sb, op_cstr);
+    string_builder_push_ast_node(sb, node->unary);
+  } break;
+  case Ast_Kind_add:
+  case Ast_Kind_mul: {
+    string_builder_push_cstr(sb, "(");
+    string_builder_push_ast_node(sb, node->binary.lhs);
+    Cstr op_cstr = cstr_from_ast_kind(node->kind);
+    string_builder_push_cstr(sb, " ");
+    string_builder_push_cstr(sb, op_cstr);
+    string_builder_push_cstr(sb, " ");
+    string_builder_push_ast_node(sb, node->binary.rhs);
+    string_builder_push_cstr(sb, ")");
+  } break;
   }
+}
+
+Cstr cstr_from_ast(C8* buffer, Ast_Node* node) {
+  String_Builder sb = string_builder_begin(buffer);
+  string_builder_push_ast_node(&sb, node);
   Cstr result = string_builder_end(&sb);
   return result;
 }
-
-typedef struct {
-  I32* base;
-  I32 length;
-} I32s;
-
-typedef struct Scopes Scopes;
-struct Scopes {
-  Hash_Map* base;
-  I32 length;
-};
-
-typedef struct Scope_Stack Scope_Stack;
-struct Scope_Stack {
-  Hash_Map** base;
-  I32 length;
-};
-
-typedef struct Ast Ast;
-struct Ast {
-  I32 length;
-  Ast_Node* base[];
-};
 
 typedef struct {
   Arena* perm_arena;
@@ -240,69 +272,104 @@ Ast_Node* parse_statement(Parser* parser);
 
 Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to_beat) {
   Ast_Node* node = lhs;
-  Token token = parser->tokens.base[parser->tok++];
-  switch (token.kind) {
-  case Token_Kind_bang_equal:
-  case Token_Kind_equal_equal:
-  case Token_Kind_less_equal:
-  case Token_Kind_less:
-  case Token_Kind_greater_equal:
-  case Token_Kind_greater:
-  case Token_Kind_backslash:
-  case Token_Kind_plus: case Token_Kind_minus:
-  case Token_Kind_star: case Token_Kind_dot: {
-    Ast_Kind kind = (Ast_Kind)token.kind | Ast_Flag_binary;
-    I32 precedence = parse_left_precedence(kind);
-    if (precedence > precedence_to_beat) {
-      I32 right_precedence = parse_right_precedence(kind);
-      Ast_Node* rhs = parse_new_expression(parser, right_precedence);
-      node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-      node->kind = kind;
-      node->binary.lhs = lhs;
-      node->binary.rhs = rhs;
-    }
-  } break;
-  case Token_Kind_arrow: {
-    assert(0);
-  } break;
-  case Token_Kind_brace_open: {
-    Ast_Kind kind = Ast_Kind_subscript;
-    I32 precedence = parse_left_precedence(kind);
-    if (precedence > precedence_to_beat) {
-      Ast_Node* rhs = parse_new_expression(parser, 0);
-      parse_expect_token(parser, Token_Kind_brace_close);
-      node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-      node->kind = kind;
-      node->binary.lhs = lhs;
-      node->binary.rhs = rhs;
-    }
-  } break;
-  case Token_Kind_at: {
-    Ast_Kind kind = Ast_Kind_load;
-    I32 precedence = parse_left_precedence(kind);
-    if (precedence > precedence_to_beat) {
-      node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-      node->kind = kind;
-      node->unary = lhs;
-    }
-  } break;
-  default: {
-    parser->tok--;
-    if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
-      Ast_Kind kind = Ast_Kind_call;
+  while (true) {
+    Token token = parser->tokens.base[parser->tok++];
+    switch (token.kind) {
+    case Token_Kind_bang_equal:
+    case Token_Kind_equal_equal:
+    case Token_Kind_less_equal:
+    case Token_Kind_less:
+    case Token_Kind_greater_equal:
+    case Token_Kind_greater:
+    case Token_Kind_backslash:
+    case Token_Kind_plus: case Token_Kind_minus:
+    case Token_Kind_star: case Token_Kind_dot: {
+      Ast_Kind kind = (Ast_Kind)token.kind;
       I32 precedence = parse_left_precedence(kind);
       if (precedence > precedence_to_beat) {
         I32 right_precedence = parse_right_precedence(kind);
         Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+        lhs = node;
         node = arena_push(parser->perm_arena, sizeof(Ast_Node));
         node->kind = kind;
         node->binary.lhs = lhs;
         node->binary.rhs = rhs;
       }
+      else {
+        parser->tok--;
+        return node;
+      }
+    } break;
+    case Token_Kind_arrow: {
+      assert(0);
+    } break;
+    case Token_Kind_brace_open: {
+      Ast_Kind kind = Ast_Kind_subscript;
+      I32 precedence = parse_left_precedence(kind);
+      if (precedence > precedence_to_beat) {
+        Ast_Node* rhs = parse_new_expression(parser, 0);
+        parse_expect_token(parser, Token_Kind_brace_close);
+        lhs = node;
+        node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+        node->kind = kind;
+        node->binary.lhs = lhs;
+        node->binary.rhs = rhs;
+      }
+      else {
+        parser->tok--;
+        return node;
+      }
+    } break;
+    case Token_Kind_at: {
+      Ast_Kind kind = Ast_Kind_load;
+      I32 precedence = parse_left_precedence(kind);
+      if (precedence > precedence_to_beat) {
+        lhs = node;
+        node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+        node->kind = kind;
+        node->unary = lhs;
+      }
+      else {
+        parser->tok--;
+        return node;
+      }
+    } break;
+    default: {
+      parser->tok--;
+      if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
+        Ast_Kind kind = Ast_Kind_call;
+        I32 precedence = parse_left_precedence(kind);
+        if (precedence > precedence_to_beat) {
+          I32 right_precedence = parse_right_precedence(kind);
+          Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+          lhs = node;
+          node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+          node->kind = kind;
+          node->binary.lhs = lhs;
+          node->binary.rhs = rhs;
+        }
+        else {
+          return node;
+        }
+      }
+      else {
+        return node;
+      }
+    } break;
     }
-  } break;
   }
-  return node;
+}
+
+Ast* parse_list_temp(Parser* parser) {
+  return arena_push_zero(parser->temp_arena, sizeof(Ast));
+}
+
+Ast* parse_list_perm(Parser* parser, Ast* temp_list) {
+  I32 size = sizeof(Ast) + temp_list->length * sizeof(Ast_Node);
+  Ast* perm_list = arena_push(parser->perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(parser->temp_arena, (C8*)temp_list);
+  return perm_list;
 }
 
 Ast_Node* parse_prefix_or_atom(Parser* parser) {
@@ -312,7 +379,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
   case Token_Kind_at_prefix:    case Token_Kind_at: {
-    Ast_Kind kind = Ast_Flag_unary | (((Ast_Kind)token.kind+1) & 0xff);
+    Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind);
     Ast_Node* unary = parse_new_expression(parser, precedence);
     node = arena_push(parser->perm_arena, sizeof(Ast_Node));
@@ -333,8 +400,25 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     assert(0);
   } break;
   case Token_Kind_paren_open: {
-    assert(0);
+    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+    node->kind = Ast_Kind_record;
+    node->list = parse_list_temp(parser);
+    B8 is_record = false;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
+      Ast_Node* exp = parse_new_expression(parser, 0);
+      if (parse_match_token(parser, Token_Kind_semicolon)) {
+        is_record = true;
+      }
+      else if (parse_match_token(parser, Token_Kind_equal)) {
+        is_record = true;
+      }
+      node->list->base[node->list->length++] = exp;
+    }
+    if (!is_record && node->list->length == 1) {
+      node = node->list->base[0];
+    }
+    else {
+      node->list = parse_list_perm(parser, node->list);
     }
   } break;
   case Token_Kind_curly_open: {
@@ -411,17 +495,16 @@ Ast* parse_tokens(Arena* perm_arena, Tokens tokens) {
   Parser parser = {0};
   parser.perm_arena = perm_arena;
   parser.temp_arena = &temp_arena;
-  Ast* temp_ast = arena_push_zero(&temp_arena, sizeof(Ast));
   parser.tokens = tokens;
   parser.tok    = 1;
+  Ast* temp_ast = parse_list_temp(&parser);
   while (!parse_match_token(&parser, Token_Kind_source_leave)) {
     Ast_Node* node = parse_statement(&parser);
     parse_match_token(&parser, Token_Kind_semicolon);
     temp_ast->base[temp_ast->length++] = node;
   }
-  I32 final_length = sizeof(Ast) + temp_ast->length * sizeof(Ast_Node);
-  parser.final = arena_push(perm_arena, final_length);
-  memcpy(parser.final, temp_ast, final_length);
+  parser.final = parse_list_perm(&parser, temp_ast);
+  arena_free(&temp_arena);
   return parser.final;
 }
 
@@ -439,8 +522,22 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("1",              "1");
+  test("(1)",            "1");
+  test("(1\n)",          "1");
+  test("(1;)",           "(1;)");
+  test("(1\n 2)",        "(1; 2;)");
   return;
+  test("(1; 2)",         "s{ r( 1 ; 2 ; )r ; }s ");
+  test("(1; 2;)",        "s{ r( 1 ; 2 ; )r ; }s ");
+  test("(1,2;3)",        "s{ r( t( 1 , 2 , )t ; 3 ; )r ; }s ");
+
+  test("1*2+3",        "((1 * 2) + 3)");
+  test("1 + -2",         "(1 + -2)");
+  test("1 + 2*3",        "(1 + (2 * 3))");
+  test("1",              "1");
+  test("1 + 2",          "(1 + 2)");
+  test("1*(2+3)",        "(1 * (2 + 3))");
+  test("(1 + 2)*3",      "((1 + 2) * 3)");
 
   test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
   test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
@@ -450,16 +547,8 @@ void parse_test(void) {
   test("b[1+2]",         "s{ b 1 2 add s[] ; }s ");
   test("b[1]",           "s{ b 1 s[] ; }s ");
   test("b[1+2]*c",       "s{ b 1 2 add s[] c mul ; }s ");
-  test("1 + 2*3",        "s{ 1 2 3 mul add ; }s ");
-  test("1",              "s{ 1 ; }s ");
-  test("1 + 2",          "s{ 1 2 add ; }s ");
-  test("1 + -2",         "s{ 1 2 neg add ; }s ");
-  test("1*(2+3)",        "s{ 1 2 3 add mul ; }s ");
-  test("(1 + 2)*3",      "s{ 1 2 add 3 mul ; }s ");
   test("foo 1\n2",       "s{ foo 1 call ; 2 ; }s ");
   test("bar 1 2",        "s{ bar 1 call 2 call ; }s ");
-  test("(1)",            "s{ 1 ; }s ");
-  test("(1\n)",          "s{ 1 ; }s ");
   test("1,2",            "s{ t( 1 , 2 , )t ; }s ");
   test("a = 1",          "s{ 1 a = ; }s ");
   test("a = 1 + 2",      "s{ 1 2 add a = ; }s ");
@@ -469,11 +558,6 @@ void parse_test(void) {
   test("a+b = 1-2",      "s{ 1 2 sub a b add = ; }s ");
   test("a, (b,c), d = 1", "s{ 1 a( a , a( b , c , )a , d , )a = ; }s ");
   test("b + (c,d), e = 1", "s{ 1 a( b t( c , d , )t add , e , )a = ; }s ");
-  test("(1;)",           "s{ r( 1 ; )r ; }s ");
-  test("(1\n 2)",        "s{ r( 1 ; 2 ; )r ; }s ");
-  test("(1; 2)",         "s{ r( 1 ; 2 ; )r ; }s ");
-  test("(1; 2;)",        "s{ r( 1 ; 2 ; )r ; }s ");
-  test("(1,2;3)",        "s{ r( t( 1 , 2 , )t ; 3 ; )r ; }s ");
   test("wh 1 do 2",      "s{ 1 wh_do 2 hw ; }s ");
   test("(if 1 do 2)",      "s{ 1 if_do 2 vi ; }s ");
   test("(if 1 do 2 el 3)", "s{ 1 if_do 2 fi_el 3 ve ; }s ");
