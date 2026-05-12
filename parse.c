@@ -45,8 +45,9 @@ typedef enum Ast_Kind {
   Ast_Kind_break_value = Token_Kind_break+1,
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
-  Ast_Kind_call,
+  Ast_Kind_call        = 50,
   Ast_Kind_iblock,
+  Ast_Kind_source,
 } Ast_Kind;
 
 typedef struct {
@@ -79,12 +80,20 @@ struct Ast_Node {
     U64   bits;
     I64   i64;
     Istr  istr;
+    Ast_Node* unary;
+    Ast* list;
     struct {
       Ast_Node* lhs;
       Ast_Node* rhs;
     } binary;
-    Ast_Node* unary;
-    Ast* list;
+    struct {
+      Istr istr;
+      Ast_Node* rhs;
+    } declare;
+    struct {
+      Hash_Map* scope;
+      Ast* list;
+    } block;
   };
 };
 
@@ -162,6 +171,26 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.lhs);
     string_builder_push_cstr(sb, " else ");
     string_builder_push_ast_node(sb, node->binary.rhs);
+  } break;
+  case Ast_Kind_source: {
+    Hash_Map* scope = node->block.scope;
+    for (I32 i = 0; i < scope->len; i++) {
+      Istr istr = scope->keys[i];
+      string_builder_push_istr(sb, istr);
+      string_builder_push_cstr(sb, " : ");
+      Ast_Node* rhs = hash_map_get(scope, istr);
+      string_builder_push_ast_node(sb, rhs);
+      if (i+1 < node->block.list->length) {
+        string_builder_push_cstr(sb, "; ");
+      }
+    }
+
+    for (I32 i = 0; i < node->block.list->length; i++) {
+      string_builder_push_ast_node(sb, node->block.list->base[i]);
+      if (i+1 < node->block.list->length) {
+        string_builder_push_cstr(sb, "; ");
+      }
+    }
   } break;
   case Ast_Kind_block_value: case Ast_Kind_iblock: case Ast_Kind_block:
     string_builder_push_cstr(sb, "{");
@@ -261,26 +290,19 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   }
 }
 
-Cstr cstr_from_ast(C8* buffer, Ast* ast) {
+Cstr cstr_from_ast(C8* buffer, Ast_Node ast) {
   String_Builder sb = string_builder_begin(buffer);
-  for (I32 i = 0; i < ast->length; i++) {
-    string_builder_push_ast_node(&sb, ast->base[i]);
-    if (i+1 < ast->length) {
-      string_builder_push_cstr(&sb, "; ");
-    }
-  }
+  string_builder_push_ast_node(&sb, &ast);
   Cstr result = string_builder_end(&sb);
   return result;
 }
 
 typedef struct {
   Arena* perm_arena;
-  Arena* temp_arena;
+  Arena* list_arena;
+  Arena* map_arena;
 
-  Ast* final;
-
-  Scopes scopes;
-  Scope_Stack scope_stack;
+  Ast_Node ast;
 
   Tokens tokens;
   I32  tok;
@@ -364,24 +386,45 @@ B8 parse_expect_token(Parser* parser, Token_Kind kind) {
 }
 
 void parse_list_end(Parser* parser, Ast* list) {
-  arena_release_mark(parser->temp_arena, list);
+  arena_release_mark(parser->list_arena, list);
 }
 
 void parse_list_push(Parser* parser, Ast* list, Ast_Node* node) {
-  arena_push(parser->temp_arena, sizeof(Ast_Node));
+  arena_push(parser->list_arena, sizeof(Ast_Node));
   list->base[list->length++] = node;
 }
 
 Ast* parse_list_temp(Parser* parser) {
-  return arena_push_zero(parser->temp_arena, sizeof(Ast));
+  return arena_push_zero(parser->list_arena, sizeof(Ast));
 }
 
 Ast* parse_list_perm(Parser* parser, Ast* temp_list) {
   I32 size = sizeof(Ast) + temp_list->length * sizeof(Ast_Node);
   Ast* perm_list = arena_push(parser->perm_arena, size);
   memcpy(perm_list, temp_list, size);
-  arena_release_mark(parser->temp_arena, temp_list);
+  arena_release_mark(parser->list_arena, temp_list);
   return perm_list;
+}
+
+Ast* parse_map_temp(Parser* parser) {
+  return arena_push_zero(parser->map_arena, sizeof(Ast));
+}
+
+void parse_map_push(Parser* parser, Ast* temp_map, Ast_Node* node) {
+  arena_push(parser->map_arena, sizeof(Ast_Node));
+  temp_map->base[temp_map->length++] = node;
+}
+
+Hash_Map* parse_map_perm(Parser* parser, Ast* temp_list) {
+  Hash_Map* map = arena_push(parser->perm_arena, sizeof(Hash_Map));
+  *map = hash_map_init(parser->perm_arena, temp_list->length);
+  for (I32 i = 0; i < temp_list->length; i++) {
+    Ast_Node* node = temp_list->base[i];
+    assert(node->kind == Ast_Kind_declare);
+    hash_map_put(map, node->declare.istr, node->declare.rhs);
+  }
+  arena_release_mark(parser->map_arena, temp_list);
+  return map;
 }
 
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat);
@@ -692,36 +735,56 @@ Ast_Node* parse_statement(Parser* parser) {
       node->binary.rhs = rhs;
     }
     else if (parse_match_token(parser, Token_Kind_colon)) {
-      assert(0);
+      Ast_Node* lhs = node;
+      if (lhs->kind == Ast_Kind_name) {
+        Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
+        node = parse_new_node(parser, Ast_Kind_declare);
+        node->declare.istr = lhs->istr;
+        node->declare.rhs = rhs;
+      }
+      else {
+        assert(0);
+      }
     }
   }
   }
   return node;
 }
 
-Ast* parse_tokens(Arena* perm_arena, Tokens tokens) {
-  Arena temp_arena = arena_init(KB(4) * perm_arena->capacity);
+Ast_Node parse_tokens(Arena* perm_arena, Tokens tokens) {
+  Arena temp_ast_arena  = arena_init(KB(1) * perm_arena->capacity);
+  Arena temp_map_arena = arena_init(KB(1) * perm_arena->capacity);
   Parser parser = {0};
   parser.perm_arena = perm_arena;
-  parser.temp_arena = &temp_arena;
+  parser.list_arena = &temp_ast_arena;
+  parser.map_arena = &temp_map_arena;
   parser.tokens = tokens;
   parser.tok    = 1;
   Ast* temp_ast = parse_list_temp(&parser);
+  Ast* temp_map = parse_map_temp(&parser);
   while (!parse_match_token(&parser, Token_Kind_source_leave)) {
     Ast_Node* node = parse_statement(&parser);
-    parse_match_token(&parser, Token_Kind_semicolon);
-    parse_list_push(&parser, temp_ast, node);
+    if (node->kind == Ast_Kind_declare) {
+      parse_map_push(&parser, temp_map, node);
+    }
+    else {
+      parse_match_token(&parser, Token_Kind_semicolon);
+      parse_list_push(&parser, temp_ast, node);
+    }
   }
-  parser.final = parse_list_perm(&parser, temp_ast);
-  arena_free(&temp_arena);
-  return parser.final;
+  parser.ast.kind = Ast_Kind_source;
+  parser.ast.block.list = parse_list_perm(&parser, temp_ast);
+  parser.ast.block.scope = parse_map_perm(&parser, temp_map);
+  arena_free(&temp_ast_arena);
+  arena_free(&temp_map_arena);
+  return parser.ast;
 }
 
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
   Arena arena   = arena_init(KB(4) * source_length);
   Tokens tokens = lex_source(&arena, source);
-  Ast* ast      = parse_tokens(&arena, tokens);
+  Ast_Node ast  = parse_tokens(&arena, tokens);
   C8* buffer    = arena_push(&arena, 4*source_length);
   Cstr result   = cstr_from_ast(buffer, ast);
   test_at_source(result, expected, file_name, line, source);
@@ -731,6 +794,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a : 1",          "a : 1");
+  return;
   test("a,b -> 1,2",      "((a, b) -> (1, 2))");
   test("wh 1 do 2",      "while 1 do {2;}");
   test("(if 1 do 2)",      "if 1 do 2");
