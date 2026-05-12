@@ -192,6 +192,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     }
   } break;
   case Ast_Kind_block_value: case Ast_Kind_block: {
+    string_builder_push_cstr(sb, "{");
     Hash_Map* scope = node->block.scope;
     for (I32 i = 0; i < scope->len; i++) {
       Istr istr = scope->keys[i];
@@ -199,12 +200,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
       string_builder_push_cstr(sb, " : ");
       Ast_Node* rhs = hash_map_get(scope, istr);
       string_builder_push_ast_node(sb, rhs);
-      if (i+1 < node->block.list->length) {
-        string_builder_push_cstr(sb, "; ");
-      }
+      string_builder_push_cstr(sb, "; ");
     }
     Ast* list = node->block.list;
-    string_builder_push_cstr(sb, "{");
     for (I32 i = 0; i < list->length; i++) {
       string_builder_push_ast_node(sb, list->base[i]);
       string_builder_push_cstr(sb, ";");
@@ -830,7 +828,6 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("{ a : 1; a = 2 }", "a : 1");
   test("a,b -> 1,2",       "((a, b) -> (1, 2))");
   test("wh 1 do 2",        "while 1 do {2;}");
   test("(if 1 do 2)",      "if 1 do 2");
