@@ -110,7 +110,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_block:        result = "block"; break;
   case Ast_Kind_block_value:  result = "block_value"; break;
   case Ast_Kind_tuple:        result = "tuple"; break;
-  case Ast_Kind_fun:          result = "fun"; break;
+  case Ast_Kind_fun:          result = "->"; break;
   case Ast_Kind_if:           result = "if"; break;
   case Ast_Kind_if_value:     result = "if_value"; break;
   case Ast_Kind_else:         result = "else"; break;
@@ -217,6 +217,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_gt: case Ast_Kind_ge:
   case Ast_Kind_mul:
   case Ast_Kind_dot:
+  case Ast_Kind_fun:
   case Ast_Kind_join:
     {
     string_builder_push_cstr(sb, "(");
@@ -407,7 +408,7 @@ Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
   return node;
 }
 
-Ast_Node* parse_tuple_or_expression(Parser* parser) {
+Ast_Node* parse_tuple_or_exp(Parser* parser) {
   Ast_Node* node;
   Ast* temp = parse_list_temp(parser);
   do {
@@ -419,11 +420,24 @@ Ast_Node* parse_tuple_or_expression(Parser* parser) {
     parse_list_end(parser, temp);
   }
   else {
-    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-    node->kind = Ast_Kind_tuple;
+    node = parse_new_node(parser, Ast_Kind_tuple);
     node->list = parse_list_perm(parser, temp);
   }
   return node;
+}
+
+Ast_Node* parse_fun_tuple_or_exp(Parser* parser) {
+  Ast_Node* lhs = parse_tuple_or_exp(parser);
+  if (parse_match_token(parser, Token_Kind_arrow)) {
+    Ast_Node* rhs = parse_tuple_or_exp(parser);
+    Ast_Node* fun = parse_new_node(parser, Ast_Kind_fun);
+    fun->binary.lhs = lhs;
+    fun->binary.rhs = rhs;
+    return fun;
+  }
+  else {
+    return lhs;
+  }
 }
 
 Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to_beat) {
@@ -450,9 +464,6 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
         parser->tok--;
         return node;
       }
-    } break;
-    case Token_Kind_arrow: {
-      assert(0);
     } break;
     case Token_Kind_brace_open: {
       Ast_Kind kind = Ast_Kind_subscript;
@@ -499,6 +510,21 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
   }
 }
 
+Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
+  Ast* temp = parse_list_temp(parser);
+  while (true) {
+    Ast_Node* node = parse_statement(parser);
+    parse_list_push(parser, temp, node);
+    Token next_token = get(parser->tokens, parser->tok);
+    if (next_token.indent <= indent) {
+      break;
+    }
+  }
+  Ast_Node* node = parse_new_node(parser, Ast_Kind_iblock);
+  node->list = parse_list_perm(parser, temp);
+  return node;
+}
+
 Ast_Node* parse_prefix_or_atom(Parser* parser) {
   Ast_Node* node;
   Token token = parser->tokens.base[parser->tok++];
@@ -521,16 +547,33 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     // parse_final_push(parser, node);
   } break;
   case Token_Kind_if: {
-    assert(0);
+    Ast_Node* cond = parse_new_expression(parser, 0);
+    parse_expect_token(parser, Token_Kind_do);
+    Ast_Node* if_value = parse_new_expression(parser, 0);
+    node = parse_new_node(parser, Ast_Kind_if_value);
+    node->binary.lhs = cond;
+    node->binary.rhs = if_value;
+    if (parse_match_token(parser, Token_Kind_else)) {
+      Ast_Node* if_node = node;
+      Ast_Node* else_value = parse_new_expression(parser, 0);
+      node = parse_new_node(parser, Ast_Kind_else_value);
+      node->binary.lhs = if_node;
+      node->binary.rhs = else_value;
+    }
   } break;
   case Token_Kind_while: {
-    assert(0);
+    Ast_Node* cond = parse_new_expression(parser, 0);
+    parse_expect_token(parser, Token_Kind_do);
+    Ast_Node* while_block = parse_indented_block(parser, token.indent);
+    node = parse_new_node(parser, Ast_Kind_while);
+    node->binary.lhs = cond;
+    node->binary.rhs = while_block;
   } break;
   case Token_Kind_paren_open: {
     Ast* temp = parse_list_temp(parser);
     B8 is_record = false;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
-      Ast_Node* exp = parse_tuple_or_expression(parser);
+      Ast_Node* exp = parse_fun_tuple_or_exp(parser);
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         is_record = true;
       }
@@ -582,21 +625,6 @@ Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat) {
   return node;
 }
 
-Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
-  Ast* temp = parse_list_temp(parser);
-  while (true) {
-    Ast_Node* node = parse_statement(parser);
-    parse_list_push(parser, temp, node);
-    Token next_token = get(parser->tokens, parser->tok);
-    if (next_token.indent <= indent) {
-      break;
-    }
-  }
-  Ast_Node* node = parse_new_node(parser, Ast_Kind_iblock);
-  node->list = parse_list_perm(parser, temp);
-  return node;
-}
-
 Ast_Node* parse_statement(Parser* parser) {
   Ast_Node* node;
   Token token = parser->tokens.base[parser->tok++];
@@ -617,7 +645,12 @@ Ast_Node* parse_statement(Parser* parser) {
     }
   } break;
   case Token_Kind_while: {
-    assert(0);
+    Ast_Node* cond = parse_new_expression(parser, 0);
+    parse_expect_token(parser, Token_Kind_do);
+    Ast_Node* while_block = parse_indented_block(parser, token.indent);
+    node = parse_new_node(parser, Ast_Kind_while);
+    node->binary.lhs = cond;
+    node->binary.rhs = while_block;
   } break;
   // case Token_Kind_for:
   case Token_Kind_return: {
@@ -650,10 +683,10 @@ Ast_Node* parse_statement(Parser* parser) {
   } break;
   default: {
     parser->tok--;
-    node = parse_tuple_or_expression(parser);
+    node = parse_fun_tuple_or_exp(parser);
     if (parse_match_token(parser, Token_Kind_equal)) {
       Ast_Node* lhs = node;
-      Ast_Node* rhs = parse_tuple_or_expression(parser);
+      Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
       node = parse_new_node(parser, Ast_Kind_assign);
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
@@ -698,8 +731,13 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a,b -> 1,2",      "((a, b) -> (1, 2))");
+  test("wh 1 do 2",      "while 1 do {2;}");
+  test("(if 1 do 2)",      "if 1 do 2");
+  test("(if 1 do 2 el 3)", "if 1 do 2 else 3");
   test("if 1 do 2",      "if 1 do {2;}");
   test("if 1 do 2 el 3", "if 1 do {2;} else {3;}");
+
   test("{1; 2}",         "{1; 2;}");
 
   test("c+b[1]",         "(c + b[1])");
@@ -741,11 +779,6 @@ void parse_test(void) {
 
   test("re 1",        "return 1");
   test("re\n1",        "return; 1");
-  return;
-
-  test("wh 1 do 2",      "s{ 1 wh_do 2 hw ; }s ");
-  test("(if 1 do 2)",      "s{ 1 if_do 2 vi ; }s ");
-  test("(if 1 do 2 el 3)", "s{ 1 if_do 2 fi_el 3 ve ; }s ");
   return;
 }
 
