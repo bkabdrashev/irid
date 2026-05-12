@@ -93,18 +93,18 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_name:         result = "name"; break;
   case Ast_Kind_int:          result = "int"; break;
   case Ast_Kind_add:          result = "+"; break;
-  case Ast_Kind_sub:          result = "sub"; break;
+  case Ast_Kind_sub:          result = "-"; break;
   case Ast_Kind_mul:          result = "*"; break;
   case Ast_Kind_neg:          result = "-"; break;
-  case Ast_Kind_pos:          result = "pos"; break;
-  case Ast_Kind_ptr:          result = "ptr"; break;
-  case Ast_Kind_load:         result = "load"; break;
-  case Ast_Kind_dot:          result = "dot"; break;
-  case Ast_Kind_join:         result = "join"; break;
+  case Ast_Kind_pos:          result = "+"; break;
+  case Ast_Kind_ptr:          result = "@"; break;
+  case Ast_Kind_load:         result = "@"; break;
+  case Ast_Kind_dot:          result = "."; break;
+  case Ast_Kind_join:         result = "\\"; break;
   case Ast_Kind_subscript:    result = "s[]"; break;
   case Ast_Kind_array:        result = "a[]"; break;
   case Ast_Kind_assign:       result = "="; break;
-  case Ast_Kind_declare:      result = "declare"; break;
+  case Ast_Kind_declare:      result = ":"; break;
   case Ast_Kind_block:        result = "block"; break;
   case Ast_Kind_block_value:  result = "block_value"; break;
   case Ast_Kind_source:       result = "source"; break;
@@ -156,17 +156,26 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     }
     string_builder_push_cstr(sb, ")");
   break;
+  case Ast_Kind_ptr:
   case Ast_Kind_pos:
   case Ast_Kind_neg: {
     Cstr op_cstr = cstr_from_ast_kind(node->kind);
     string_builder_push_cstr(sb, op_cstr);
     string_builder_push_ast_node(sb, node->unary);
   } break;
+  case Ast_Kind_load: {
+    Cstr op_cstr = cstr_from_ast_kind(node->kind);
+    string_builder_push_ast_node(sb, node->unary);
+    string_builder_push_cstr(sb, op_cstr);
+  } break;
   case Ast_Kind_add: case Ast_Kind_sub:
   case Ast_Kind_eq: case Ast_Kind_ne:
   case Ast_Kind_lt: case Ast_Kind_le:
   case Ast_Kind_gt: case Ast_Kind_ge:
-  case Ast_Kind_mul: {
+  case Ast_Kind_mul:
+  case Ast_Kind_dot:
+  case Ast_Kind_join:
+    {
     string_builder_push_cstr(sb, "(");
     string_builder_push_ast_node(sb, node->binary.lhs);
     Cstr op_cstr = cstr_from_ast_kind(node->kind);
@@ -198,6 +207,11 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_assign: {
     string_builder_push_ast_node(sb, node->binary.lhs);
     string_builder_push_cstr(sb, " = ");
+    string_builder_push_ast_node(sb, node->binary.rhs);
+  } break;
+  case Ast_Kind_declare: {
+    string_builder_push_ast_node(sb, node->binary.lhs);
+    string_builder_push_cstr(sb, " : ");
     string_builder_push_ast_node(sb, node->binary.rhs);
   } break;
   }
@@ -246,10 +260,10 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:
+  case Ast_Kind_array:
     return 16;
   case Ast_Kind_load:
     return 18;
-  case Ast_Kind_subscript:
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 20;
@@ -273,11 +287,6 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return 11;
   case Ast_Kind_mul:
     return 13;
-  case Ast_Kind_ptr:
-  case Ast_Kind_neg:
-  case Ast_Kind_pos:
-    return 15;
-  case Ast_Kind_array:
   case Ast_Kind_load:
     return 17;
   case Ast_Kind_subscript:
@@ -334,6 +343,23 @@ Ast* parse_list_perm(Parser* parser, Ast* temp_list) {
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat);
 Ast_Node* parse_statement(Parser* parser);
 
+Ast_Node* parse_new_suffix(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
+  Ast_Node* node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+  node->kind = kind;
+  node->unary = lhs;
+  return node;
+}
+
+Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
+  I32 right_precedence = parse_right_precedence(kind);
+  Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+  Ast_Node* node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+  node->kind = kind;
+  node->binary.lhs = lhs;
+  node->binary.rhs = rhs;
+  return node;
+}
+
 Ast_Node* parse_tuple_or_expression(Parser* parser) {
   Ast_Node* node = arena_push(parser->perm_arena, sizeof(Ast_Node));
   Ast* temp = parse_list_temp(parser);
@@ -369,13 +395,8 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       Ast_Kind kind = (Ast_Kind)token.kind;
       I32 precedence = parse_left_precedence(kind);
       if (precedence > precedence_to_beat) {
-        I32 right_precedence = parse_right_precedence(kind);
-        Ast_Node* rhs = parse_new_expression(parser, right_precedence);
         lhs = node;
-        node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-        node->kind = kind;
-        node->binary.lhs = lhs;
-        node->binary.rhs = rhs;
+        node = parse_new_infix(parser, kind, lhs);
       }
       else {
         parser->tok--;
@@ -389,13 +410,9 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       Ast_Kind kind = Ast_Kind_subscript;
       I32 precedence = parse_left_precedence(kind);
       if (precedence > precedence_to_beat) {
-        Ast_Node* rhs = parse_new_expression(parser, 0);
-        parse_expect_token(parser, Token_Kind_brace_close);
         lhs = node;
-        node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-        node->kind = kind;
-        node->binary.lhs = lhs;
-        node->binary.rhs = rhs;
+        node = parse_new_infix(parser, kind, lhs);
+        parse_expect_token(parser, Token_Kind_brace_close);
       }
       else {
         parser->tok--;
@@ -406,10 +423,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       Ast_Kind kind = Ast_Kind_load;
       I32 precedence = parse_left_precedence(kind);
       if (precedence > precedence_to_beat) {
-        lhs = node;
-        node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-        node->kind = kind;
-        node->unary = lhs;
+        node = parse_new_suffix(parser, kind, lhs);
       }
       else {
         parser->tok--;
@@ -422,13 +436,8 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
         Ast_Kind kind = Ast_Kind_call;
         I32 precedence = parse_left_precedence(kind);
         if (precedence > precedence_to_beat) {
-          I32 right_precedence = parse_right_precedence(kind);
-          Ast_Node* rhs = parse_new_expression(parser, right_precedence);
           lhs = node;
-          node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-          node->kind = kind;
-          node->binary.lhs = lhs;
-          node->binary.rhs = rhs;
+          node = parse_new_infix(parser, kind, lhs);
         }
         else {
           return node;
@@ -605,6 +614,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("c+b[1]",         "(c + b[1])");
   test("(1\n 2)",        "(1; 2;)");
   test("a, (b,c), d = 1", "(a, (b, c), d) = 1");
   test("a = 1",          "a = 1");
@@ -616,7 +626,6 @@ void parse_test(void) {
   test("1,2",            "(1, 2)");
   test("(1,2;3)",        "((1, 2); 3;)");
 
-  test("c+b[1]",         "(c + b[1])");
   test("b[1+2]",         "b[(1 + 2)]");
   test("b[1]",           "b[1]");
   test("b[1+2]*c",       "(b[(1 + 2)] * c)");
