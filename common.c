@@ -137,7 +137,7 @@ void arena_release_all(Arena* arena) {
   arena->top = arena->base;
 }
 
-void arena_release_mark(Arena* arena, C8* mark) {
+void arena_release_mark(Arena* arena, void* mark) {
   arena->top = mark;
 }
 
