@@ -746,7 +746,7 @@ Ast_Node* parse_statement(Parser* parser) {
     Ast* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
       Ast_Node* statement = parse_statement(parser);
-      if (node->kind == Ast_Kind_declare) {
+      if (statement->kind == Ast_Kind_declare) {
         parse_map_push(parser, temp_map, statement);
       }
       else {
