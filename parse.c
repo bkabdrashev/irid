@@ -658,12 +658,12 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     Ast* temp_ast = parse_list_temp(parser);
     Ast* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
-      Ast_Node* node = parse_statement(parser);
-      if (node->kind == Ast_Kind_declare) {
-        parse_map_push(parser, temp_map, node);
+      Ast_Node* statement = parse_statement(parser);
+      if (statement->kind == Ast_Kind_declare) {
+        parse_map_push(parser, temp_map, statement);
       }
       else {
-        parse_list_push(parser, temp_ast, node);
+        parse_list_push(parser, temp_ast, statement);
       }
       parse_match_token(parser, Token_Kind_semicolon);
     }
@@ -745,12 +745,12 @@ Ast_Node* parse_statement(Parser* parser) {
     Ast* temp_ast = parse_list_temp(parser);
     Ast* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
-      Ast_Node* node = parse_statement(parser);
+      Ast_Node* statement = parse_statement(parser);
       if (node->kind == Ast_Kind_declare) {
-        parse_map_push(parser, temp_map, node);
+        parse_map_push(parser, temp_map, statement);
       }
       else {
-        parse_list_push(parser, temp_ast, node);
+        parse_list_push(parser, temp_ast, statement);
       }
       parse_match_token(parser, Token_Kind_semicolon);
     }
