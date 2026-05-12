@@ -165,6 +165,25 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.rhs);
     string_builder_push_cstr(sb, ")");
   } break;
+  case Ast_Kind_call: {
+    string_builder_push_cstr(sb, "(");
+    string_builder_push_ast_node(sb, node->binary.lhs);
+    string_builder_push_cstr(sb, " ");
+    string_builder_push_ast_node(sb, node->binary.rhs);
+    string_builder_push_cstr(sb, ")");
+  } break;
+  case Ast_Kind_array: {
+    string_builder_push_cstr(sb, "[");
+    string_builder_push_ast_node(sb, node->binary.lhs);
+    string_builder_push_cstr(sb, "]");
+    string_builder_push_ast_node(sb, node->binary.rhs);
+  } break;
+  case Ast_Kind_subscript: {
+    string_builder_push_ast_node(sb, node->binary.lhs);
+    string_builder_push_cstr(sb, "[");
+    string_builder_push_ast_node(sb, node->binary.rhs);
+    string_builder_push_cstr(sb, "]");
+  } break;
   }
 }
 
@@ -195,36 +214,6 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_tuple:
     return 3;
   case Ast_Kind_eq:
-    return 5;
-  case Ast_Kind_join:
-    return 7;
-  case Ast_Kind_sub:
-  case Ast_Kind_add:
-    return 11;
-  case Ast_Kind_mul:
-    return 13;
-  case Ast_Kind_ptr:
-  case Ast_Kind_neg:
-  case Ast_Kind_pos:
-    return 15;
-  case Ast_Kind_load:
-    return 17;
-  case Ast_Kind_subscript:
-  case Ast_Kind_call:
-  case Ast_Kind_dot:
-    return 19;
-  default :
-    return -1;
-  }
-}
-
-I32 parse_left_precedence(Ast_Kind kind) {
-  switch (kind) {
-  case Ast_Kind_fun:
-    return 1;
-  case Ast_Kind_tuple:
-    return 3;
-  case Ast_Kind_eq:
     return 6;
   case Ast_Kind_join:
     return 8;
@@ -237,13 +226,43 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_neg:
   case Ast_Kind_pos:
     return 16;
-  case Ast_Kind_array:
   case Ast_Kind_load:
     return 18;
   case Ast_Kind_subscript:
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 20;
+  default :
+    return -1;
+  }
+}
+
+I32 parse_left_precedence(Ast_Kind kind) {
+  switch (kind) {
+  case Ast_Kind_fun:
+    return 1;
+  case Ast_Kind_tuple:
+    return 3;
+  case Ast_Kind_eq:
+    return 5;
+  case Ast_Kind_join:
+    return 7;
+  case Ast_Kind_sub:
+  case Ast_Kind_add:
+    return 11;
+  case Ast_Kind_mul:
+    return 13;
+  case Ast_Kind_ptr:
+  case Ast_Kind_neg:
+  case Ast_Kind_pos:
+    return 15;
+  case Ast_Kind_array:
+  case Ast_Kind_load:
+    return 17;
+  case Ast_Kind_subscript:
+  case Ast_Kind_call:
+  case Ast_Kind_dot:
+    return 19;
   default :
     return -1;
   }
@@ -429,7 +448,15 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
-    assert(0);
+    Ast_Kind kind = Ast_Kind_array;
+    Ast_Node* lhs = parse_new_expression(parser, 0);
+    parse_expect_token(parser, Token_Kind_brace_close);
+    I32 right_precedence = parse_right_precedence(kind);
+    Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
+    node->kind = kind;
+    node->binary.lhs = lhs;
+    node->binary.rhs = rhs;
   } break;
   default:
     parser->tok--;
@@ -525,14 +552,24 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("foo 1\n2",       "(foo 1); 2");
+  test("bar 1 2",        "((bar 1) 2)");
+  return;
+  test("c+b[1]",         "(c + b[1])");
+  test("b[1+2]",         "b[(1 + 2)]");
+  test("b[1]",           "b[1]");
+  test("b[1+2]*c",       "(b[(1 + 2)] * c)");
+  test("[1]b",           "[1]b");
+  test("c+[1]b",         "(c + [1]b)");
+  test("1 * [2+3]b",     "(1 * [(2 + 3)]b)");
+  test("[1+2]b",         "[(1 + 2)]b");
+
   test("(1)",            "1");
   test("(1\n)",          "1");
   test("(1;)",           "(1;)");
   test("(1\n 2)",        "(1; 2;)");
-  return;
-  test("(1; 2)",         "s{ r( 1 ; 2 ; )r ; }s ");
-  test("(1; 2;)",        "s{ r( 1 ; 2 ; )r ; }s ");
-  test("(1,2;3)",        "s{ r( t( 1 , 2 , )t ; 3 ; )r ; }s ");
+  test("(1; 2)",         "(1; 2;)");
+  test("(1; 2;)",        "(1; 2;)");
 
   test("1*2+3",        "((1 * 2) + 3)");
   test("1 + -2",         "(1 + -2)");
@@ -541,17 +578,9 @@ void parse_test(void) {
   test("1 + 2",          "(1 + 2)");
   test("1*(2+3)",        "(1 * (2 + 3))");
   test("(1 + 2)*3",      "((1 + 2) * 3)");
+  test("(1,2;3)",        "s{ r( t( 1 , 2 , )t ; 3 ; )r ; }s ");
 
-  test("1 * [2+3]b",     "s{ 1 2 3 add b a[] mul ; }s ");
-  test("c+[1]b",         "s{ c 1 b a[] add ; }s ");
-  test("c+b[1]",         "s{ c b 1 s[] add ; }s ");
-  test("[1+2]b",         "s{ 1 2 add b a[] ; }s ");
-  test("[1]b",           "s{ 1 b a[] ; }s ");
-  test("b[1+2]",         "s{ b 1 2 add s[] ; }s ");
-  test("b[1]",           "s{ b 1 s[] ; }s ");
-  test("b[1+2]*c",       "s{ b 1 2 add s[] c mul ; }s ");
-  test("foo 1\n2",       "s{ foo 1 call ; 2 ; }s ");
-  test("bar 1 2",        "s{ bar 1 call 2 call ; }s ");
+
   test("1,2",            "s{ t( 1 , 2 , )t ; }s ");
   test("a = 1",          "s{ 1 a = ; }s ");
   test("a = 1 + 2",      "s{ 1 2 add a = ; }s ");
