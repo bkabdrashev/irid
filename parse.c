@@ -180,19 +180,41 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
       string_builder_push_cstr(sb, " : ");
       Ast_Node* rhs = hash_map_get(scope, istr);
       string_builder_push_ast_node(sb, rhs);
-      if (i+1 < node->block.list->length) {
-        string_builder_push_cstr(sb, "; ");
-      }
+      string_builder_push_cstr(sb, "; ");
     }
 
-    for (I32 i = 0; i < node->block.list->length; i++) {
-      string_builder_push_ast_node(sb, node->block.list->base[i]);
-      if (i+1 < node->block.list->length) {
+    Ast* list = node->block.list;
+    for (I32 i = 0; i < list->length; i++) {
+      string_builder_push_ast_node(sb, list->base[i]);
+      if (i+1 < list->length) {
         string_builder_push_cstr(sb, "; ");
       }
     }
   } break;
-  case Ast_Kind_block_value: case Ast_Kind_iblock: case Ast_Kind_block:
+  case Ast_Kind_block_value: case Ast_Kind_block: {
+    Hash_Map* scope = node->block.scope;
+    for (I32 i = 0; i < scope->len; i++) {
+      Istr istr = scope->keys[i];
+      string_builder_push_istr(sb, istr);
+      string_builder_push_cstr(sb, " : ");
+      Ast_Node* rhs = hash_map_get(scope, istr);
+      string_builder_push_ast_node(sb, rhs);
+      if (i+1 < node->block.list->length) {
+        string_builder_push_cstr(sb, "; ");
+      }
+    }
+    Ast* list = node->block.list;
+    string_builder_push_cstr(sb, "{");
+    for (I32 i = 0; i < list->length; i++) {
+      string_builder_push_ast_node(sb, list->base[i]);
+      string_builder_push_cstr(sb, ";");
+      if (i+1 < list->length) {
+        string_builder_push_cstr(sb, " ");
+      }
+    }
+    string_builder_push_cstr(sb, "}");
+  } break;
+  case Ast_Kind_iblock:
     string_builder_push_cstr(sb, "{");
     for (I32 i = 0; i < node->list->length; i++) {
       string_builder_push_ast_node(sb, node->list->base[i]);
@@ -635,14 +657,21 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     }
   } break;
   case Token_Kind_curly_open: {
-    Ast* temp = parse_list_temp(parser);
+    Ast* temp_ast = parse_list_temp(parser);
+    Ast* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
       Ast_Node* node = parse_statement(parser);
+      if (node->kind == Ast_Kind_declare) {
+        parse_map_push(parser, temp_map, node);
+      }
+      else {
+        parse_list_push(parser, temp_ast, node);
+      }
       parse_match_token(parser, Token_Kind_semicolon);
-      parse_list_push(parser, temp, node);
     }
     node = parse_new_node(parser, Ast_Kind_block_value);
-    node->list = parse_list_perm(parser, temp);
+    node->block.list = parse_list_perm(parser, temp_ast);
+    node->block.scope = parse_map_perm(parser, temp_map);
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
@@ -715,14 +744,21 @@ Ast_Node* parse_statement(Parser* parser) {
     }
   } break;
   case Token_Kind_curly_open: {
-    Ast* temp = parse_list_temp(parser);
+    Ast* temp_ast = parse_list_temp(parser);
+    Ast* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
       Ast_Node* node = parse_statement(parser);
+      if (node->kind == Ast_Kind_declare) {
+        parse_map_push(parser, temp_map, node);
+      }
+      else {
+        parse_list_push(parser, temp_ast, node);
+      }
       parse_match_token(parser, Token_Kind_semicolon);
-      parse_list_push(parser, temp, node);
     }
     node = parse_new_node(parser, Ast_Kind_block);
-    node->list = parse_list_perm(parser, temp);
+    node->block.list = parse_list_perm(parser, temp_ast);
+    node->block.scope = parse_map_perm(parser, temp_map);
   } break;
   default: {
     parser->tok--;
@@ -768,9 +804,9 @@ Ast_Node parse_tokens(Arena* perm_arena, Tokens tokens) {
       parse_map_push(&parser, temp_map, node);
     }
     else {
-      parse_match_token(&parser, Token_Kind_semicolon);
       parse_list_push(&parser, temp_ast, node);
     }
+    parse_match_token(&parser, Token_Kind_semicolon);
   }
   parser.ast.kind = Ast_Kind_source;
   parser.ast.block.list = parse_list_perm(&parser, temp_ast);
@@ -794,10 +830,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a : 1",          "a : 1");
-  return;
-  test("a,b -> 1,2",      "((a, b) -> (1, 2))");
-  test("wh 1 do 2",      "while 1 do {2;}");
+  test("{ a : 1; a = 2 }", "a : 1");
+  test("a,b -> 1,2",       "((a, b) -> (1, 2))");
+  test("wh 1 do 2",        "while 1 do {2;}");
   test("(if 1 do 2)",      "if 1 do 2");
   test("(if 1 do 2 el 3)", "if 1 do 2 else 3");
   test("if 1 do 2",      "if 1 do {2;}");
