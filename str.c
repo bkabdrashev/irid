@@ -1,64 +1,28 @@
-typedef enum Token_Kind_Flag {
-  Token_Kind_Flag_prefix   = 1 << 8,
-  Token_Kind_Flag_call_rhs = 1 << 9,
-} Token_Kind_Flag;
-
-typedef enum Token_Kind {
-  Token_Kind_source_leave       = 0,
-  Token_Kind_source_enter       = 1,
-  Token_Kind_name               = 2 | Token_Kind_Flag_call_rhs,
-  Token_Kind_int                = 3 | Token_Kind_Flag_call_rhs,
-  Token_Kind_plus               = 4,
-  Token_Kind_plus_prefix        = 4 | Token_Kind_Flag_prefix,
-  Token_Kind_minus              = 6,
-  Token_Kind_minus_prefix       = 6 | Token_Kind_Flag_prefix,
-  Token_Kind_star               = 8,
-  Token_Kind_at                 = 9,
-  Token_Kind_at_prefix          = 9 | Token_Kind_Flag_prefix,
-  Token_Kind_dot                = 11,
-  Token_Kind_equal              = 13,
-  Token_Kind_colon              = 15,
-  Token_Kind_brace_open         = 17,
-  Token_Kind_brace_prefix_open  = 17 | Token_Kind_Flag_prefix,
-  Token_Kind_brace_close        = 19,
-  Token_Kind_paren_open         = 20 | Token_Kind_Flag_call_rhs,
-  Token_Kind_paren_close        = 22,
-  Token_Kind_curly_open         = 23 | Token_Kind_Flag_call_rhs,
-  Token_Kind_curly_close        = 24,
-  Token_Kind_semicolon          = 25,
-  Token_Kind_comma              = 26,
-  Token_Kind_if                 = 28 | Token_Kind_Flag_call_rhs,
-  Token_Kind_do                 = 30,
-  Token_Kind_else               = 31,
-  Token_Kind_arrow              = 33,
-  Token_Kind_return             = 34,
-  Token_Kind_break              = 36,
-  Token_Kind_while              = 38,
-  Token_Kind_bang_equal         = 40,
-  Token_Kind_equal_equal        = 41,
-  Token_Kind_less_equal         = 42,
-  Token_Kind_less               = 43,
-  Token_Kind_greater_equal      = 44,
-  Token_Kind_greater            = 45,
-  Token_Kind_backslash          = 46,
-} Token_Kind;
+typedef enum String_Kind {
+  String_Kind_none   = 0,
+  String_Kind_name   = 128 | (1 << 9),
+  String_Kind_if     = 129 | (1 << 9),
+  String_Kind_do     = 139,
+  String_Kind_else   = 140,
+  String_Kind_return = 141,
+  String_Kind_break  = 142,
+  String_Kind_while  = 143,
+} String_Kind;
 
 typedef const char* Cstr;
 
 typedef struct Str Str;
 struct Str {
-  C8* base;
-  Umi length;
+  String_Kind kind;
+  I32         length;
+  C8          base[];
 };
-typedef Str* Istr;
+typedef Str* Strid;
 
-typedef struct Internal_Strings Internal_Strings;
-struct Internal_Strings {
-  C8* buffer_top;
-  C8* buffer_bot;
-  Str* strings;
-  Token_Kind* token_kinds;
-  Umi cap;
+typedef struct Internal Internal;
+struct Internal {
+  Arena* arena;
+  Hash_Set set;
 };
 
 typedef struct String_Builder String_Builder;
@@ -67,75 +31,83 @@ struct String_Builder {
   Umi size;
 };
 
-Internal_Strings internal_strings = {0};
-const Istr istr_nil = {0};
-void istr_init(Umi capacity) {
-  capacity = power_of_2_up(capacity);
-  internal_strings.buffer_bot  = xmalloc(capacity);
-  internal_strings.buffer_top  = internal_strings.buffer_bot;
-  internal_strings.strings     = xcalloc(sizeof(Str), capacity);
-  internal_strings.token_kinds = xcalloc(sizeof(Token_Kind), capacity);
-  internal_strings.cap = capacity;
+Internal internal = {0};
+const Strid strid_nil = {0};
+String_Kind token_kind_from_strid(Strid strid) {
+  return strid->kind;
 }
 
-Token_Kind token_kind_from_istr(Istr istr) {
-  I32 offset = istr - internal_strings.strings;
-  return internal_strings.token_kinds[offset];
-}
-
-Cstr cstr_from_istr(Istr istr) {
-  return istr->base;
-}
-
-Umi istr_length(Istr istr) {
-  return istr->length;
-}
-
-Istr istr_from_cstr_token_kind(Cstr cstr, Token_Kind kind) {
-  // TODO: use the hash map ptr -> ptr interface
-  Umi len  = strlen(cstr);
-  Istr istr = hash_bytes(cstr, len);
+Strid strid_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
+  I32 len = strlen(cstr);
+  I32 i = hash_bytes(cstr, len);
   for (;;) {
-    istr &= internal_strings.cap - 1;
-    Str str = internal_strings.strings[istr];
-    if (!str.base) {
-      str.base = internal_strings.buffer_top;
-      str.length = len;
-      memcpy(str.base, str, len + 1);
-      internal_strings.buffer_top += len + 1;
-      internal_strings.strings[istr] = slice;
-      internal_strings.token_kinds[istr] = kind;
-      return istr;
+    i &= internal.set.cap - 1;
+    Strid strid = internal.set.keys[i];
+    if (!strid) {
+      Strid new_strid = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
+      new_strid->length = len;
+      new_strid->kind = kind;
+      for (I32 j = 0; j < len; j++) {
+        new_strid->base[j] = cstr[j];
+      }
+      internal.set.keys[i] = new_strid;
+      return new_strid;
     }
-    else if (str.length == len && strncmp(str.base, str, len) == 0) {
-      return istr;
+    else {
+      if (strid->length == len) {
+        I32 j = 0;
+        for (; j < strid->length; j++) {
+          if (strid->base[j] != cstr[j]) {
+            break;
+          }
+        }
+        if (j == strid->length) return strid;
+      }
     }
-    istr++;
+    i++;
   }
-  return (Istr){0};
 }
 
-Istr istr_from_range(Cstr begin, Cstr end) {
-  Umi len   = end - begin;
-  Istr istr = hash_bytes(begin, len);
+Strid strid_from_range(Cstr begin, Cstr end) {
+  I32 len = end - begin;
+  I32 i = hash_bytes(begin, len);
   for (;;) {
-    istr &= internal_strings.cap - 1;
-    Str slice = internal_strings.strings[istr];
-    if (!slice.base) {
-      slice.base = internal_strings.buffer_top;
-      slice.length = len;
-      memcpy(slice.base, begin, len);
-      slice.base[len] = '\0';
-      internal_strings.buffer_top += len + 1;
-      internal_strings.strings[istr] = slice;
-      internal_strings.token_kinds[istr] = Token_Kind_name;
-      return istr;
+    i &= internal.set.cap - 1;
+    Strid strid = internal.set.keys[i];
+    if (!strid) {
+      Strid new_strid = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
+      new_strid->length = len;
+      new_strid->kind   = String_Kind_name;
+      for (I32 j = 0; j < len; j++) {
+        new_strid->base[j] = begin[j];
+      }
+      internal.set.keys[i] = new_strid;
+      return new_strid;
     }
-    else if (slice.length == len && strncmp(slice.base, begin, len) == 0) {
-      return istr;
+    else {
+      if (strid->length == len) {
+        I32 j = 0;
+        for (; j < strid->length; j++) {
+          if (strid->base[j] != begin[j]) {
+            break;
+          }
+        }
+        if (j == strid->length) return strid;
+      }
     }
-    istr++;
+    i++;
   }
+}
+
+void strid_init(Arena* arena, I32 capacity) {
+  internal.arena = arena;
+  internal.set = hash_set_init(arena, capacity);
+  strid_from_cstr_with_kind("if", String_Kind_if);
+  strid_from_cstr_with_kind("do", String_Kind_do);
+  strid_from_cstr_with_kind("el", String_Kind_else);
+  strid_from_cstr_with_kind("re", String_Kind_return);
+  strid_from_cstr_with_kind("wh", String_Kind_while);
+  strid_from_cstr_with_kind("br", String_Kind_break);
 }
 
 String_Builder string_builder_begin(C8* buffer) {
@@ -162,9 +134,10 @@ void string_builder_push_i64(String_Builder* sb, I64 val) {
   string_builder_push_cstr(sb, line_str);
 }
 
-void string_builder_push_istr(String_Builder* sb, Istr str) {
-  Cstr internal = cstr_from_istr(str);
-  string_builder_push_cstr(sb, internal);
+void string_builder_push_strid(String_Builder* sb, Strid strid) {
+  for (I32 i = 0; i < strid->length; i++) {
+    sb->base[sb->size++] = strid->base[i];
+  }
 }
 
 void string_builder_push_string_builder(String_Builder* sb, String_Builder one) {

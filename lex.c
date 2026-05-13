@@ -3,6 +3,52 @@ typedef enum {
   Token_Flag_willnewline = 1 << 1,
 } Token_Flag;
 
+typedef enum Token_Kind_Flag {
+  Token_Kind_Flag_prefix   = 1 << 8,
+  Token_Kind_Flag_call_rhs = 1 << 9,
+} Token_Kind_Flag;
+
+typedef enum Token_Kind {
+  Token_Kind_source_leave       = 0,
+  Token_Kind_source_enter       = 1,
+  Token_Kind_int                = 3 | Token_Kind_Flag_call_rhs,
+  Token_Kind_plus               = 4,
+  Token_Kind_plus_prefix        = 4 | Token_Kind_Flag_prefix,
+  Token_Kind_minus              = 6,
+  Token_Kind_minus_prefix       = 6 | Token_Kind_Flag_prefix,
+  Token_Kind_star               = 8,
+  Token_Kind_at                 = 9,
+  Token_Kind_at_prefix          = 9 | Token_Kind_Flag_prefix,
+  Token_Kind_dot                = 11,
+  Token_Kind_equal              = 13,
+  Token_Kind_colon              = 15,
+  Token_Kind_brace_open         = 17,
+  Token_Kind_brace_prefix_open  = 17 | Token_Kind_Flag_prefix,
+  Token_Kind_brace_close        = 19,
+  Token_Kind_paren_open         = 20 | Token_Kind_Flag_call_rhs,
+  Token_Kind_paren_close        = 22,
+  Token_Kind_curly_open         = 23 | Token_Kind_Flag_call_rhs,
+  Token_Kind_curly_close        = 24,
+  Token_Kind_semicolon          = 25,
+  Token_Kind_comma              = 26,
+  Token_Kind_arrow              = 33,
+  Token_Kind_bang_equal         = 40,
+  Token_Kind_equal_equal        = 41,
+  Token_Kind_less_equal         = 42,
+  Token_Kind_less               = 43,
+  Token_Kind_greater_equal      = 44,
+  Token_Kind_greater            = 45,
+  Token_Kind_backslash          = 46,
+
+  Token_Kind_name               = String_Kind_name,
+  Token_Kind_if                 = String_Kind_if,
+  Token_Kind_do                 = String_Kind_do,
+  Token_Kind_else               = String_Kind_else,
+  Token_Kind_return             = String_Kind_return,
+  Token_Kind_break              = String_Kind_break,
+  Token_Kind_while              = String_Kind_while,
+} Token_Kind;
+
 typedef struct {
   Token_Kind kind;
   Token_Flag flag;
@@ -10,7 +56,7 @@ typedef struct {
   union {
     U64  bits;
     I64  i64;
-    Istr istr;
+    Strid strid;
   };
 } Token;
 
@@ -145,8 +191,8 @@ Tokens lex_source(Arena* arena, Cstr source) {
       while (isalnum(*lexer.stream)) {
         lexer.stream++;
       }
-      token.istr = istr_from_range(start, lexer.stream);
-      token.kind = token_kind_from_istr(token.istr);
+      token.strid = strid_from_range(start, lexer.stream);
+      token.kind  = (Token_Kind)token.strid->kind;
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
@@ -264,8 +310,7 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
       string_builder_push_cstr(&sb, "enter");
     break;
     case Token_Kind_name: {
-      Cstr str =  cstr_from_istr(token->istr);
-      string_builder_push_cstr(&sb, str);
+      string_builder_push_strid(&sb, token->strid);
     } break;
     case Token_Kind_int:
       string_builder_push_i64(&sb, token->i64);
