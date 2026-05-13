@@ -40,6 +40,10 @@ typedef enum Ir_Kind {
 
 } Ir_Kind;
 
+typedef struct Ir    Ir;
+typedef struct Block Block;
+typedef struct Fun   Fun;
+
 typedef struct Ir_Pair Ir_Pair;
 struct Ir_Pair { Ir* one; Ir* two; };
 
@@ -47,54 +51,46 @@ typedef struct Name_Offset Name_Offset;
 struct Name_Offset { Ir* of; Str* at; };
 
 typedef struct Position_Offset Position_Offset;
-struct Position_Offset { Irid of; I32 at; };
+struct Position_Offset { Ir* of; I32 at; };
 
-typedef struct Ir Ir;
+typedef struct Record Record;
+struct Record {
+  I32      length;
+  Ir**     assigned;
+  Ir**     declared;
+  Str**    names;
+  Hash_Map position_from_name;
+};
+
 struct Ir {
   Ir_Kind kind;
   union {
     I64 i64;
     Varid varid;
-    Recordid recordid;
-    Irid_Pair binary;
-    Irid unary;
+    Record* record;
+    Ir_Pair binary;
+    Ir*     unary;
     Position_Offset position;
     Name_Offset     name;
   };
 };
 
-typedef struct Record Record;
-struct Record {
-  I32      length;
-  Irid*    assigned;
-  Irid*    declared;
-  Strid*    names;
-  Hash_Map positions;
-};
-
 typedef struct Field Field;
 struct Field {
-  Strid name;
+  Str* name;
   I32  position;
-  Irid assigned;
-  Irid declared;
+  Ir*  assigned;
+  Ir*  declared;
 };
-
-typedef struct Irids Irids;
-struct Irids {
-  Irid* base;
-  I32   length;
-};
-
 
 typedef struct Jump Jump;
 struct Jump {
-  Blockid blockid;
+  Block* to_block;
 };
 
 typedef struct Branch Branch;
 struct Branch {
-  Irid cond;
+  Ir*  cond;
   Jump eqz;
   Jump nez;
 };
@@ -105,12 +101,11 @@ typedef enum Block_Kind {
   Block_Kind_branch,
 } Block_Kind;
 
-typedef struct Block Block;
 struct Block {
   Block_Kind kind;
   I32 pred_count;
-  Irid entryid;
-  Irid leaveid;
+  Ir* entryid;
+  Ir* leaveid;
   Hash_Map out_var_typeids;
   Hash_Map in_var_typeids;
   union {
@@ -119,12 +114,11 @@ struct Block {
   };
 };
 
-typedef struct Fun Fun;
 struct Fun {
-  Blockid entryid;
-  Blockid leaveid;
-  Irid    returnid;
-  I32     var_count;
+  Block* entry_block;
+  Block* leave_block;
+  Ir*    return_ir;
+  I32    var_count;
 };
 
 typedef struct Funs Funs;
@@ -139,22 +133,10 @@ struct Blocks {
   I32    length;
 };
 
-typedef struct Blockids Blockids;
-struct Blockids {
-  Blockid* base;
-  I32      length;
-};
-
 typedef struct Records Records;
 struct Records {
   Record* base;
   I32     length;
-};
-
-typedef struct Recordid_Stack Recordid_Stack;
-struct Recordid_Stack {
-  Recordid* base;
-  I32       length;
 };
 
 typedef struct Irs Irs;
@@ -180,191 +162,122 @@ struct Irgen {
   Blocks  blocks;
   Records records;
   Irs     irs;
-  Irid    irid_nil;
+  Ir*     irid_nil;
   Varid   varid_nil;
   Varid   varids;
 
   Fun_Stack      fun_stack;
   Scope_Stack    scope_stack;
-  Irs            ir_stack;
-  Irids          irid_stack;
-  Blocks         block_stack;
-  Recordid_Stack recordid_stack;
-  Blockids       headerids;
 };
 
 Irgen irgen = {};
 
-Irid ir_push_int(I64 i64) {
+Ir* ir_push_int(I64 i64) {
   Ir ir = { Ir_Kind_int, .i64 = i64 };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
+  Ir* new_ir = irgen.irs.base + irgen.irs.length;
+  *new_ir = ir;
+  irgen.irs.length++;
+  return new_ir;
 }
 
-Irid ir_push_var(Varid varid) {
+Ir* ir_push_var(Varid varid) {
   Ir ir = { Ir_Kind_var, .varid = varid };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
+  Ir* new_ir = irgen.irs.base + irgen.irs.length;
+  *new_ir = ir;
+  irgen.irs.length++;
+  return new_ir;
 }
 
-Irid ir_push_unary(Ir_Kind kind, Irid one) {
+Ir* ir_push_unary(Ir_Kind kind, Ir* one) {
   Ir ir = { kind, .unary = one };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
+  Ir* new_ir = irgen.irs.base + irgen.irs.length;
+  *new_ir = ir;
+  irgen.irs.length++;
+  return new_ir;
 }
 
-Irid ir_push_binary(Ir_Kind kind, Irid one, Irid two) {
+Ir* ir_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
   Ir ir = { kind, .binary = { .one = one, .two = two } };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
+  Ir* new_ir = irgen.irs.base + irgen.irs.length;
+  *new_ir = ir;
+  irgen.irs.length++;
+  return new_ir;
 }
 
-Irid ir_push_record(Recordid recordid) {
-  Ir ir = { Ir_Kind_record, .recordid = recordid };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
+Ir* ir_push_record(Record* record) {
+  Ir ir = { Ir_Kind_record, .record = record };
+  Ir* new_ir = irgen.irs.base + irgen.irs.length;
+  *new_ir = ir;
+  irgen.irs.length++;
+  return new_ir;
 }
 
-Irid ir_push_position_offset(Irid record, I32 position) {
+Ir* ir_push_position_offset(Ir* record, I32 position) {
   Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
-  Irid irid = push(irgen.ir_stack, ir);
-  return irid;
+  Ir* new_ir = irgen.irs.base + irgen.irs.length;
+  *new_ir = ir;
+  irgen.irs.length++;
+  return new_ir;
 }
 
-Ir_Kind irid_kind(Irid irid) {
-  Ir_Kind kind = get(irgen.irs, irid).kind;
-  return kind;
+Record* recordid_new(I32 length) {
+  Record* new_record = &new(irgen.records);
+  new_record->length   = length;
+  new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
+  new_record->assigned = arena_push(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->declared = arena_push(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
+  return new_record;
 }
 
-Name_Offset irid_name_offset(Irid irid) {
-  return get(irgen.irs, irid).name;
-}
-
-B8 irid_kind_equal(Irid irid, Ir_Kind kind) {
-  return get(irgen.irs, irid).kind == kind;
-}
-
-Irid_Pair irid_binary(Irid irid) {
-  return get(irgen.irs, irid).binary;
-}
-
-Irid irid_unary(Irid irid) {
-  return get(irgen.irs, irid).unary;
-}
-
-I64 irid_int(Irid irid) {
-  return get(irgen.irs, irid).i64;
-}
-
-Strid irid_istr(Irid irid) {
-  return get(irgen.irs, irid).varid;
-}
-
-Strid irid_recordid(Irid irid) {
-  return get(irgen.irs, irid).recordid;
-}
-
-I32 recordid_length(Recordid recordid) {
-  Record record = get(irgen.records, recordid);
-  return record.length;
-}
-
-Recordid recordid_new(I32 length) {
-  Record record = {};
-  record.length = length;
-  record.names    = arena_push_zero(irgen.perm_arena, length*sizeof(Strid));
-  record.assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Irid));
-  record.declared = arena_push_zero(irgen.perm_arena, length*sizeof(Irid));
-  record.positions = hash_map_init(irgen.perm_arena, length);
-  Recordid recordid = push(irgen.records, record);
-  return recordid;
-}
-
-void recordid_push_assign_position(Recordid recordid, I32 position, Irid value) {
-  Record* record = &get(irgen.records, recordid);
+void record_push_assign_position(Record* record, I32 position, Ir* value) {
   record->assigned[position] = value;
 }
-void recordid_push_assign_name(Recordid recordid, Strid name, I32 position) {
-  Record* record = &get(irgen.records, recordid);
-  hash_map_put(&record->positions, name, position);
+void record_push_assign_name(Record* record, Str* name, I32 position) {
+  hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
 }
-void recordid_push_declare_position(Recordid recordid, I32 position, Irid value) {
-  Record* record = &get(irgen.records, recordid);
+void record_push_declare_position(Record* record, I32 position, Ir* value) {
   record->declared[position] = value;
 }
-void recordid_push_declare_name(Recordid recordid, Strid name, I32 position) {
-  Record* record = &get(irgen.records, recordid);
-  hash_map_put(&record->positions, name, position);
+void record_push_declare_name(Record* record, Str* name, I32 position) {
+  hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
 }
-Field field_nil = {istr_nil, 0, 0, 0};
-Field recordid_get_by_name(Recordid recordid, Strid name) {
-  Record record = get(irgen.records, recordid);
+
+Field field_nil = {0, 0, 0, 0};
+Field record_get_by_name(Record* record, Str* name) {
   Field field = {};
-  I32 position = hash_map_get(&record.positions, name);
-  field.name     = record.names[position];
-  field.assigned = record.assigned[position];
-  field.declared = record.declared[position];
+  I32 position = hash_map_get_i32(&record->position_from_name, name);
+  field.name     = record->names[position];
+  field.assigned = record->assigned[position];
+  field.declared = record->declared[position];
   field.position = position;
   return field;
 }
 
-Field recordid_get_by_position(Recordid recordid, I32 position) {
-  Record record = get(irgen.records, recordid);
+Field record_get_by_position(Record* record, I32 position) {
   Field field = {};
-  field.name     = record.names[position];
-  field.assigned = record.assigned[position];
-  field.declared = record.declared[position];
+  field.name     = record->names[position];
+  field.assigned = record->assigned[position];
+  field.declared = record->declared[position];
   field.position = position;
   return field;
 }
 
-Record recordid_get(Recordid recordid) {
-  Record record = get(irgen.records, recordid);
-  return record;
-}
-
-Block* blockid_get(Blockid blockid) {
-  return &irgen.blocks.base[blockid];
-}
-
-Branch blockid_branch(Blockid blockid) {
-  return irgen.blocks.base[blockid].branch;
-}
-
-Jump blockid_jump(Blockid blockid) {
-  return irgen.blocks.base[blockid].jump;
-}
-
-Blockid ir_put_branch(Irid cond) {
+Block* ir_put_branch(Ir* cond) {
   Fun* fun = top(irgen.fun_stack);
-  Block* block = &get(irgen.block_stack, fun->leaveid);
+  Block* block = fun->leave_block;
   block->branch.cond = cond;
   block->kind = Block_Kind_branch;
-  return fun->leaveid;
+  return fun->leave_block;
 }
 
-Blockid irgen_put_jump() {
+Block* irgen_put_jump() {
   Fun* fun = top(irgen.fun_stack);
-  Block* block = &get(irgen.block_stack, fun->leaveid);
+  Block* block = fun->leave_block;
   block->kind = Block_Kind_jump;
-  return fun->leaveid;
-}
-
-void irgen_jump_link_to(Blockid blockid, Blockid jumpto) {
-  Block* block = &get(irgen.block_stack, blockid);
-  block->jump.blockid = jumpto;
-}
-
-void irgen_nez_link_to(Blockid blockid, Blockid jumpto) {
-  Block* block = &get(irgen.block_stack, blockid);
-  block->branch.nez.blockid = jumpto;
-}
-
-void irgen_eqz_link_to(Blockid blockid, Blockid jumpto) {
-  Block* block = &get(irgen.block_stack, blockid);
-  block->branch.eqz.blockid = jumpto;
+  return fun->leave_block;
 }
 
 Block* ir_block_leave() {
