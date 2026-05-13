@@ -11,7 +11,7 @@ const char *__asan_default_options() {
 int main(void) {
   arena_test();
   parse_test();
-  // irgen_test();
+  irgen_test();
   // sem_test();
   return 0;
 }

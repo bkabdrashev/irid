@@ -166,7 +166,8 @@ struct Irgen {
   Ast_Block ast;
 
   Arena*  perm_arena;
-  Arena*  temp_arena;
+  Arena*  temp_block_arena;
+  Arena*  temp_ir_arena;
 
   Funs    funs;
   Block_Pool blocks;
@@ -181,121 +182,6 @@ struct Irgen {
 };
 
 Irgen irgen = {};
-
-void irgen_irs_end(Irs* list) {
-  arena_release_mark(irgen.temp_arena, list);
-}
-
-void irgen_irs_push(Irs* list, Ir* ir) {
-  arena_push(irgen.temp_arena, sizeof(Ir*));
-  list->base[list->length++] = ir;
-}
-
-Irs* irgen_irs_temp(void) {
-  return arena_push_zero(irgen.temp_arena, sizeof(Irs));
-}
-
-Irs* irgen_irs_perm(Irs* temp_list) {
-  I32 size = sizeof(Irs) + temp_list->length * sizeof(Ir*);
-  Irs* perm_list = arena_push(irgen.perm_arena, size);
-  memcpy(perm_list, temp_list, size);
-  arena_release_mark(irgen.temp_arena, temp_list);
-  return perm_list;
-}
-
-void irgen_blocks_end(Blocks* list) {
-  arena_release_mark(irgen.temp_arena, list);
-}
-
-void irgen_blocks_push(Blocks* list, Block* block) {
-  arena_push(irgen.temp_arena, sizeof(Block*));
-  list->base[list->length++] = block;
-}
-
-Blocks* irgen_blocks_temp(void) {
-  return arena_push_zero(irgen.temp_arena, sizeof(Blocks));
-}
-
-Blocks* irgen_blocks_perm(Blocks* temp_list) {
-  I32 size = sizeof(Blocks) + temp_list->length * sizeof(Block*);
-  Blocks* perm_list = arena_push(irgen.perm_arena, size);
-  memcpy(perm_list, temp_list, size);
-  arena_release_mark(irgen.temp_arena, temp_list);
-  return perm_list;
-}
-
-Ir* ir_push_int(I64 i64) {
-  Ir ir = { Ir_Kind_int, .i64 = i64 };
-  Ir* new_ir = irgen.irs.base + irgen.irs.length;
-  *new_ir = ir;
-  irgen.irs.length++;
-  return new_ir;
-}
-
-Ir* ir_push_var(Varid varid) {
-  Ir ir = { Ir_Kind_var, .varid = varid };
-  Ir* new_ir = irgen.irs.base + irgen.irs.length;
-  *new_ir = ir;
-  irgen.irs.length++;
-  return new_ir;
-}
-
-Ir* ir_push_unary(Ir_Kind kind, Ir* one) {
-  Ir ir = { kind, .unary = one };
-  Ir* new_ir = irgen.irs.base + irgen.irs.length;
-  *new_ir = ir;
-  irgen.irs.length++;
-  return new_ir;
-}
-
-Ir* ir_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
-  Ir ir = { kind, .binary = { .one = one, .two = two } };
-  Ir* new_ir = irgen.irs.base + irgen.irs.length;
-  *new_ir = ir;
-  irgen.irs.length++;
-  return new_ir;
-}
-
-Ir* ir_push_record(Record* record) {
-  Ir ir = { Ir_Kind_record, .record = record };
-  Ir* new_ir = irgen.irs.base + irgen.irs.length;
-  *new_ir = ir;
-  irgen.irs.length++;
-  return new_ir;
-}
-
-Ir* ir_push_position_offset(Ir* record, I32 position) {
-  Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
-  Ir* new_ir = irgen.irs.base + irgen.irs.length;
-  *new_ir = ir;
-  irgen.irs.length++;
-  return new_ir;
-}
-
-Record* recordid_new(I32 length) {
-  Record* new_record = &new(irgen.records);
-  new_record->length   = length;
-  new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
-  new_record->assigned = arena_push(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->declared = arena_push(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
-  return new_record;
-}
-
-void record_push_assign_position(Record* record, I32 position, Ir* value) {
-  record->assigned[position] = value;
-}
-void record_push_assign_name(Record* record, Str* name, I32 position) {
-  hash_map_put_i32(&record->position_from_name, name, position);
-  record->names[position] = name;
-}
-void record_push_declare_position(Record* record, I32 position, Ir* value) {
-  record->declared[position] = value;
-}
-void record_push_declare_name(Record* record, Str* name, I32 position) {
-  hash_map_put_i32(&record->position_from_name, name, position);
-  record->names[position] = name;
-}
 
 Field field_nil = {0, 0, 0, 0};
 Field record_get_by_name(Record* record, Str* name) {
@@ -315,78 +201,6 @@ Field record_get_by_position(Record* record, I32 position) {
   field.declared = record->declared[position];
   field.position = position;
   return field;
-}
-
-Block* irgen_top_block() {
-  Fun* fun = top(irgen.fun_stack);
-  Block* block = fun->blocks->base[fun->blocks->length-1];
-  return block;
-}
-void irgen_put_branch(Ir* cond) {
-  Block* block = irgen_top_block();
-  block->branch.cond = cond;
-  block->kind = Block_Kind_branch;
-}
-
-void irgen_put_jump() {
-  Block* block = irgen_top_block();
-  block->kind = Block_Kind_jump;
-}
-
-Block* irgen_block_leave() {
-  Block* block = irgen_top_block();
-  block->irs = irgen_irs_perm(block->irs);
-  return block;
-}
-
-Block* irgen_block_new() {
-  irgen_block_leave();
-  Fun* fun = top(irgen.fun_stack);
-  Block* block = &new(irgen.blocks);
-  irgen_blocks_push(fun->blocks, block);
-  memset(block, 0, sizeof(Block));
-  // block->entry_ir = irgen.ir_stack.length;
-  return block;
-}
-
-void scope_enter() {
-  assert(0);
-}
-
-void scope_leave() {
-  del(irgen.scope_stack);
-}
-
-Fun* ir_fun_enter() {
-  scope_enter();
-  Fun* fun = &new(irgen.funs);
-  add(irgen.fun_stack, fun);
-  {
-    Block* block = &new(irgen.blocks);
-    memset(block, 0, sizeof(Block));
-    block->irs = irgen_irs_temp();
-    fun->blocks = irgen_blocks_temp();
-  }
-  fun->return_ir = &top(irgen.irs);
-  fun->var_count = 0;
-  return fun;
-}
-
-void ir_fun_leave() {
-  Fun* fun = top(irgen.fun_stack);
-
-  {
-    Block* block = irgen_block_leave();
-    block->kind = Block_Kind_jump;
-    Block* last = &new(irgen.blocks);
-    block->jump.to_block = last;
-    last->kind = Block_Kind_none;
-    irgen_blocks_push(fun->blocks, last);
-  }
-
-  fun->blocks = irgen_blocks_perm(fun->blocks);
-
-  scope_leave();
 }
 
 void string_builder_push_irid(String_Builder* sb, Ir* ir) {
@@ -477,45 +291,6 @@ void string_builder_push_ir(String_Builder* sb, I32 irid, Ir* ir) {
   }
 }
 
-void irgen_print() {
-  assert(0);
-}
-
-Varid ir_get_sym(Str* str) {
-  assert(0);
-  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
-  }
-  Varid varid = irgen.varids++;
-  return varid;
-}
-
-Funs ir_ast(Arena* arena, Ast_Block ast) {
-  Arena temp = arena_init(arena->capacity);
-  irgen.ast = ast;
-  irgen.perm_arena = arena;
-  irgen.temp_arena = &temp;
-  irgen.funs.base      = arena_push(irgen.perm_arena, sizeof(Fun)*ast.list->length);
-  irgen.funs.length    = 0;
-  irgen.blocks.base    = arena_push(irgen.perm_arena, sizeof(Block)*ast.list->length);
-  irgen.blocks.length  = 0;
-  irgen.irs.base       = arena_push(irgen.perm_arena, sizeof(Ir)*ast.list->length);
-  irgen.irs.length     = 0;
-  irgen.records.base   = arena_push(irgen.perm_arena, sizeof(Record)*ast.list->length);
-  irgen.records.length = 0;
-  irgen.fun_stack.base        = arena_push(irgen.temp_arena, ast.list->length * sizeof(Fun*));
-  irgen.fun_stack.length      = 0;
-  irgen.scope_stack.base      = arena_push(irgen.temp_arena, ast.list->length * sizeof(Hash_Map));
-  irgen.scope_stack.length    = 0;
-  irgen.irid_nil = 0;
-  Ir ir_nil = {0, {0}};
-  add(irgen.irs, ir_nil);
-  irgen.varid_nil = 0;
-  irgen.varids = 1;
-
-  arena_free(irgen.temp_arena);
-  return irgen.funs;
-}
-
 Cstr cstr_from_funs(C8* buffer, Funs funs) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
@@ -537,7 +312,7 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
       case Block_Kind_none:
       break;
       case Block_Kind_jump:
-        string_builder_push_cstr(&sb, "\n    jump .");
+        string_builder_push_cstr(&sb, "\n    jump ");
         string_builder_push_blockid(&sb, block->jump.to_block);
       break;
       case Block_Kind_branch:
@@ -559,13 +334,254 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
   return result;
 }
 
+void irgen_print() {
+  assert(0);
+}
+
+void irgen_irs_end(Irs* list) {
+  arena_release_mark(irgen.temp_ir_arena, list);
+}
+
+void irgen_irs_push(Irs* list, Ir* ir) {
+  arena_push(irgen.temp_ir_arena, sizeof(Ir*));
+  list->base[list->length++] = ir;
+}
+
+Irs* irgen_irs_temp(void) {
+  return arena_push_zero(irgen.temp_ir_arena, sizeof(Irs));
+}
+
+Irs* irgen_irs_perm(Irs* temp_list) {
+  I32 size = sizeof(Irs) + temp_list->length * sizeof(Ir*);
+  Irs* perm_list = arena_push(irgen.perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(irgen.temp_ir_arena, temp_list);
+  return perm_list;
+}
+
+void irgen_blocks_end(Blocks* list) {
+  arena_release_mark(irgen.temp_block_arena, list);
+}
+
+void irgen_blocks_push(Blocks* list, Block* block) {
+  arena_push(irgen.temp_block_arena, sizeof(Block*));
+  list->base[list->length++] = block;
+}
+
+Blocks* irgen_blocks_temp(void) {
+  return arena_push_zero(irgen.temp_block_arena, sizeof(Blocks));
+}
+
+Blocks* irgen_blocks_perm(Blocks* temp_list) {
+  I32 size = sizeof(Blocks) + temp_list->length * sizeof(Block*);
+  Blocks* perm_list = arena_push(irgen.perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(irgen.temp_block_arena, temp_list);
+  return perm_list;
+}
+
+Block* irgen_top_block() {
+  Fun* fun = top(irgen.fun_stack);
+  Block* block = fun->blocks->base[fun->blocks->length-1];
+  return block;
+}
+
+Ir* irgen_push(Ir ir) {
+  Block* block = irgen_top_block();
+  Ir* new_ir = &new(irgen.irs);
+  *new_ir = ir;
+  irgen_irs_push(block->irs, new_ir);
+  return new_ir;
+}
+
+Ir* irgen_push_int(I64 i64) {
+  Ir ir = { Ir_Kind_int, .i64 = i64 };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_var(Varid varid) {
+  Ir ir = { Ir_Kind_var, .varid = varid };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_unary(Ir_Kind kind, Ir* one) {
+  Ir ir = { kind, .unary = one };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
+  Ir ir = { kind, .binary = { .one = one, .two = two } };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_record(Record* record) {
+  Ir ir = { Ir_Kind_record, .record = record };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_position_offset(Ir* record, I32 position) {
+  Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
+  return irgen_push(ir);
+}
+
+Record* recordid_new(I32 length) {
+  Record* new_record = &new(irgen.records);
+  new_record->length   = length;
+  new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
+  new_record->assigned = arena_push(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->declared = arena_push(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
+  return new_record;
+}
+
+void record_push_assign_position(Record* record, I32 position, Ir* value) {
+  record->assigned[position] = value;
+}
+void record_push_assign_name(Record* record, Str* name, I32 position) {
+  hash_map_put_i32(&record->position_from_name, name, position);
+  record->names[position] = name;
+}
+void record_push_declare_position(Record* record, I32 position, Ir* value) {
+  record->declared[position] = value;
+}
+void record_push_declare_name(Record* record, Str* name, I32 position) {
+  hash_map_put_i32(&record->position_from_name, name, position);
+  record->names[position] = name;
+}
+
+void irgen_put_branch(Ir* cond) {
+  Block* block = irgen_top_block();
+  block->branch.cond = cond;
+  block->kind = Block_Kind_branch;
+}
+
+void irgen_put_jump() {
+  Block* block = irgen_top_block();
+  block->kind = Block_Kind_jump;
+}
+
+Block* irgen_block_leave() {
+  Block* block = irgen_top_block();
+  block->irs = irgen_irs_perm(block->irs);
+  return block;
+}
+
+Block* irgen_block_new() {
+  irgen_block_leave();
+  Fun* fun = top(irgen.fun_stack);
+  Block* block = &new(irgen.blocks);
+  irgen_blocks_push(fun->blocks, block);
+  memset(block, 0, sizeof(Block));
+  block->irs = irgen_irs_temp();
+  return block;
+}
+
+void scope_enter() {
+}
+
+void scope_leave() {
+  del(irgen.scope_stack);
+}
+
+Fun* irgen_fun_enter() {
+  scope_enter();
+  Fun* fun = &new(irgen.funs);
+  add(irgen.fun_stack, fun);
+  {
+    Block* block = &new(irgen.blocks);
+    memset(block, 0, sizeof(Block));
+    block->irs = irgen_irs_temp();
+    fun->blocks = irgen_blocks_temp();
+    irgen_blocks_push(fun->blocks, block);
+  }
+  fun->return_ir = &top(irgen.irs);
+  fun->var_count = 0;
+  return fun;
+}
+
+void irgen_fun_leave() {
+  Fun* fun = top(irgen.fun_stack);
+
+  {
+    Block* block = irgen_block_leave();
+    block->kind = Block_Kind_jump;
+    Block* last = &new(irgen.blocks);
+    block->jump.to_block = last;
+    last->kind = Block_Kind_none;
+    Irs empty = { .length = 0 };
+    last->irs = irgen_irs_perm(&empty);
+    irgen_blocks_push(fun->blocks, last);
+  }
+
+  fun->blocks = irgen_blocks_perm(fun->blocks);
+
+  scope_leave();
+}
+Varid ir_get_sym(Str* str) {
+  assert(0);
+  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
+  }
+  Varid varid = irgen.varids++;
+  return varid;
+}
+
+Ir* irgen_ast_node(Ast_Node* node) {
+  Ir* result = 0;
+  switch (node->kind) {
+  case Ast_Kind_int: {
+    result = irgen_push_int(node->i64);
+  } break;
+  case Ast_Kind_add: {
+    Ir* lhs = irgen_ast_node(node->binary.lhs);
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    result = irgen_push_binary((Ir_Kind)node->kind, lhs, rhs);
+  } break;
+  }
+  return result;
+}
+
+Funs irgen_ast(Arena* arena, Ast_Block ast) {
+  Arena temp_block_arena = arena_init(arena->capacity);
+  Arena temp_ir_arena    = arena_init(arena->capacity);
+  irgen.ast = ast;
+  irgen.perm_arena = arena;
+  irgen.temp_block_arena = &temp_block_arena;
+  irgen.temp_ir_arena    = &temp_ir_arena;
+  irgen.funs.base      = arena_push(irgen.perm_arena, sizeof(Fun)*ast.list->length);
+  irgen.funs.length    = 0;
+  irgen.blocks.base    = arena_push(irgen.perm_arena, sizeof(Block)*ast.list->length);
+  irgen.blocks.length  = 0;
+  irgen.irs.base       = arena_push(irgen.perm_arena, sizeof(Ir)*ast.list->length);
+  irgen.irs.length     = 0;
+  irgen.records.base   = arena_push(irgen.perm_arena, sizeof(Record)*ast.list->length);
+  irgen.records.length = 0;
+  irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, ast.list->length * sizeof(Fun*));
+  irgen.fun_stack.length      = 0;
+  irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, ast.list->length * sizeof(Hash_Map));
+  irgen.scope_stack.length    = 0;
+  irgen.irid_nil = 0;
+  Ir ir_nil = {0, {0}};
+  add(irgen.irs, ir_nil);
+  irgen.varid_nil = 0;
+  irgen.varids = 1;
+
+  irgen_fun_enter();
+  for (I32 i = 0; i < ast.list->length; i++) {
+    irgen_ast_node(ast.list->base[i]);
+  }
+  irgen_fun_leave();
+  arena_free(irgen.temp_block_arena);
+  arena_free(irgen.temp_ir_arena);
+  return irgen.funs;
+}
+
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source) + 2;
   Arena arena          = arena_init(KB(8) * source_length);
                          str_init(&arena, source_length);
   Tokens tokens        = lex_source(&arena, source);
   Ast_Block ast        = parse_tokens(&arena, tokens);
-  Funs funs            = ir_ast(&arena, ast);
+  Funs funs            = irgen_ast(&arena, ast);
   C8* buffer           = arena_push(&arena, KB(1) * source_length);
   Cstr result          = cstr_from_funs(buffer, funs);
   test_at_source(result, expected, file_name, line, source);
@@ -575,7 +591,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a = 1; a+a; b+b", "");
+  test("1 + 2", "test");
 }
 
 #undef test
