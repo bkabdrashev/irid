@@ -75,6 +75,18 @@ struct Ir {
   };
 };
 
+typedef struct Ir_Pool Ir_Pool;
+struct Ir_Pool {
+  I32 length;
+  Ir* base;
+};
+
+typedef struct Irs Irs;
+struct Irs {
+  I32 length;
+  Ir* base[];
+};
+
 typedef struct Field Field;
 struct Field {
   Str* name;
@@ -95,6 +107,18 @@ struct Branch {
   Jump nez;
 };
 
+typedef struct Funs Funs;
+struct Funs {
+  Fun* base;
+  I32  length;
+};
+
+typedef struct Block_Pool Block_Pool;
+struct Block_Pool {
+  I32    length;
+  Block* base;
+};
+
 typedef enum Block_Kind {
   Block_Kind_none,
   Block_Kind_jump,
@@ -104,8 +128,7 @@ typedef enum Block_Kind {
 struct Block {
   Block_Kind kind;
   I32 pred_count;
-  Ir* entryid;
-  Ir* leaveid;
+  Irs* irs;
   Hash_Map out_var_typeids;
   Hash_Map in_var_typeids;
   union {
@@ -114,35 +137,22 @@ struct Block {
   };
 };
 
-struct Fun {
-  Block* entry_block;
-  Block* leave_block;
-  Ir*    return_ir;
-  I32    var_count;
-};
-
-typedef struct Funs Funs;
-struct Funs {
-  Fun* base;
-  I32  length;
-};
-
 typedef struct Blocks Blocks;
 struct Blocks {
-  Block* base;
   I32    length;
+  Block* base[];
 };
 
-typedef struct Records Records;
-struct Records {
-  Record* base;
+typedef struct Record_Pool Record_Pool;
+struct Record_Pool {
   I32     length;
+  Record* base;
 };
 
-typedef struct Irs Irs;
-struct Irs {
-  Ir* base;
-  I32 length;
+struct Fun {
+  Blocks* blocks;
+  Ir*     return_ir;
+  I32     var_count;
 };
 
 typedef struct Fun_Stack Fun_Stack;
@@ -159,9 +169,9 @@ struct Irgen {
   Arena*  temp_arena;
 
   Funs    funs;
-  Blocks  blocks;
-  Records records;
-  Irs     irs;
+  Block_Pool blocks;
+  Record_Pool records;
+  Ir_Pool     irs;
   Ir*     irid_nil;
   Varid   varid_nil;
   Varid   varids;
@@ -171,6 +181,48 @@ struct Irgen {
 };
 
 Irgen irgen = {};
+
+void irgen_irs_end(Irs* list) {
+  arena_release_mark(irgen.temp_arena, list);
+}
+
+void irgen_irs_push(Irs* list, Ir* ir) {
+  arena_push(irgen.temp_arena, sizeof(Ir*));
+  list->base[list->length++] = ir;
+}
+
+Irs* irgen_irs_temp(void) {
+  return arena_push_zero(irgen.temp_arena, sizeof(Irs));
+}
+
+Irs* irgen_irs_perm(Irs* temp_list) {
+  I32 size = sizeof(Irs) + temp_list->length * sizeof(Ir*);
+  Irs* perm_list = arena_push(irgen.perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(irgen.temp_arena, temp_list);
+  return perm_list;
+}
+
+void irgen_blocks_end(Blocks* list) {
+  arena_release_mark(irgen.temp_arena, list);
+}
+
+void irgen_blocks_push(Blocks* list, Block* block) {
+  arena_push(irgen.temp_arena, sizeof(Block*));
+  list->base[list->length++] = block;
+}
+
+Blocks* irgen_blocks_temp(void) {
+  return arena_push_zero(irgen.temp_arena, sizeof(Blocks));
+}
+
+Blocks* irgen_blocks_perm(Blocks* temp_list) {
+  I32 size = sizeof(Blocks) + temp_list->length * sizeof(Block*);
+  Blocks* perm_list = arena_push(irgen.perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(irgen.temp_arena, temp_list);
+  return perm_list;
+}
 
 Ir* ir_push_int(I64 i64) {
   Ir ir = { Ir_Kind_int, .i64 = i64 };
@@ -265,37 +317,36 @@ Field record_get_by_position(Record* record, I32 position) {
   return field;
 }
 
-Block* ir_put_branch(Ir* cond) {
+Block* irgen_top_block() {
   Fun* fun = top(irgen.fun_stack);
-  Block* block = fun->leave_block;
+  Block* block = fun->blocks->base[fun->blocks->length-1];
+  return block;
+}
+void irgen_put_branch(Ir* cond) {
+  Block* block = irgen_top_block();
   block->branch.cond = cond;
   block->kind = Block_Kind_branch;
-  return fun->leave_block;
 }
 
-Block* irgen_put_jump() {
-  Fun* fun = top(irgen.fun_stack);
-  Block* block = fun->leave_block;
+void irgen_put_jump() {
+  Block* block = irgen_top_block();
   block->kind = Block_Kind_jump;
-  return fun->leave_block;
 }
 
-Block* ir_block_leave() {
-  Fun* fun = top(irgen.fun_stack);
-  Block* block = &get(irgen.block_stack, fun->leaveid);
-  block->leaveid = irgen.ir_stack.length - block->entryid;
+Block* irgen_block_leave() {
+  Block* block = irgen_top_block();
+  block->irs = irgen_irs_perm(block->irs);
   return block;
 }
 
-Blockid ir_block_new() {
-  ir_block_leave();
+Block* irgen_block_new() {
+  irgen_block_leave();
   Fun* fun = top(irgen.fun_stack);
-  Blockid blockid = irgen.block_stack.length;
-  Block* block = &new(irgen.block_stack);
-  fun->leaveid = blockid;
+  Block* block = &new(irgen.blocks);
+  irgen_blocks_push(fun->blocks, block);
   memset(block, 0, sizeof(Block));
-  block->entryid = irgen.ir_stack.length;
-  return blockid;
+  // block->entry_ir = irgen.ir_stack.length;
+  return block;
 }
 
 void scope_enter() {
@@ -306,110 +357,89 @@ void scope_leave() {
   del(irgen.scope_stack);
 }
 
-Fun* funid_get(Funid funid) {
-  return &get(irgen.funs, funid);
-}
-
-Funid ir_fun_enter() {
+Fun* ir_fun_enter() {
   scope_enter();
-  Funid funid = irgen.funs.length;
-  Fun*  fun = &new(irgen.funs);
+  Fun* fun = &new(irgen.funs);
   add(irgen.fun_stack, fun);
   {
-    Blockid blockid = irgen.block_stack.length;
-    Block* block = &new(irgen.block_stack);
+    Block* block = &new(irgen.blocks);
     memset(block, 0, sizeof(Block));
-    block->entryid = irgen.ir_stack.length;
-    fun->entryid = blockid;
-    fun->leaveid = blockid;
+    block->irs = irgen_irs_temp();
+    fun->blocks = irgen_blocks_temp();
   }
-  fun->returnid = irgen.ir_stack.length;
+  fun->return_ir = &top(irgen.irs);
   fun->var_count = 0;
-  return funid;
+  return fun;
 }
 
 void ir_fun_leave() {
   Fun* fun = top(irgen.fun_stack);
 
   {
-    Block* block = ir_block_leave();
+    Block* block = irgen_block_leave();
     block->kind = Block_Kind_jump;
-    Block last = { Block_Kind_none, .pred_count = 0, .entryid = 0, .leaveid = 0, .jump = {0} };
-    fun->leaveid = irgen.block_stack.length;
-    block->jump.blockid = push(irgen.block_stack, last);
+    Block* last = &new(irgen.blocks);
+    block->jump.to_block = last;
+    last = Block_Kind_none;
+    irgen_blocks_push(fun->blocks, last);
   }
 
-  {
-    Blockid first = irgen.blocks.length;
-    Blockid irid = irgen.irs.length;
-    for (Irid irid = fun->returnid; irid < irgen.ir_stack.length; irid++) {
-      Ir ir = get(irgen.ir_stack, irid);
-      add(irgen.irs, ir);
-    }
-    for (Blockid i = fun->entryid; i <= fun->leaveid; i++) {
-      Block block = get(irgen.block_stack, i);
-      block.entryid = irid;
-      irid += block.leaveid;
-      block.leaveid = irid;
-      add(irgen.blocks, block);
-    }
-    fun->entryid = first;
-    fun->leaveid = irgen.blocks.length;
-  }
+  fun->blocks = irgen_blocks_perm(fun->blocks);
+
   scope_leave();
 }
 
-void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
+void string_builder_push_irid(String_Builder* sb, Ir* ir) {
+  string_builder_push_cstr(sb, "r");
+  I32 irid = ir - irgen.irs.base;
+  string_builder_push_i64(sb, irid);
+}
+
+void string_builder_push_ir(String_Builder* sb, I32 irid, Ir* ir) {
   string_builder_push_cstr(sb, "\n    r");
   string_builder_push_i64(sb, irid);
   string_builder_push_cstr(sb, " = ");
-  switch (ir.kind) {
+  switch (ir->kind) {
   case Ir_Kind_nop:
     string_builder_push_cstr(sb, "nop");
   break;
   case Ir_Kind_int:
     string_builder_push_cstr(sb, "int ");
-    string_builder_push_i64(sb, ir.i64);
+    string_builder_push_i64(sb, ir->i64);
   break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
-    string_builder_push_i64(sb, ir.varid);
+    string_builder_push_i64(sb, ir->varid);
   break;
   case Ir_Kind_position_offset:
     string_builder_push_cstr(sb, "position offset ");
-    string_builder_push_cstr(sb, "r");
-    string_builder_push_i64(sb, ir.position.of);
-    string_builder_push_cstr(sb, ".");
-    string_builder_push_i64(sb, ir.position.at);
+    string_builder_push_irid(sb, ir->position.of);
+    string_builder_push_i64(sb, ir->position.at);
   break;
   case Ir_Kind_name_offset:
     string_builder_push_cstr(sb, "name offset ");
-    string_builder_push_cstr(sb, "r");
-    string_builder_push_i64(sb, ir.name.of);
+    string_builder_push_irid(sb, ir->name.of);
     string_builder_push_cstr(sb, ".");
-    string_builder_push_istr(sb, ir.name.at);
+    string_builder_push_str(sb, ir->name.at);
   break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");
-    for (I32 i = 0; i < recordid_length(ir.recordid); i++) {
-      Field field = recordid_get_by_position(ir.recordid, i);
+    for (I32 i = 0; i < ir->record->length; i++) {
+      Field field = record_get_by_position(ir->record, i);
       if (field.name) {
         string_builder_push_cstr(sb, " ");
-        string_builder_push_istr(sb, field.name);
+        string_builder_push_str(sb, field.name);
         if (field.declared != irgen.irid_nil) {
           string_builder_push_cstr(sb, ":");
-          string_builder_push_cstr(sb, "r");
-          string_builder_push_i64(sb, field.declared);
+          string_builder_push_irid(sb, field.declared);
         }
         if (field.assigned != irgen.irid_nil) {
           string_builder_push_cstr(sb, "=");
-          string_builder_push_cstr(sb, "r");
-          string_builder_push_i64(sb, field.assigned);
+          string_builder_push_irid(sb, field.assigned);
         }
       }
       else {
-        string_builder_push_cstr(sb, " r");
-        string_builder_push_i64(sb, field.assigned);
+        string_builder_push_irid(sb, field.assigned);
       }
     }
   break;
@@ -431,47 +461,25 @@ void string_builder_push_ir(String_Builder* sb, Irid irid, Ir ir) {
     assert(0);
   } break;
   }
-  if (ir.kind & Ir_Flag_binary) {
-    string_builder_push_cstr(sb, "r");
-    string_builder_push_i64(sb, ir.binary.one);
-    string_builder_push_cstr(sb, " r");
-    string_builder_push_i64(sb, ir.binary.two);
+  if (ir->kind & Ir_Flag_binary) {
+    string_builder_push_irid(sb, ir->binary.one);
+    string_builder_push_cstr(sb, " ");
+    string_builder_push_irid(sb, ir->binary.two);
   }
-  else if (ir.kind & Ir_Flag_unary) {
-    string_builder_push_cstr(sb, "r");
-    string_builder_push_i64(sb, ir.unary);
+  else if (ir->kind & Ir_Flag_unary) {
+    string_builder_push_irid(sb, ir->unary);
   }
 }
 
 void irgen_print() {
-  C8 buf[1024];
-  String_Builder sb = string_builder_begin(buf);
-  printf("ir_stack:");
-  for (I32 i = 0; i < irgen.ir_stack.length; i++) {
-    Ir ir = get(irgen.ir_stack, i);
-    string_builder_push_ir(&sb, i, ir);
-  }
-  Cstr cstr = string_builder_end(&sb);
-  printf("%s\n", cstr);
-  printf("irid_stack:");
-  for (I32 i = 0; i < irgen.irid_stack.length; i++) {
-    Irid irid = get(irgen.irid_stack, i);
-    printf(" r%d", irid);
-  }
-  printf("\n");
+  assert(0);
 }
 
-Varid ir_get_sym(Strid istr) {
+Varid ir_get_sym(Str* str) {
+  assert(0);
   for (I32 i = 0; i < irgen.scope_stack.length; i++) {
-    Hash_Map* scope = &get(irgen.scope_stack, i);
-    Varid varid = hash_map_get(scope, istr);
-    if (varid) {
-      return varid;
-    }
   }
   Varid varid = irgen.varids++;
-  Hash_Map* scope = &top(irgen.scope_stack);
-  hash_map_put(scope, istr, varid);
   return varid;
 }
 
@@ -490,199 +498,13 @@ Funs ir_ast(Arena* arena, Ast ast) {
   irgen.records.length = 0;
   irgen.fun_stack.base        = arena_push(irgen.temp_arena, ast.length * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
-  irgen.block_stack.base      = arena_push(irgen.temp_arena, ast.length * sizeof(Block));
-  irgen.block_stack.length    = 0;
   irgen.scope_stack.base      = arena_push(irgen.temp_arena, ast.length * sizeof(Hash_Map));
   irgen.scope_stack.length    = 0;
-  irgen.ir_stack.base         = arena_push(irgen.temp_arena, ast.length * sizeof(Ir));
-  irgen.ir_stack.length       = 0;
-  irgen.irid_stack.base       = arena_push(irgen.temp_arena, ast.length * sizeof(Irid));
-  irgen.irid_stack.length     = 0;
-  irgen.recordid_stack.base   = arena_push(irgen.temp_arena, ast.length * sizeof(Recordid));
-  irgen.recordid_stack.length = 0;
-  irgen.headerids.base        = arena_push(irgen.temp_arena, ast.length * sizeof(Blockid));
-  irgen.headerids.length      = 0;
   irgen.irid_nil = 0;
   Ir ir_nil = {0, {0}};
-  add(irgen.ir_stack, ir_nil);
   add(irgen.irs, ir_nil);
   irgen.varid_nil = 0;
   irgen.varids = 1;
-
-  for (Astid astid = 0; astid < irgen.ast.length; astid++) {
-    Ast_Node node = get(irgen.ast, astid);
-    switch (node.kind) {
-    case Ast_Kind_source_enter: {
-      ir_fun_enter(astid);
-    } break;
-    case Ast_Kind_source_split: {} break;
-    case Ast_Kind_source_leave: {
-      ir_fun_leave();
-    } break;
-    case Ast_Kind_block_value_enter: {
-      scope_enter();
-    } break;
-    case Ast_Kind_block_split: {} break;
-    case Ast_Kind_block_value_leave: {
-      scope_leave();
-    } break;
-    case Ast_Kind_tuple_enter: {
-      Recordid tuple = recordid_new(node.list.length);
-      add(irgen.recordid_stack, tuple);
-    } break;
-    case Ast_Kind_tuple_split: {
-      Recordid tuple = top(irgen.recordid_stack);
-      Irid val = pop(irgen.irid_stack);
-      recordid_push_assign_position(tuple, node.split.position, val);
-    } break;
-    case Ast_Kind_tuple_leave: {
-      Recordid tuple = pop(irgen.recordid_stack);
-      Irid irid = ir_push_record(tuple);
-      add(irgen.irid_stack, irid);
-    } break;
-    case Ast_Kind_record_enter: {
-      Recordid record = recordid_new(node.list.length);
-      add(irgen.recordid_stack, record);
-    } break;
-    case Ast_Kind_record_split: {
-      Recordid record = top(irgen.recordid_stack);
-      Irid val = pop(irgen.irid_stack);
-      recordid_push_assign_position(record, node.split.position, val);
-    } break;
-    case Ast_Kind_record_assign: {
-      Recordid record = top(irgen.recordid_stack);
-      Irid val = pop(irgen.irid_stack);
-      recordid_push_assign_position(record, node.field.position, val);
-      recordid_push_assign_name(record, node.field.name, node.field.position);
-      astid++; // skips split
-    } break;
-    case Ast_Kind_record_declare: {
-      Recordid record = top(irgen.recordid_stack);
-      Irid val = pop(irgen.irid_stack);
-      recordid_push_declare_position(record, node.field.position, val);
-      recordid_push_declare_name(record, node.field.name, node.field.position);
-      astid++; // skips split
-    } break;
-    case Ast_Kind_record_leave: {
-      Recordid record = pop(irgen.recordid_stack);
-      Irid irid = ir_push_record(record);
-      add(irgen.irid_stack, irid);
-    } break;
-    case Ast_Kind_int: {
-      Irid irid = ir_push_int(node.i64);
-      add(irgen.irid_stack, irid);
-    } break;
-    case Ast_Kind_name: {
-      Fun* fun = top(irgen.fun_stack);
-      fun->var_count++;
-      Varid varid = ir_get_sym(node.istr);
-      Irid var = ir_push_var(varid);
-      Irid irid = ir_push_unary(Ir_Kind_load, var);
-      add(irgen.irid_stack, irid);
-    } break;
-    case Ast_Kind_ptr_leave:
-    case Ast_Kind_load_leave:
-    case Ast_Kind_neg_leave: {
-      Irid one = pop(irgen.irid_stack);
-      Irid irid = ir_push_unary((Ir_Kind)node.kind, one);
-      add(irgen.irid_stack, irid);
-    } break;
-    case Ast_Kind_dot_leave: {
-      Irid rhs = pop(irgen.irid_stack);
-      Irid lhs = pop(irgen.irid_stack);
-      Ir* rhs_ir = &get(irgen.ir_stack, rhs);
-      if (rhs_ir->kind == Ir_Kind_int) {
-        rhs_ir->kind = Ir_Kind_position_offset;
-        rhs_ir->position.at = rhs_ir->i64;
-        rhs_ir->position.of = lhs;
-        rhs_ir->kind = Ir_Kind_position_offset;
-        Irid irid = ir_push_unary(Ir_Kind_load, rhs);
-        add(irgen.irid_stack, irid);
-      }
-      else if (rhs_ir->kind == Ir_Kind_load) {
-        Ir* ir_ptr = &get(irgen.ir_stack, rhs_ir->unary);
-        if (ir_ptr->kind == Ir_Kind_var) {
-          ir_ptr->kind = Ir_Kind_name_offset;
-          ir_ptr->name.at = ir_ptr->varid;
-          ir_ptr->name.of = lhs;
-          add(irgen.irid_stack, rhs);
-        }
-        else {
-          assert(0);
-        }
-      }
-      else {
-        assert(0);
-      }
-    } break;
-    case Ast_Kind_join_leave:
-    case Ast_Kind_mul_leave:
-    case Ast_Kind_eq_leave:  case Ast_Kind_ne_leave:
-    case Ast_Kind_le_leave:  case Ast_Kind_lt_leave:
-    case Ast_Kind_ge_leave:  case Ast_Kind_gt_leave:
-    case Ast_Kind_add_leave: {
-      Irid two = pop(irgen.irid_stack);
-      Irid one = pop(irgen.irid_stack);
-      Irid irid = ir_push_binary((Ir_Kind)node.kind, one, two);
-      add(irgen.irid_stack, irid);
-    } break;
-    case Ast_Kind_assign_tuple_enter: {
-      Irid rhs = pop(irgen.irid_stack);
-      Irid start = irgen.ir_stack.length;
-      for (I32 i = 0; i < node.list.length; i++) {
-        Irid pos = ir_push_position_offset(rhs, i);
-        ir_push_unary(Ir_Kind_load, pos);
-      }
-      for (I32 i = node.list.length-1; i >= 0; i--) {
-        add(irgen.irid_stack, 2*i + start + 1);
-      }
-    } break;
-    case Ast_Kind_assign_tuple_leave:
-      astid++; // NOTE: skips = or ,
-    break;
-    case Ast_Kind_assign_tuple_split:
-    case Ast_Kind_assign_leave: {
-      Irid lhs = pop(irgen.irid_stack);
-      Irid rhs = pop(irgen.irid_stack);
-      Ir* ir = &get(irgen.ir_stack, lhs);
-      if (ir->kind == Ir_Kind_load) {
-        ir->kind = Ir_Kind_store;
-        ir->binary.two = rhs;
-      }
-    } break;
-    case Ast_Kind_if_split: {
-      Irid cond = pop(irgen.irid_stack);
-      Blockid headerid     = ir_put_branch(cond);
-      Blockid nez_blockid  = ir_block_new();
-      irgen_nez_link_to(headerid, nez_blockid);
-      add(irgen.headerids, headerid);
-    } break;
-    case Ast_Kind_if_leave: {
-      Blockid headerid    = pop(irgen.headerids);
-      Blockid blockid     = irgen_put_jump();
-      Blockid eqz_blockid = ir_block_new();
-      irgen_eqz_link_to(headerid, eqz_blockid);
-      irgen_jump_link_to(blockid, eqz_blockid);
-    } break;
-    case Ast_Kind_if_leave_else_enter: {
-      Blockid headerid    = pop(irgen.headerids);
-      Blockid blockid     = irgen_put_jump();
-      Blockid eqz_blockid = ir_block_new();
-      irgen_eqz_link_to(headerid, eqz_blockid);
-      add(irgen.headerids, blockid);
-    } break;
-    case Ast_Kind_else_leave: {
-      Blockid nez_blockid = pop(irgen.headerids);
-      Blockid blockid     = irgen_put_jump();
-      Blockid end_blockid = ir_block_new();
-      irgen_jump_link_to(nez_blockid, end_blockid);
-      irgen_jump_link_to(blockid, end_blockid);
-    } break;
-    default:
-      assert(0);
-    break;
-    }
-  }
 
   arena_free(irgen.temp_arena);
   return irgen.funs;
@@ -696,29 +518,29 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
     string_builder_push_i64(&sb,   f);
     string_builder_push_cstr(&sb, " {");
 
-    for (Blockid b = fun.entryid; b < fun.leaveid; b++) {
-      Block block = get(irgen.blocks, b);
+    for (I32 b = 0; b < fun.blocks->length; b++) {
+      Block* block = fun.blocks->base[b];
       string_builder_push_cstr(&sb, "\n  .");
       string_builder_push_i64(&sb, b);
       string_builder_push_cstr(&sb, ":");
-      for (Irid irid = block.entryid; irid < block.leaveid; irid++) {
-        Ir ir = irgen.irs.base[irid];
+      for (I32 irid = 0; irid < block->irs->length; irid++) {
+        Ir* ir = block->irs->base[irid];
         string_builder_push_ir(&sb, irid, ir);
       }
-      switch (block.kind) {
+      switch (block->kind) {
       case Block_Kind_none:
       break;
       case Block_Kind_jump:
         string_builder_push_cstr(&sb, "\n    jump .");
-        string_builder_push_i64(&sb, block.jump.blockid);
+        string_builder_push_i64(&sb, block->jump.to_block);
       break;
       case Block_Kind_branch:
         string_builder_push_cstr(&sb, "\n    if r");
-        string_builder_push_i64(&sb, block.branch.cond);
+        string_builder_push_i64(&sb, block->branch.cond);
         string_builder_push_cstr(&sb, " then .");
-        string_builder_push_i64(&sb, block.branch.nez.blockid);
+        string_builder_push_i64(&sb, block->branch.nez.to_block);
         string_builder_push_cstr(&sb, " else .");
-        string_builder_push_i64(&sb, block.branch.eqz.blockid);
+        string_builder_push_i64(&sb, block->branch.eqz.to_block);
       break;
       }
     }
