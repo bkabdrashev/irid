@@ -56,7 +56,7 @@ typedef struct {
   union {
     U64  bits;
     I64  i64;
-    Strid strid;
+    Str* str;
   };
 } Token;
 
@@ -191,8 +191,8 @@ Tokens lex_source(Arena* arena, Cstr source) {
       while (isalnum(*lexer.stream)) {
         lexer.stream++;
       }
-      token.strid = strid_from_range(start, lexer.stream);
-      token.kind  = (Token_Kind)token.strid->kind;
+      token.str = str_from_range(start, lexer.stream);
+      token.kind  = (Token_Kind)token.str->kind;
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
@@ -310,7 +310,7 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
       string_builder_push_cstr(&sb, "enter");
     break;
     case Token_Kind_name: {
-      string_builder_push_strid(&sb, token->strid);
+      string_builder_push_str(&sb, token->str);
     } break;
     case Token_Kind_int:
       string_builder_push_i64(&sb, token->i64);

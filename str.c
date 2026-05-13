@@ -17,7 +17,6 @@ struct Str {
   I32         length;
   C8          base[];
 };
-typedef Str* Strid;
 
 typedef struct Internal Internal;
 struct Internal {
@@ -32,82 +31,82 @@ struct String_Builder {
 };
 
 Internal internal = {0};
-const Strid strid_nil = {0};
-String_Kind token_kind_from_strid(Strid strid) {
-  return strid->kind;
+const Str* str_nil = {0};
+String_Kind token_kind_from_str(Str* str) {
+  return str->kind;
 }
 
-Strid strid_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
+Str* str_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
   I32 len = strlen(cstr);
   I32 i = hash_bytes(cstr, len);
   for (;;) {
     i &= internal.set.cap - 1;
-    Strid strid = internal.set.keys[i];
-    if (!strid) {
-      Strid new_strid = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
-      new_strid->length = len;
-      new_strid->kind = kind;
+    Str* str = internal.set.keys[i];
+    if (!str) {
+      Str* new_str = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
+      new_str->length = len;
+      new_str->kind = kind;
       for (I32 j = 0; j < len; j++) {
-        new_strid->base[j] = cstr[j];
+        new_str->base[j] = cstr[j];
       }
-      internal.set.keys[i] = new_strid;
-      return new_strid;
+      internal.set.keys[i] = new_str;
+      return new_str;
     }
     else {
-      if (strid->length == len) {
+      if (str->length == len) {
         I32 j = 0;
-        for (; j < strid->length; j++) {
-          if (strid->base[j] != cstr[j]) {
+        for (; j < str->length; j++) {
+          if (str->base[j] != cstr[j]) {
             break;
           }
         }
-        if (j == strid->length) return strid;
+        if (j == str->length) return str;
       }
     }
     i++;
   }
 }
 
-Strid strid_from_range(Cstr begin, Cstr end) {
+Str* str_from_range(Cstr begin, Cstr end) {
   I32 len = end - begin;
   I32 i = hash_bytes(begin, len);
   for (;;) {
     i &= internal.set.cap - 1;
-    Strid strid = internal.set.keys[i];
-    if (!strid) {
-      Strid new_strid = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
-      new_strid->length = len;
-      new_strid->kind   = String_Kind_name;
+    Str* str = internal.set.keys[i];
+    if (!str) {
+      Str* new_str = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
+      new_str->length = len;
+      new_str->kind   = String_Kind_name;
       for (I32 j = 0; j < len; j++) {
-        new_strid->base[j] = begin[j];
+        new_str->base[j] = begin[j];
       }
-      internal.set.keys[i] = new_strid;
-      return new_strid;
+      internal.set.keys[i] = new_str;
+      return new_str;
     }
     else {
-      if (strid->length == len) {
+      if (str->length == len) {
         I32 j = 0;
-        for (; j < strid->length; j++) {
-          if (strid->base[j] != begin[j]) {
+        for (; j < str->length; j++) {
+          if (str->base[j] != begin[j]) {
             break;
           }
         }
-        if (j == strid->length) return strid;
+        if (j == str->length) return str;
       }
     }
     i++;
   }
 }
 
-void strid_init(Arena* arena, I32 capacity) {
+void str_init(Arena* arena, I32 capacity) {
   internal.arena = arena;
   internal.set = hash_set_init(arena, capacity);
-  strid_from_cstr_with_kind("if", String_Kind_if);
-  strid_from_cstr_with_kind("do", String_Kind_do);
-  strid_from_cstr_with_kind("el", String_Kind_else);
-  strid_from_cstr_with_kind("re", String_Kind_return);
-  strid_from_cstr_with_kind("wh", String_Kind_while);
-  strid_from_cstr_with_kind("br", String_Kind_break);
+  str_from_cstr_with_kind("if", String_Kind_if);
+  str_from_cstr_with_kind("do", String_Kind_do);
+  str_from_cstr_with_kind("el", String_Kind_else);
+  str_from_cstr_with_kind("re", String_Kind_return);
+  str_from_cstr_with_kind("wh", String_Kind_while);
+  str_from_cstr_with_kind("br", String_Kind_break);
 }
 
 String_Builder string_builder_begin(C8* buffer) {
@@ -134,9 +133,9 @@ void string_builder_push_i64(String_Builder* sb, I64 val) {
   string_builder_push_cstr(sb, line_str);
 }
 
-void string_builder_push_strid(String_Builder* sb, Strid strid) {
-  for (I32 i = 0; i < strid->length; i++) {
-    sb->base[sb->size++] = strid->base[i];
+void string_builder_push_str(String_Builder* sb, Str* str) {
+  for (I32 i = 0; i < str->length; i++) {
+    sb->base[sb->size++] = str->base[i];
   }
 }
 

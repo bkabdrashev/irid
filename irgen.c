@@ -1,9 +1,4 @@
-typedef I32 Irid;
-typedef I32 Blockid;
-typedef I32 Funid;
-typedef I32 Symbolid;
 typedef I32 Varid;
-typedef I32 Recordid;
 
 typedef enum Ir_Flag {
   Ir_Flag_unary  = Ast_Flag_unary,
@@ -45,11 +40,11 @@ typedef enum Ir_Kind {
 
 } Ir_Kind;
 
-typedef struct Irid_Pair Irid_Pair;
-struct Irid_Pair { Irid one; Irid two; };
+typedef struct Ir_Pair Ir_Pair;
+struct Ir_Pair { Ir* one; Ir* two; };
 
 typedef struct Name_Offset Name_Offset;
-struct Name_Offset { Irid of; Istr at; };
+struct Name_Offset { Ir* of; Str* at; };
 
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Irid of; I32 at; };
@@ -73,13 +68,13 @@ struct Record {
   I32      length;
   Irid*    assigned;
   Irid*    declared;
-  Istr*    names;
+  Strid*    names;
   Hash_Map positions;
 };
 
 typedef struct Field Field;
 struct Field {
-  Istr name;
+  Strid name;
   I32  position;
   Irid assigned;
   Irid declared;
@@ -261,11 +256,11 @@ I64 irid_int(Irid irid) {
   return get(irgen.irs, irid).i64;
 }
 
-Istr irid_istr(Irid irid) {
+Strid irid_istr(Irid irid) {
   return get(irgen.irs, irid).varid;
 }
 
-Istr irid_recordid(Irid irid) {
+Strid irid_recordid(Irid irid) {
   return get(irgen.irs, irid).recordid;
 }
 
@@ -277,7 +272,7 @@ I32 recordid_length(Recordid recordid) {
 Recordid recordid_new(I32 length) {
   Record record = {};
   record.length = length;
-  record.names    = arena_push_zero(irgen.perm_arena, length*sizeof(Istr));
+  record.names    = arena_push_zero(irgen.perm_arena, length*sizeof(Strid));
   record.assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Irid));
   record.declared = arena_push_zero(irgen.perm_arena, length*sizeof(Irid));
   record.positions = hash_map_init(irgen.perm_arena, length);
@@ -289,7 +284,7 @@ void recordid_push_assign_position(Recordid recordid, I32 position, Irid value) 
   Record* record = &get(irgen.records, recordid);
   record->assigned[position] = value;
 }
-void recordid_push_assign_name(Recordid recordid, Istr name, I32 position) {
+void recordid_push_assign_name(Recordid recordid, Strid name, I32 position) {
   Record* record = &get(irgen.records, recordid);
   hash_map_put(&record->positions, name, position);
   record->names[position] = name;
@@ -298,13 +293,13 @@ void recordid_push_declare_position(Recordid recordid, I32 position, Irid value)
   Record* record = &get(irgen.records, recordid);
   record->declared[position] = value;
 }
-void recordid_push_declare_name(Recordid recordid, Istr name, I32 position) {
+void recordid_push_declare_name(Recordid recordid, Strid name, I32 position) {
   Record* record = &get(irgen.records, recordid);
   hash_map_put(&record->positions, name, position);
   record->names[position] = name;
 }
 Field field_nil = {istr_nil, 0, 0, 0};
-Field recordid_get_by_name(Recordid recordid, Istr name) {
+Field recordid_get_by_name(Recordid recordid, Strid name) {
   Record record = get(irgen.records, recordid);
   Field field = {};
   I32 position = hash_map_get(&record.positions, name);
@@ -553,7 +548,7 @@ void irgen_print() {
   printf("\n");
 }
 
-Varid ir_get_sym(Istr istr) {
+Varid ir_get_sym(Strid istr) {
   for (I32 i = 0; i < irgen.scope_stack.length; i++) {
     Hash_Map* scope = &get(irgen.scope_stack, i);
     Varid varid = hash_map_get(scope, istr);

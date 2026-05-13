@@ -77,7 +77,7 @@ struct Ast_Node {
   union {
     U64   bits;
     I64   i64;
-    Strid  strid;
+    Str*  str;
     Ast_Node* unary;
     Ast* list;
     struct {
@@ -85,7 +85,7 @@ struct Ast_Node {
       Ast_Node* rhs;
     } binary;
     struct {
-      Strid strid;
+      Str* str;
       Ast_Node* rhs;
     } declare;
     struct {
@@ -138,7 +138,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, cstr);
   } break;
   case Ast_Kind_name:
-    string_builder_push_strid(sb, node->strid);
+    string_builder_push_str(sb, node->str);
   break;
   case Ast_Kind_int:
     string_builder_push_i64(sb, node->i64);
@@ -173,10 +173,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_source: {
     Hash_Map* scope = node->block.scope;
     for (I32 i = 0; i < scope->len; i++) {
-      Strid istr = scope->keys[i];
-      string_builder_push_strid(sb, istr);
+      Str* str = scope->keys[i];
+      string_builder_push_str(sb, str);
       string_builder_push_cstr(sb, " : ");
-      Ast_Node* rhs = hash_map_get(scope, istr);
+      Ast_Node* rhs = hash_map_get(scope, str);
       string_builder_push_ast_node(sb, rhs);
       string_builder_push_cstr(sb, "; ");
     }
@@ -193,10 +193,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, "{");
     Hash_Map* scope = node->block.scope;
     for (I32 i = 0; i < scope->len; i++) {
-      Strid istr = scope->keys[i];
-      string_builder_push_strid(sb, istr);
+      Str* str = scope->keys[i];
+      string_builder_push_str(sb, str);
       string_builder_push_cstr(sb, " : ");
-      Ast_Node* rhs = hash_map_get(scope, istr);
+      Ast_Node* rhs = hash_map_get(scope, str);
       string_builder_push_ast_node(sb, rhs);
       string_builder_push_cstr(sb, "; ");
     }
@@ -301,7 +301,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.rhs);
   } break;
   case Ast_Kind_declare: {
-    string_builder_push_strid(sb, node->declare.strid);
+    string_builder_push_str(sb, node->declare.str);
     string_builder_push_cstr(sb, " : ");
     string_builder_push_ast_node(sb, node->declare.rhs);
   } break;
@@ -439,7 +439,7 @@ Hash_Map* parse_map_perm(Parser* parser, Ast* temp_list) {
   for (I32 i = 0; i < temp_list->length; i++) {
     Ast_Node* node = temp_list->base[i];
     assert(node->kind == Ast_Kind_declare);
-    hash_map_put(map, node->declare.strid, node->declare.rhs);
+    hash_map_put(map, node->declare.str, node->declare.rhs);
   }
   arena_release_mark(parser->map_arena, temp_list);
   return map;
@@ -641,7 +641,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
         if (lhs->kind == Ast_Kind_name) {
           Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
           exp = parse_new_node(parser, Ast_Kind_declare);
-          exp ->declare.strid = lhs->strid;
+          exp ->declare.str = lhs->str;
           exp ->declare.rhs = rhs;
         }
         else {
@@ -781,7 +781,7 @@ Ast_Node* parse_statement(Parser* parser) {
       if (lhs->kind == Ast_Kind_name) {
         Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
         node = parse_new_node(parser, Ast_Kind_declare);
-        node->declare.strid = lhs->strid;
+        node->declare.str = lhs->str;
         node->declare.rhs = rhs;
       }
       else {
@@ -825,7 +825,7 @@ Ast_Node parse_tokens(Arena* perm_arena, Tokens tokens) {
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
   Arena arena   = arena_init(KB(4) * source_length);
-  strid_init(&arena, source_length);
+  str_init(&arena, source_length);
   Tokens tokens = lex_source(&arena, source);
   Ast_Node ast  = parse_tokens(&arena, tokens);
   C8* buffer    = arena_push(&arena, 4*source_length);
