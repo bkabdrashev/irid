@@ -525,12 +525,49 @@ Varid ir_get_sym(Str* str) {
   return varid;
 }
 
+Ir* irgen_ast_node(Ast_Node* node);
+void irgen_assign(Ast_Node* lhs, Ir* rhs) {
+  switch (lhs->kind) {
+  case Ast_Kind_name: {
+  } break;
+  case Ast_Kind_record: {
+    for (I32 i = 0; i < lhs->list->length; i++) {
+      Ir* at = irgen_push_position_offset(rhs, i);
+      Ast_Node* node = lhs->list->base[i];
+      if (node->kind == Ast_Kind_assign) {
+        assert(0);
+      }
+      else if (node->kind == Ast_Kind_declare) {
+        assert(0);
+      }
+      else {
+        irgen_assign(node, at);
+      }
+    }
+  } break;
+  default : {
+    Ir* lhs_ir = irgen_ast_node(lhs);
+    if (lhs_ir->kind == Ir_Kind_load) {
+      lhs_ir->kind = Ir_Kind_store;
+      lhs_ir->binary.two = rhs;
+    }
+  } break;
+  }
+}
+
 Ir* irgen_ast_node(Ast_Node* node) {
   Ir* result = 0;
   switch (node->kind) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
   } break;
+  case Ast_Kind_ptr:
+  case Ast_Kind_pos: case Ast_Kind_neg: {
+    Ir* unary = irgen_ast_node(node->unary);
+    result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
+  } break;
+  case Ast_Kind_call: case Ast_Kind_subscript:
+  case Ast_Kind_array:
   case Ast_Kind_eq: case Ast_Kind_ne:
   case Ast_Kind_le: case Ast_Kind_lt:
   case Ast_Kind_ge: case Ast_Kind_gt:
@@ -539,6 +576,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     result = irgen_push_binary((Ir_Kind)node->kind | Ir_Flag_binary, lhs, rhs);
+  } break;
+  case Ast_Kind_assign: {
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    irgen_assign(node->binary.lhs, rhs);
   } break;
   }
   return result;
@@ -584,10 +625,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Arena arena          = arena_init(KB(8) * source_length);
                          str_init(&arena, 2*source_length);
   Tokens tokens        = lex_source(&arena, source);
-  C8* before           = arena.top;
   Ast_Block ast        = parse_tokens(&arena, tokens);
-  I32 total_nodes      = (arena.top - before) / sizeof(Ast_Node);
-  Funs funs            = irgen_ast(&arena, ast, total_nodes);
+  Funs funs            = irgen_ast(&arena, ast, source_length);
   C8* buffer           = arena_push(&arena, KB(1) * source_length);
   Cstr result          = cstr_from_funs(buffer, funs);
   test_at_source(result, expected, file_name, line, source);
