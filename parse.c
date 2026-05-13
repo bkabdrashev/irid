@@ -407,7 +407,7 @@ void parse_list_end(Parser* parser, Ast* list) {
 }
 
 void parse_list_push(Parser* parser, Ast* list, Ast_Node* node) {
-  arena_push(parser->list_arena, sizeof(Ast_Node));
+  arena_push(parser->list_arena, sizeof(Ast_Node*));
   list->base[list->length++] = node;
 }
 
@@ -416,7 +416,7 @@ Ast* parse_list_temp(Parser* parser) {
 }
 
 Ast* parse_list_perm(Parser* parser, Ast* temp_list) {
-  I32 size = sizeof(Ast) + temp_list->length * sizeof(Ast_Node);
+  I32 size = sizeof(Ast) + temp_list->length * sizeof(Ast_Node*);
   Ast* perm_list = arena_push(parser->perm_arena, size);
   memcpy(perm_list, temp_list, size);
   arena_release_mark(parser->list_arena, temp_list);
@@ -428,7 +428,7 @@ Ast* parse_map_temp(Parser* parser) {
 }
 
 void parse_map_push(Parser* parser, Ast* temp_map, Ast_Node* node) {
-  arena_push(parser->map_arena, sizeof(Ast_Node));
+  arena_push(parser->map_arena, sizeof(Ast_Node*));
   temp_map->base[temp_map->length++] = node;
 }
 
@@ -823,7 +823,7 @@ Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
   Arena arena   = arena_init(KB(4) * source_length);
-  str_init(&arena, source_length);
+  str_init(&arena, 2*source_length);
   Tokens tokens = lex_source(&arena, source);
   Ast_Block ast = parse_tokens(&arena, tokens);
   C8* buffer    = arena_push(&arena, 4*source_length);

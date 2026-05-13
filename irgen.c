@@ -10,23 +10,24 @@ typedef enum Ir_Kind {
 
   Ir_Kind_int = Ast_Kind_int,
 
-  Ir_Kind_add = Ast_Kind_add,
-  Ir_Kind_sub = Ast_Kind_sub,
-  Ir_Kind_mul = Ast_Kind_mul,
-  Ir_Kind_eq  = Ast_Kind_eq,
-  Ir_Kind_ne  = Ast_Kind_ne,
-  Ir_Kind_lt  = Ast_Kind_lt,
-  Ir_Kind_le  = Ast_Kind_le,
-  Ir_Kind_gt  = Ast_Kind_gt,
-  Ir_Kind_ge  = Ast_Kind_ge,
+  Ir_Kind_add = Ast_Kind_add | Ir_Flag_binary,
+  Ir_Kind_sub = Ast_Kind_sub | Ir_Flag_binary,
+  Ir_Kind_mul = Ast_Kind_mul | Ir_Flag_binary,
+  Ir_Kind_eq  = Ast_Kind_eq | Ir_Flag_binary,
+  Ir_Kind_ne  = Ast_Kind_ne | Ir_Flag_binary,
+  Ir_Kind_lt  = Ast_Kind_lt | Ir_Flag_binary,
+  Ir_Kind_le  = Ast_Kind_le | Ir_Flag_binary,
+  Ir_Kind_gt  = Ast_Kind_gt | Ir_Flag_binary,
+  Ir_Kind_ge  = Ast_Kind_ge | Ir_Flag_binary,
+  Ir_Kind_call = Ast_Kind_call | Ir_Flag_binary,
 
-  Ir_Kind_join = Ast_Kind_join,
+  Ir_Kind_join = Ast_Kind_join | Ir_Flag_binary,
 
-  Ir_Kind_neg = Ast_Kind_neg,
+  Ir_Kind_neg = Ast_Kind_neg | Ir_Flag_unary,
 
-  Ir_Kind_load      = Ast_Kind_load,
+  Ir_Kind_load      = Ast_Kind_load | Ir_Flag_unary,
   Ir_Kind_var       = Ast_Kind_name,
-  Ir_Kind_ptr       = Ast_Kind_ptr,
+  Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
   Ir_Kind_record          = 131,
@@ -36,7 +37,6 @@ typedef enum Ir_Kind {
   Ir_Kind_name_update     = 135,
 
   Ir_Kind_fun  = 136,
-  Ir_Kind_call = 137,
 
 } Ir_Kind;
 
@@ -215,9 +215,9 @@ void string_builder_push_blockid(String_Builder* sb, Block* block) {
   string_builder_push_i64(sb, blockid);
 }
 
-void string_builder_push_ir(String_Builder* sb, I32 irid, Ir* ir) {
-  string_builder_push_cstr(sb, "\n    r");
-  string_builder_push_i64(sb, irid);
+void string_builder_push_ir(String_Builder* sb, Ir* ir) {
+  string_builder_push_cstr(sb, "\n    ");
+  string_builder_push_irid(sb, ir);
   string_builder_push_cstr(sb, " = ");
   switch (ir->kind) {
   case Ir_Kind_nop:
@@ -306,7 +306,7 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
       string_builder_push_cstr(&sb, ":");
       for (I32 irid = 0; irid < block->irs->length; irid++) {
         Ir* ir = block->irs->base[irid];
-        string_builder_push_ir(&sb, irid, ir);
+        string_builder_push_ir(&sb, ir);
       }
       switch (block->kind) {
       case Block_Kind_none:
@@ -531,33 +531,37 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
   } break;
-  case Ast_Kind_add: {
+  case Ast_Kind_eq: case Ast_Kind_ne:
+  case Ast_Kind_le: case Ast_Kind_lt:
+  case Ast_Kind_ge: case Ast_Kind_gt:
+  case Ast_Kind_mul: case Ast_Kind_join:
+  case Ast_Kind_add: case Ast_Kind_sub: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     Ir* rhs = irgen_ast_node(node->binary.rhs);
-    result = irgen_push_binary((Ir_Kind)node->kind, lhs, rhs);
+    result = irgen_push_binary((Ir_Kind)node->kind | Ir_Flag_binary, lhs, rhs);
   } break;
   }
   return result;
 }
 
-Funs irgen_ast(Arena* arena, Ast_Block ast) {
+Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   Arena temp_block_arena = arena_init(arena->capacity);
   Arena temp_ir_arena    = arena_init(arena->capacity);
   irgen.ast = ast;
   irgen.perm_arena = arena;
   irgen.temp_block_arena = &temp_block_arena;
   irgen.temp_ir_arena    = &temp_ir_arena;
-  irgen.funs.base      = arena_push(irgen.perm_arena, sizeof(Fun)*ast.list->length);
+  irgen.funs.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Fun));
   irgen.funs.length    = 0;
-  irgen.blocks.base    = arena_push(irgen.perm_arena, sizeof(Block)*ast.list->length);
+  irgen.blocks.base    = arena_push(irgen.perm_arena, total_nodes * sizeof(Block));
   irgen.blocks.length  = 0;
-  irgen.irs.base       = arena_push(irgen.perm_arena, sizeof(Ir)*ast.list->length);
+  irgen.irs.base       = arena_push(irgen.perm_arena, total_nodes * sizeof(Ir));
   irgen.irs.length     = 0;
-  irgen.records.base   = arena_push(irgen.perm_arena, sizeof(Record)*ast.list->length);
+  irgen.records.base   = arena_push(irgen.perm_arena, total_nodes * sizeof(Record));
   irgen.records.length = 0;
-  irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, ast.list->length * sizeof(Fun*));
+  irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
-  irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, ast.list->length * sizeof(Hash_Map));
+  irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Hash_Map));
   irgen.scope_stack.length    = 0;
   irgen.irid_nil = 0;
   Ir ir_nil = {0, {0}};
@@ -578,10 +582,12 @@ Funs irgen_ast(Arena* arena, Ast_Block ast) {
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source) + 2;
   Arena arena          = arena_init(KB(8) * source_length);
-                         str_init(&arena, source_length);
+                         str_init(&arena, 2*source_length);
   Tokens tokens        = lex_source(&arena, source);
+  C8* before           = arena.top;
   Ast_Block ast        = parse_tokens(&arena, tokens);
-  Funs funs            = irgen_ast(&arena, ast);
+  I32 total_nodes      = (arena.top - before) / sizeof(Ast_Node);
+  Funs funs            = irgen_ast(&arena, ast, total_nodes);
   C8* buffer           = arena_push(&arena, KB(1) * source_length);
   Cstr result          = cstr_from_funs(buffer, funs);
   test_at_source(result, expected, file_name, line, source);
@@ -591,7 +597,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1 + 2", "test");
+  test("1 == 2*3", "test");
 }
 
 #undef test
