@@ -45,7 +45,6 @@ typedef enum Ast_Kind {
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_call        = 50,
   Ast_Kind_iblock,
-  Ast_Kind_source,
 } Ast_Kind;
 
 typedef struct {
@@ -72,6 +71,12 @@ struct Ast {
   Ast_Node* base[];
 };
 
+typedef struct Ast_Block Ast_Block;
+struct Ast_Block {
+  Hash_Map* scope;
+  Ast* list;
+};
+
 struct Ast_Node {
   Ast_Kind kind;
   union {
@@ -88,10 +93,7 @@ struct Ast_Node {
       Str* str;
       Ast_Node* rhs;
     } declare;
-    struct {
-      Hash_Map* scope;
-      Ast* list;
-    } block;
+    Ast_Block block;
   };
 };
 
@@ -169,25 +171,6 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.lhs);
     string_builder_push_cstr(sb, " else ");
     string_builder_push_ast_node(sb, node->binary.rhs);
-  } break;
-  case Ast_Kind_source: {
-    Hash_Map* scope = node->block.scope;
-    for (I32 i = 0; i < scope->len; i++) {
-      Str* str = scope->keys[i];
-      string_builder_push_str(sb, str);
-      string_builder_push_cstr(sb, " : ");
-      Ast_Node* rhs = hash_map_get(scope, str);
-      string_builder_push_ast_node(sb, rhs);
-      string_builder_push_cstr(sb, "; ");
-    }
-
-    Ast* list = node->block.list;
-    for (I32 i = 0; i < list->length; i++) {
-      string_builder_push_ast_node(sb, list->base[i]);
-      if (i+1 < list->length) {
-        string_builder_push_cstr(sb, "; ");
-      }
-    }
   } break;
   case Ast_Kind_block_value: case Ast_Kind_block: {
     string_builder_push_cstr(sb, "{");
@@ -308,9 +291,25 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   }
 }
 
-Cstr cstr_from_ast(C8* buffer, Ast_Node ast) {
+Cstr cstr_from_ast(C8* buffer, Ast_Block ast) {
   String_Builder sb = string_builder_begin(buffer);
-  string_builder_push_ast_node(&sb, &ast);
+  Hash_Map* scope = ast.scope;
+  for (I32 i = 0; i < scope->len; i++) {
+    Str* str = scope->keys[i];
+    string_builder_push_str(&sb, str);
+    string_builder_push_cstr(&sb, " : ");
+    Ast_Node* rhs = hash_map_get(scope, str);
+    string_builder_push_ast_node(&sb, rhs);
+    string_builder_push_cstr(&sb, "; ");
+  }
+
+  Ast* list = ast.list;
+  for (I32 i = 0; i < list->length; i++) {
+    string_builder_push_ast_node(&sb, list->base[i]);
+    if (i+1 < list->length) {
+      string_builder_push_cstr(&sb, "; ");
+    }
+  }
   Cstr result = string_builder_end(&sb);
   return result;
 }
@@ -320,7 +319,7 @@ typedef struct {
   Arena* list_arena;
   Arena* map_arena;
 
-  Ast_Node ast;
+  Ast_Block ast;
 
   Tokens tokens;
   I32  tok;
@@ -793,7 +792,7 @@ Ast_Node* parse_statement(Parser* parser) {
   return node;
 }
 
-Ast_Node parse_tokens(Arena* perm_arena, Tokens tokens) {
+Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
   Arena temp_ast_arena  = arena_init(KB(1) * perm_arena->capacity);
   Arena temp_map_arena = arena_init(KB(1) * perm_arena->capacity);
   Parser parser = {0};
@@ -814,9 +813,8 @@ Ast_Node parse_tokens(Arena* perm_arena, Tokens tokens) {
     }
     parse_match_token(&parser, Token_Kind_semicolon);
   }
-  parser.ast.kind = Ast_Kind_source;
-  parser.ast.block.list = parse_list_perm(&parser, temp_ast);
-  parser.ast.block.scope = parse_map_perm(&parser, temp_map);
+  parser.ast.list = parse_list_perm(&parser, temp_ast);
+  parser.ast.scope = parse_map_perm(&parser, temp_map);
   arena_free(&temp_ast_arena);
   arena_free(&temp_map_arena);
   return parser.ast;
@@ -827,7 +825,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Arena arena   = arena_init(KB(4) * source_length);
   str_init(&arena, source_length);
   Tokens tokens = lex_source(&arena, source);
-  Ast_Node ast  = parse_tokens(&arena, tokens);
+  Ast_Block ast = parse_tokens(&arena, tokens);
   C8* buffer    = arena_push(&arena, 4*source_length);
   Cstr result   = cstr_from_ast(buffer, ast);
   test_at_source(result, expected, file_name, line, source);

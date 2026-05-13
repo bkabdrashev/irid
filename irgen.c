@@ -163,7 +163,7 @@ struct Fun_Stack {
 
 typedef struct Irgen Irgen;
 struct Irgen {
-  Ast     ast;
+  Ast_Block ast;
 
   Arena*  perm_arena;
   Arena*  temp_arena;
@@ -380,7 +380,7 @@ void ir_fun_leave() {
     block->kind = Block_Kind_jump;
     Block* last = &new(irgen.blocks);
     block->jump.to_block = last;
-    last = Block_Kind_none;
+    last->kind = Block_Kind_none;
     irgen_blocks_push(fun->blocks, last);
   }
 
@@ -393,6 +393,12 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
   string_builder_push_cstr(sb, "r");
   I32 irid = ir - irgen.irs.base;
   string_builder_push_i64(sb, irid);
+}
+
+void string_builder_push_blockid(String_Builder* sb, Block* block) {
+  string_builder_push_cstr(sb, "b");
+  I32 blockid = block - irgen.blocks.base;
+  string_builder_push_i64(sb, blockid);
 }
 
 void string_builder_push_ir(String_Builder* sb, I32 irid, Ir* ir) {
@@ -483,22 +489,22 @@ Varid ir_get_sym(Str* str) {
   return varid;
 }
 
-Funs ir_ast(Arena* arena, Ast ast) {
+Funs ir_ast(Arena* arena, Ast_Block ast) {
   Arena temp = arena_init(arena->capacity);
   irgen.ast = ast;
   irgen.perm_arena = arena;
   irgen.temp_arena = &temp;
-  irgen.funs.base      = arena_push(irgen.perm_arena, sizeof(Fun)*ast.length);
+  irgen.funs.base      = arena_push(irgen.perm_arena, sizeof(Fun)*ast.list->length);
   irgen.funs.length    = 0;
-  irgen.blocks.base    = arena_push(irgen.perm_arena, sizeof(Block)*ast.length);
+  irgen.blocks.base    = arena_push(irgen.perm_arena, sizeof(Block)*ast.list->length);
   irgen.blocks.length  = 0;
-  irgen.irs.base       = arena_push(irgen.perm_arena, sizeof(Ir)*ast.length);
+  irgen.irs.base       = arena_push(irgen.perm_arena, sizeof(Ir)*ast.list->length);
   irgen.irs.length     = 0;
-  irgen.records.base   = arena_push(irgen.perm_arena, sizeof(Record)*ast.length);
+  irgen.records.base   = arena_push(irgen.perm_arena, sizeof(Record)*ast.list->length);
   irgen.records.length = 0;
-  irgen.fun_stack.base        = arena_push(irgen.temp_arena, ast.length * sizeof(Fun*));
+  irgen.fun_stack.base        = arena_push(irgen.temp_arena, ast.list->length * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
-  irgen.scope_stack.base      = arena_push(irgen.temp_arena, ast.length * sizeof(Hash_Map));
+  irgen.scope_stack.base      = arena_push(irgen.temp_arena, ast.list->length * sizeof(Hash_Map));
   irgen.scope_stack.length    = 0;
   irgen.irid_nil = 0;
   Ir ir_nil = {0, {0}};
@@ -520,7 +526,7 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
 
     for (I32 b = 0; b < fun.blocks->length; b++) {
       Block* block = fun.blocks->base[b];
-      string_builder_push_cstr(&sb, "\n  .");
+      string_builder_push_cstr(&sb, "\n  b");
       string_builder_push_i64(&sb, b);
       string_builder_push_cstr(&sb, ":");
       for (I32 irid = 0; irid < block->irs->length; irid++) {
@@ -532,21 +538,21 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
       break;
       case Block_Kind_jump:
         string_builder_push_cstr(&sb, "\n    jump .");
-        string_builder_push_i64(&sb, block->jump.to_block);
+        string_builder_push_blockid(&sb, block->jump.to_block);
       break;
       case Block_Kind_branch:
-        string_builder_push_cstr(&sb, "\n    if r");
-        string_builder_push_i64(&sb, block->branch.cond);
-        string_builder_push_cstr(&sb, " then .");
-        string_builder_push_i64(&sb, block->branch.nez.to_block);
-        string_builder_push_cstr(&sb, " else .");
-        string_builder_push_i64(&sb, block->branch.eqz.to_block);
+        string_builder_push_cstr(&sb, "\n    if ");
+        string_builder_push_irid(&sb, block->branch.cond);
+        string_builder_push_cstr(&sb, " then ");
+        string_builder_push_blockid(&sb, block->branch.nez.to_block);
+        string_builder_push_cstr(&sb, " else ");
+        string_builder_push_blockid(&sb, block->branch.eqz.to_block);
       break;
       }
     }
 
-    string_builder_push_cstr(&sb, "\n  ret r");
-    string_builder_push_i64(&sb, fun.returnid);
+    string_builder_push_cstr(&sb, "\n  ret ");
+    string_builder_push_irid(&sb, fun.return_ir);
     string_builder_push_cstr(&sb, "\n}");
   }
   Cstr result = string_builder_end(&sb);
@@ -555,8 +561,10 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source) + 2;
-  Arena arena          = arena_init(KB(64) * source_length);
-  Ast ast              = ast_from_source(&arena, source);
+  Arena arena          = arena_init(KB(8) * source_length);
+                         str_init(&arena, source_length);
+  Tokens tokens        = lex_source(&arena, source);
+  Ast_Block ast        = parse_tokens(&arena, tokens);
   Funs funs            = ir_ast(&arena, ast);
   C8* buffer           = arena_push(&arena, KB(1) * source_length);
   Cstr result          = cstr_from_funs(buffer, funs);
