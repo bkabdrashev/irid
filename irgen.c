@@ -15,23 +15,23 @@ typedef enum Ir_Kind {
 
   Ir_Kind_int = Ast_Kind_int,
 
-  Ir_Kind_add = Ast_Kind_add_leave,
-  Ir_Kind_sub = Ast_Kind_sub_leave,
-  Ir_Kind_mul = Ast_Kind_mul_leave,
-  Ir_Kind_eq  = Ast_Kind_eq_leave,
-  Ir_Kind_ne  = Ast_Kind_ne_leave,
-  Ir_Kind_lt  = Ast_Kind_lt_leave,
-  Ir_Kind_le  = Ast_Kind_le_leave,
-  Ir_Kind_gt  = Ast_Kind_gt_leave,
-  Ir_Kind_ge  = Ast_Kind_ge_leave,
+  Ir_Kind_add = Ast_Kind_add,
+  Ir_Kind_sub = Ast_Kind_sub,
+  Ir_Kind_mul = Ast_Kind_mul,
+  Ir_Kind_eq  = Ast_Kind_eq,
+  Ir_Kind_ne  = Ast_Kind_ne,
+  Ir_Kind_lt  = Ast_Kind_lt,
+  Ir_Kind_le  = Ast_Kind_le,
+  Ir_Kind_gt  = Ast_Kind_gt,
+  Ir_Kind_ge  = Ast_Kind_ge,
 
-  Ir_Kind_join = Ast_Kind_join_leave,
+  Ir_Kind_join = Ast_Kind_join,
 
-  Ir_Kind_neg = Ast_Kind_neg_leave,
+  Ir_Kind_neg = Ast_Kind_neg,
 
-  Ir_Kind_load      = Ast_Kind_load_leave,
+  Ir_Kind_load      = Ast_Kind_load,
   Ir_Kind_var       = Ast_Kind_name,
-  Ir_Kind_ptr       = Ast_Kind_ptr_leave,
+  Ir_Kind_ptr       = Ast_Kind_ptr,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
   Ir_Kind_record          = 131,
@@ -391,8 +391,7 @@ Blockid ir_block_new() {
 }
 
 void scope_enter() {
-  Hash_Map new_scope = hash_map_init(irgen.temp_arena, KB(1)); // BUG: figure out tight upper bound for the hash map
-  add(irgen.scope_stack, new_scope);
+  assert(0);
 }
 
 void scope_leave() {
@@ -403,7 +402,7 @@ Fun* funid_get(Funid funid) {
   return &get(irgen.funs, funid);
 }
 
-Funid ir_fun_enter(Astid astid) {
+Funid ir_fun_enter() {
   scope_enter();
   Funid funid = irgen.funs.length;
   Fun*  fun = &new(irgen.funs);

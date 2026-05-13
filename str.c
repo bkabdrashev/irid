@@ -44,13 +44,13 @@ typedef enum Token_Kind {
 } Token_Kind;
 
 typedef const char* Cstr;
-typedef I32 Istr;
 
 typedef struct Str Str;
 struct Str {
   C8* base;
   Umi length;
 };
+typedef Str* Istr;
 
 typedef struct Internal_Strings Internal_Strings;
 struct Internal_Strings {
@@ -79,33 +79,35 @@ void istr_init(Umi capacity) {
 }
 
 Token_Kind token_kind_from_istr(Istr istr) {
-  return internal_strings.token_kinds[istr];
+  I32 offset = istr - internal_strings.strings;
+  return internal_strings.token_kinds[offset];
 }
 
 Cstr cstr_from_istr(Istr istr) {
-  return internal_strings.strings[istr].base;
+  return istr->base;
 }
 
 Umi istr_length(Istr istr) {
-  return internal_strings.strings[istr].length;
+  return istr->length;
 }
 
-Istr istr_from_cstr_token_kind(Cstr str, Token_Kind kind) {
-  Umi len  = strlen(str);
-  Istr istr = hash_bytes(str, len);
+Istr istr_from_cstr_token_kind(Cstr cstr, Token_Kind kind) {
+  // TODO: use the hash map ptr -> ptr interface
+  Umi len  = strlen(cstr);
+  Istr istr = hash_bytes(cstr, len);
   for (;;) {
     istr &= internal_strings.cap - 1;
-    Str slice = internal_strings.strings[istr];
-    if (!slice.base) {
-      slice.base = internal_strings.buffer_top;
-      slice.length = len;
-      memcpy(slice.base, str, len + 1);
+    Str str = internal_strings.strings[istr];
+    if (!str.base) {
+      str.base = internal_strings.buffer_top;
+      str.length = len;
+      memcpy(str.base, str, len + 1);
       internal_strings.buffer_top += len + 1;
       internal_strings.strings[istr] = slice;
       internal_strings.token_kinds[istr] = kind;
       return istr;
     }
-    else if (slice.length == len && strncmp(slice.base, str, len) == 0) {
+    else if (str.length == len && strncmp(str.base, str, len) == 0) {
       return istr;
     }
     istr++;
@@ -196,5 +198,3 @@ void test_at_source(Cstr testee, Cstr expected, Cstr file_name, I32 line, Cstr s
     printf("%s(%i): at test source: %s\n", file_name, line, source);
   }
 }
-
-
