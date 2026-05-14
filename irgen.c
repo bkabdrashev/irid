@@ -301,8 +301,8 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
 
     for (I32 b = 0; b < fun.blocks->length; b++) {
       Block* block = fun.blocks->base[b];
-      string_builder_push_cstr(&sb, "\n  b");
-      string_builder_push_i64(&sb, b);
+      string_builder_push_cstr(&sb, "\n  ");
+      string_builder_push_blockid(&sb, block);
       string_builder_push_cstr(&sb, ":");
       for (I32 irid = 0; irid < block->irs->length; irid++) {
         Ir* ir = block->irs->base[irid];
@@ -561,7 +561,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
   } break;
-  case Ast_Kind_ptr:
+  case Ast_Kind_ptr: case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg: {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
@@ -636,7 +636,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1 == 2*3", "test");
+  test("@1; 2@", "test");
 }
 
 #undef test
