@@ -451,15 +451,17 @@ void record_push_declare_name(Record* record, Str* name, I32 position) {
   record->names[position] = name;
 }
 
-void irgen_put_branch(Ir* cond) {
+Block* irgen_put_branch(Ir* cond) {
   Block* block = irgen_top_block();
   block->branch.cond = cond;
   block->kind = Block_Kind_branch;
+  return block;
 }
 
-void irgen_put_jump() {
+Block* irgen_put_jump(void) {
   Block* block = irgen_top_block();
   block->kind = Block_Kind_jump;
+  return block;
 }
 
 Block* irgen_block_leave() {
@@ -468,7 +470,7 @@ Block* irgen_block_leave() {
   return block;
 }
 
-Block* irgen_block_new() {
+Block* irgen_block_new(void) {
   irgen_block_leave();
   Fun* fun = top(irgen.fun_stack);
   Block* block = &new(irgen.blocks);
@@ -579,6 +581,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
       assert(0);
     }
   } break;
+  case Ast_Kind_assign: {
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    irgen_assign(node->binary.lhs, rhs);
+  } break;
   case Ast_Kind_tuple: {
     Record* record = record_new(node->list->length);
     for (I32 i = 0; i < node->list->length; i++) {
@@ -632,10 +638,20 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     result = irgen_push_binary((Ir_Kind)node->kind | Ir_Flag_binary, lhs, rhs);
   } break;
-  case Ast_Kind_assign: {
-    Ir* rhs = irgen_ast_node(node->binary.rhs);
-    irgen_assign(node->binary.lhs, rhs);
+  case Ast_Kind_if: {
+    Ast_Node* cond = node->binary.lhs;
+    Ast_Node* then = node->binary.rhs;
+    Ir* cond_ir = irgen_ast_node(cond);
+    Block* branch_from_block = irgen_put_branch(cond_ir);
+    Block* nez_block = irgen_block_new();
+    branch_from_block->branch.nez.to_block = nez_block;
+    irgen_ast_node(then);
+    Block* jump_from_block = irgen_put_jump();
+    Block* eqz_block = irgen_block_new();
+    jump_from_block->jump.to_block = eqz_block;
+    branch_from_block->branch.eqz.to_block = eqz_block;
   } break;
+  case Ast_Kind_none: { assert(0); }
   case Ast_Kind_declare: { assert(0); }
   case Ast_Kind_assign_field: { assert(0); }
   case Ast_Kind_declare_field: { assert(0); }
@@ -694,7 +710,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a:1; b:2; a,b = 3,4  ", "test");
+  test("if 1 do 2", "test");
 }
 
 #undef test

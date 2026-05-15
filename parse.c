@@ -586,6 +586,13 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
 }
 
 Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
+  {
+    Token next_token = get(parser->tokens, parser->tok);
+    if ((next_token.flag & Token_Flag_wasnewline) == 0) {
+      Ast_Node* node = parse_statement(parser);
+      return node;
+    }
+  }
   Ast* temp = parse_list_temp(parser);
   while (true) {
     Ast_Node* node = parse_statement(parser);
@@ -864,11 +871,11 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void parse_test(void) {
   test("a, b -> 1, 2",     "((a, b) -> (1, 2))");
-  test("wh 1 do 2",        "while 1 do {2;}");
+  test("wh 1 do 2",        "while 1 do 2");
   test("(if 1 do 2)",      "if 1 do 2");
   test("(if 1 do 2 el 3)", "if 1 do 2 else 3");
-  test("if 1 do 2",      "if 1 do {2;}");
-  test("if 1 do 2 el 3", "if 1 do {2;} else {3;}");
+  test("if 1 do 2",      "if 1 do 2");
+  test("if 1 do 2 el 3", "if 1 do 2 else 3");
 
   test("{1; 2}",         "{1; 2;}");
 
