@@ -477,15 +477,15 @@ Block* irgen_block_new() {
   return block;
 }
 
-void scope_enter() {
+void scope_enter(Hash_Map* scope) {
 }
 
-void scope_leave() {
+void scope_leave(void) {
   del(irgen.scope_stack);
 }
 
 Fun* irgen_fun_enter() {
-  scope_enter();
+  scope_enter(0);
   Fun* fun = &new(irgen.funs);
   add(irgen.fun_stack, fun);
   {
@@ -591,6 +591,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
     result = irgen_push_record(record);
   } break;
+  case Ast_Kind_block: {
+    scope_enter(node->block.scope);
+    for (I32 i = 0; i < node->block.list->length; i++) {
+      Ast_Node* exp = node->block.list->base[i];
+      irgen_ast_node(exp);
+    }
+    scope_leave();
+  } break;
   case Ast_Kind_ptr: case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg: {
     Ir* unary = irgen_ast_node(node->unary);
@@ -669,7 +677,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("(x=1)", "test");
+  test("{ 1; 2 }", "test");
 }
 
 #undef test
