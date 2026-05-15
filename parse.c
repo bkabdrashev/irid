@@ -63,10 +63,11 @@ struct Ast {
   Ast_Node* base[];
 };
 
+typedef I32 Varid;
 typedef struct Symbol Symbol;
 struct Symbol {
   Ast_Node* ast;
-  Ir* var_ir;
+  Varid varid;
   Ir* declared;
 };
 

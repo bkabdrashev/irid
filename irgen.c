@@ -1,5 +1,3 @@
-typedef I32 Varid;
-
 typedef enum Ir_Flag {
   Ir_Flag_unary  = Ast_Flag_unary,
   Ir_Flag_binary = Ast_Flag_binary,
@@ -503,7 +501,7 @@ void irgen_scope_enter(Hash_Map* scope) {
     Symbol* sym = hash_map_get(scope, key);
     Ir* ir = irgen_ast_node(sym->ast);
     sym->declared = ir;
-    sym->var_ir = irgen_push_var(irgen.varids++);
+    sym->varid = irgen.varids++;
   }
   add(irgen.scope_stack, scope);
 }
@@ -575,7 +573,8 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_name: {
     Symbol* sym = irgen_get_sym(node->str);
     if (sym) {
-      result = irgen_push_unary(Ir_Kind_load, sym->var_ir);
+      Ir* var_ir = irgen_push_var(sym->varid);
+      result = irgen_push_unary(Ir_Kind_load, var_ir);
     }
     else {
       assert(0);
@@ -651,6 +650,24 @@ Ir* irgen_ast_node(Ast_Node* node) {
     jump_from_block->jump.to_block = eqz_block;
     branch_from_block->branch.eqz.to_block = eqz_block;
   } break;
+  case Ast_Kind_else: {
+    Ast_Node* cond = node->binary.lhs->binary.lhs;
+    Ast_Node* then_node = node->binary.lhs->binary.rhs;
+    Ast_Node* else_node = node->binary.rhs;
+    Ir* cond_ir = irgen_ast_node(cond);
+    Block* branch_from_block = irgen_put_branch(cond_ir);
+    Block* nez_block = irgen_block_new();
+    branch_from_block->branch.nez.to_block = nez_block;
+    irgen_ast_node(then_node);
+    Block* jump_from_nez = irgen_put_jump();
+    Block* eqz_block = irgen_block_new();
+    branch_from_block->branch.eqz.to_block = eqz_block;
+    irgen_ast_node(else_node);
+    Block* jump_from_eqz = irgen_put_jump();
+    Block* merge_block = irgen_block_new();
+    jump_from_eqz->jump.to_block = merge_block;
+    jump_from_nez->jump.to_block = merge_block;
+  } break;
   case Ast_Kind_none: { assert(0); }
   case Ast_Kind_declare: { assert(0); }
   case Ast_Kind_assign_field: { assert(0); }
@@ -710,7 +727,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("if 1 do 2", "test");
+  test("a:4; if 1 do { a=1 } el { a = 2 }", "test");
 }
 
 #undef test
