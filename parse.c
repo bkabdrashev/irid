@@ -44,6 +44,8 @@ typedef enum Ast_Kind {
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_call        = 50,
+  Ast_Kind_declare_field,
+  Ast_Kind_assign_field,
   Ast_Kind_iblock,
 } Ast_Kind;
 
@@ -282,6 +284,16 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.lhs);
     string_builder_push_cstr(sb, " = ");
     string_builder_push_ast_node(sb, node->binary.rhs);
+  } break;
+  case Ast_Kind_assign_field: {
+    string_builder_push_str(sb, node->declare.str);
+    string_builder_push_cstr(sb, "=");
+    string_builder_push_ast_node(sb, node->declare.rhs);
+  } break;
+  case Ast_Kind_declare_field: {
+    string_builder_push_str(sb, node->declare.str);
+    string_builder_push_cstr(sb, ":");
+    string_builder_push_ast_node(sb, node->declare.rhs);
   } break;
   case Ast_Kind_declare: {
     string_builder_push_str(sb, node->declare.str);
@@ -639,9 +651,22 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
         Ast_Node* lhs = exp;
         if (lhs->kind == Ast_Kind_name) {
           Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
-          exp = parse_new_node(parser, Ast_Kind_declare);
-          exp ->declare.str = lhs->str;
-          exp ->declare.rhs = rhs;
+          exp = parse_new_node(parser, Ast_Kind_declare_field);
+          exp->declare.str = lhs->str;
+          exp->declare.rhs = rhs;
+        }
+        else {
+          assert(0);
+        }
+      }
+      else if (parse_match_token(parser, Token_Kind_equal)) {
+        is_record = true;
+        Ast_Node* lhs = exp;
+        if (lhs->kind == Ast_Kind_name) {
+          Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
+          exp = parse_new_node(parser, Ast_Kind_assign_field);
+          exp->declare.str = lhs->str;
+          exp->declare.rhs = rhs;
         }
         else {
           assert(0);
@@ -868,7 +893,8 @@ void parse_test(void) {
   test("(1;)",           "(1;)");
   test("(1; 2)",         "(1; 2;)");
   test("(1; 2;)",        "(1; 2;)");
-  test("(x:1; y:2)",       "(x : 1; y : 2;)");
+  test("(x=1)",          "(x=1;)");
+  test("(x:1; y:2)",     "(x:1; y:2;)");
   test("1,2",            "(1, 2)");
 
   test("1",              "1");

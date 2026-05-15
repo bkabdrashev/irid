@@ -259,6 +259,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
         }
       }
       else {
+        string_builder_push_cstr(sb, " ");
         string_builder_push_irid(sb, field.assigned);
       }
     }
@@ -424,12 +425,12 @@ Ir* irgen_push_position_offset(Ir* record, I32 position) {
   return irgen_push(ir);
 }
 
-Record* recordid_new(I32 length) {
+Record* record_new(I32 length) {
   Record* new_record = &new(irgen.records);
   new_record->length   = length;
   new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
-  new_record->assigned = arena_push(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->declared = arena_push(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
   return new_record;
 }
@@ -561,6 +562,35 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
   } break;
+  case Ast_Kind_tuple: {
+    Record* record = record_new(node->list->length);
+    for (I32 i = 0; i < node->list->length; i++) {
+      Ir* ir = irgen_ast_node(node->list->base[i]);
+      record_push_assign_position(record, i, ir);
+    }
+    result = irgen_push_record(record);
+  } break;
+  case Ast_Kind_record: {
+    Record* record = record_new(node->list->length);
+    for (I32 i = 0; i < node->list->length; i++) {
+      Ast_Node* field_node = node->list->base[i];
+      if (field_node->kind == Ast_Kind_assign_field) {
+        Ir* ir = irgen_ast_node(field_node->declare.rhs);
+        record_push_assign_name(record, field_node->declare.str, i);
+        record_push_assign_position(record, i, ir);
+      }
+      else if (field_node->kind == Ast_Kind_declare_field) {
+        Ir* ir = irgen_ast_node(field_node->declare.rhs);
+        record_push_assign_name(record, field_node->declare.str, i);
+        record_push_declare_position(record, i, ir);
+      }
+      else {
+        Ir* ir = irgen_ast_node(field_node);
+        record_push_assign_position(record, i, ir);
+      }
+    }
+    result = irgen_push_record(record);
+  } break;
   case Ast_Kind_ptr: case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg: {
     Ir* unary = irgen_ast_node(node->unary);
@@ -581,6 +611,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_assign(node->binary.lhs, rhs);
   } break;
+  case Ast_Kind_declare: { assert(0); }
+  case Ast_Kind_assign_field: { assert(0); }
+  case Ast_Kind_declare_field: { assert(0); }
   }
   return result;
 }
@@ -636,7 +669,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("@1; 2@", "test");
+  test("(x=1)", "test");
 }
 
 #undef test
