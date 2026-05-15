@@ -424,6 +424,11 @@ Ir* irgen_push_position_offset(Ir* record, I32 position) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_name_offset(Ir* record, Str* name) {
+  Ir ir = { Ir_Kind_name_offset, .name = { .of = record, .at = name } };
+  return irgen_push(ir);
+}
+
 Record* record_new(I32 length) {
   Record* new_record = &new(irgen.records);
   new_record->length   = length;
@@ -580,6 +585,13 @@ Ir* irgen_ast_node(Ast_Node* node) {
       assert(0);
     }
   } break;
+  case Ast_Kind_dot: {
+    Ir* lhs = irgen_ast_node(node->binary.lhs);
+    if (node->binary.rhs->kind == Ast_Kind_name) {
+      Ir* name_offset_ir = irgen_push_name_offset(lhs, node->binary.rhs->str);
+      result = irgen_push_unary(Ir_Kind_load, name_offset_ir);
+    }
+  } break;
   case Ast_Kind_assign: {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_assign(node->binary.lhs, rhs);
@@ -668,6 +680,11 @@ Ir* irgen_ast_node(Ast_Node* node) {
     jump_from_eqz->jump.to_block = merge_block;
     jump_from_nez->jump.to_block = merge_block;
   } break;
+  case Ast_Kind_fun: case Ast_Kind_while:
+  case Ast_Kind_return: case Ast_Kind_break:
+  case Ast_Kind_return_value: case Ast_Kind_break_value:
+  case Ast_Kind_block_value: case Ast_Kind_iblock:
+  case Ast_Kind_if_value: case Ast_Kind_else_value:
   case Ast_Kind_none: { assert(0); }
   case Ast_Kind_declare: { assert(0); }
   case Ast_Kind_assign_field: { assert(0); }
@@ -727,7 +744,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a:4; if 1 do { a=1 } el { a = 2 }", "test");
+  test("a:4; a.x", "test");
 }
 
 #undef test
