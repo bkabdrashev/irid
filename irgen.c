@@ -234,6 +234,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_position_offset:
     string_builder_push_cstr(sb, "position offset ");
     string_builder_push_irid(sb, ir->position.of);
+    string_builder_push_cstr(sb, ".");
     string_builder_push_i64(sb, ir->position.at);
   break;
   case Ir_Kind_name_offset:
@@ -546,21 +547,11 @@ void irgen_fun_leave() {
 
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
-  case Ast_Kind_name: {
-  } break;
-  case Ast_Kind_record: {
+  case Ast_Kind_tuple: {
     for (I32 i = 0; i < lhs->list->length; i++) {
       Ir* at = irgen_push_position_offset(rhs, i);
       Ast_Node* node = lhs->list->base[i];
-      if (node->kind == Ast_Kind_assign) {
-        assert(0);
-      }
-      else if (node->kind == Ast_Kind_declare) {
-        assert(0);
-      }
-      else {
-        irgen_assign(node, at);
-      }
+      irgen_assign(node, at);
     }
   } break;
   default : {
@@ -583,6 +574,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Symbol* sym = irgen_get_sym(node->str);
     if (sym) {
       result = irgen_push_unary(Ir_Kind_load, sym->var_ir);
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ast_Kind_tuple: {
@@ -700,7 +694,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("{a:3; a}", "test");
+  test("a:1; b:2; a,b = 3,4  ", "test");
 }
 
 #undef test
