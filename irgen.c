@@ -479,15 +479,30 @@ Block* irgen_block_new() {
 
 Ir* irgen_ast_node(Ast_Node* node);
 
+Symbol* irgen_get_sym(Str* str) {
+  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
+    Hash_Map* scope = irgen.scope_stack.base[i];
+    Symbol* sym = hash_map_get(scope, str);
+    if (sym) {
+      return sym;
+    }
+  }
+  return 0;
+}
+
 void irgen_scope_enter(Hash_Map* scope) {
-  add(irgen.scope_stack, scope);
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
+    {
+      Symbol* sym = irgen_get_sym(key);
+      if (sym) assert(0);
+    }
     Symbol* sym = hash_map_get(scope, key);
     Ir* ir = irgen_ast_node(sym->ast);
     sym->declared = ir;
     sym->var_ir = irgen_push_var(irgen.varids++);
   }
+  add(irgen.scope_stack, scope);
 }
 
 void irgen_scope_leave(void) {
@@ -529,17 +544,6 @@ void irgen_fun_leave() {
   irgen_scope_leave();
 }
 
-Ir* irgen_get_sym(Str* str) {
-  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
-    Hash_Map* scope = irgen.scope_stack.base[i];
-    Symbol* sym = hash_map_get(scope, str);
-    if (sym) {
-      return sym->var_ir;
-    }
-  }
-  assert(0);
-}
-
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
   case Ast_Kind_name: {
@@ -576,8 +580,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_int(node->i64);
   } break;
   case Ast_Kind_name: {
-    Ir* var_ir = irgen_get_sym(node->str);
-    result = irgen_push_unary(Ir_Kind_load, var_ir);
+    Symbol* sym = irgen_get_sym(node->str);
+    if (sym) {
+      result = irgen_push_unary(Ir_Kind_load, sym->var_ir);
+    }
   } break;
   case Ast_Kind_tuple: {
     Record* record = record_new(node->list->length);
@@ -694,7 +700,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a:3; a", "test");
+  test("{a:3; a}", "test");
 }
 
 #undef test

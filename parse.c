@@ -446,6 +446,10 @@ Hash_Map* parse_map_perm(Parser* parser, Ast* temp_list) {
   *map = hash_map_init(parser->perm_arena, temp_list->length+1);
   for (I32 i = 0; i < temp_list->length; i++) {
     Ast_Node* node = temp_list->base[i];
+    {
+      Symbol* sym = hash_map_get(map, node->declare.str);
+      if (sym) assert(0);
+    }
     assert(node->kind == Ast_Kind_declare);
     Symbol* sym = arena_push(parser->perm_arena, sizeof(Symbol));
     sym->ast = node->declare.rhs;
