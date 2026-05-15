@@ -477,15 +477,24 @@ Block* irgen_block_new() {
   return block;
 }
 
-void scope_enter(Hash_Map* scope) {
+Ir* irgen_ast_node(Ast_Node* node);
+
+void irgen_scope_enter(Hash_Map* scope) {
+  add(irgen.scope_stack, scope);
+  for (I32 i = 0; i < scope->len; i++) {
+    Str* key = scope->list[i];
+    Symbol* sym = hash_map_get(scope, key);
+    Ir* ir = irgen_ast_node(sym->ast);
+    sym->declared = ir;
+    sym->var_ir = irgen_push_var(irgen.varids++);
+  }
 }
 
-void scope_leave(void) {
+void irgen_scope_leave(void) {
   del(irgen.scope_stack);
 }
 
-Fun* irgen_fun_enter() {
-  scope_enter(0);
+Fun* irgen_fun_enter(Hash_Map* scope) {
   Fun* fun = &new(irgen.funs);
   add(irgen.fun_stack, fun);
   {
@@ -497,6 +506,7 @@ Fun* irgen_fun_enter() {
   }
   fun->return_ir = &top(irgen.irs);
   fun->var_count = 0;
+  irgen_scope_enter(scope);
   return fun;
 }
 
@@ -516,17 +526,20 @@ void irgen_fun_leave() {
 
   fun->blocks = irgen_blocks_perm(fun->blocks);
 
-  scope_leave();
-}
-Varid ir_get_sym(Str* str) {
-  assert(0);
-  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
-  }
-  Varid varid = irgen.varids++;
-  return varid;
+  irgen_scope_leave();
 }
 
-Ir* irgen_ast_node(Ast_Node* node);
+Ir* irgen_get_sym(Str* str) {
+  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
+    Hash_Map* scope = irgen.scope_stack.base[i];
+    Symbol* sym = hash_map_get(scope, str);
+    if (sym) {
+      return sym->var_ir;
+    }
+  }
+  assert(0);
+}
+
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
   case Ast_Kind_name: {
@@ -562,6 +575,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
   } break;
+  case Ast_Kind_name: {
+    Ir* var_ir = irgen_get_sym(node->str);
+    result = irgen_push_unary(Ir_Kind_load, var_ir);
+  } break;
   case Ast_Kind_tuple: {
     Record* record = record_new(node->list->length);
     for (I32 i = 0; i < node->list->length; i++) {
@@ -592,12 +609,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_record(record);
   } break;
   case Ast_Kind_block: {
-    scope_enter(node->block.scope);
+    irgen_scope_enter(node->block.scope);
     for (I32 i = 0; i < node->block.list->length; i++) {
       Ast_Node* exp = node->block.list->base[i];
       irgen_ast_node(exp);
     }
-    scope_leave();
+    irgen_scope_leave();
   } break;
   case Ast_Kind_ptr: case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg: {
@@ -643,7 +660,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.records.length = 0;
   irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
-  irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Hash_Map));
+  irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
   irgen.irid_nil = 0;
   Ir ir_nil = {0, {0}};
@@ -651,7 +668,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.varid_nil = 0;
   irgen.varids = 1;
 
-  irgen_fun_enter();
+  irgen_fun_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
     irgen_ast_node(ast.list->base[i]);
   }
@@ -677,7 +694,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("{ 1; 2 }", "test");
+  test("a:3; a", "test");
 }
 
 #undef test

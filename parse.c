@@ -49,28 +49,25 @@ typedef enum Ast_Kind {
   Ast_Kind_iblock,
 } Ast_Kind;
 
-typedef struct {
-  I32* base;
-  I32 length;
-} I32s;
-
-typedef struct Scopes Scopes;
-struct Scopes {
-  Hash_Map* base;
-  I32 length;
-};
-
 typedef struct Scope_Stack Scope_Stack;
 struct Scope_Stack {
   Hash_Map** base;
   I32 length;
 };
 
+typedef struct Ir Ir;
 typedef struct Ast_Node Ast_Node;
 typedef struct Ast Ast;
 struct Ast {
   I32 length;
   Ast_Node* base[];
+};
+
+typedef struct Symbol Symbol;
+struct Symbol {
+  Ast_Node* ast;
+  Ir* var_ir;
+  Ir* declared;
 };
 
 typedef struct Ast_Block Ast_Block;
@@ -181,8 +178,8 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
       Str* str = scope->keys[i];
       string_builder_push_str(sb, str);
       string_builder_push_cstr(sb, " : ");
-      Ast_Node* rhs = hash_map_get(scope, str);
-      string_builder_push_ast_node(sb, rhs);
+      Symbol* sym = hash_map_get(scope, str);
+      string_builder_push_ast_node(sb, sym->ast);
       string_builder_push_cstr(sb, "; ");
     }
     Ast* list = node->block.list;
@@ -307,11 +304,11 @@ Cstr cstr_from_ast(C8* buffer, Ast_Block ast) {
   String_Builder sb = string_builder_begin(buffer);
   Hash_Map* scope = ast.scope;
   for (I32 i = 0; i < scope->len; i++) {
-    Str* str = scope->keys[i];
+    Str* str = scope->list[i];
     string_builder_push_str(&sb, str);
     string_builder_push_cstr(&sb, " : ");
-    Ast_Node* rhs = hash_map_get(scope, str);
-    string_builder_push_ast_node(&sb, rhs);
+    Symbol* sym = hash_map_get(scope, str);
+    string_builder_push_ast_node(&sb, sym->ast);
     string_builder_push_cstr(&sb, "; ");
   }
 
@@ -446,11 +443,13 @@ void parse_map_push(Parser* parser, Ast* temp_map, Ast_Node* node) {
 
 Hash_Map* parse_map_perm(Parser* parser, Ast* temp_list) {
   Hash_Map* map = arena_push(parser->perm_arena, sizeof(Hash_Map));
-  *map = hash_map_init(parser->perm_arena, temp_list->length);
+  *map = hash_map_init(parser->perm_arena, temp_list->length+1);
   for (I32 i = 0; i < temp_list->length; i++) {
     Ast_Node* node = temp_list->base[i];
     assert(node->kind == Ast_Kind_declare);
-    hash_map_put(map, node->declare.str, node->declare.rhs);
+    Symbol* sym = arena_push(parser->perm_arena, sizeof(Symbol));
+    sym->ast = node->declare.rhs;
+    hash_map_put(map, node->declare.str, sym);
   }
   arena_release_mark(parser->map_arena, temp_list);
   return map;
