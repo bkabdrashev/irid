@@ -12,6 +12,6 @@ int main(void) {
   arena_test();
   parse_test();
   irgen_test();
-  // sem_test();
+  sem_test();
   return 0;
 }

@@ -182,6 +182,7 @@ U64 hash_u64(U64 x) {
   return x;
 }
 
+// array
 #define empty(slice) ((slice).length == 0)
 #define push(slice, item) ((slice).base[(slice).length++] = (item), ((slice).length)-1)
 #define add(slice, item) do {(slice).base[(slice).length++] = (item);} while(0);
@@ -191,8 +192,20 @@ U64 hash_u64(U64 x) {
 #define top(slice) ((slice).base[(slice).length-1])
 #define get(slice, index) ((slice).base[(index)])
 #define put(slice, index, value) ((slice).base[(index)] = (value))
+
 #define min(x, y) ((x) <= (y) ? (x) : (y))
 #define max(x, y) ((x) >= (y) ? (x) : (y))
+
+// flexible array
+#define fa_empty(fa) ((fa)->length == 0)
+#define fa_push(fa, item) ((fa)->base[(fa)->length++] = (item), ((fa)->length)-1)
+#define fa_add(fa, item) do {(fa)->base[(fa)->length++] = (item);} while(0);
+#define fa_new(fa) ((fa)->base[(fa)->length++])
+#define fa_pop(fa) ((fa)->base[--(fa)->length])
+#define fa_del(fa) (--(fa)->length)
+#define fa_top(fa) ((fa)->base[(fa)->length-1])
+#define fa_get(fa, index) ((fa)->base[(index)])
+#define fa_put(fa, index, value) ((fa)->base[(index)] = (value))
 
 typedef struct Hash_Set Hash_Set;
 struct Hash_Set {
@@ -392,23 +405,4 @@ B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
     }
   }
   return true;
-}
-
-typedef struct Dense_Map Dense_Map;
-struct Dense_Map {
-  I32* base;
-};
-
-Dense_Map dense_map_init(Arena* arena, Umi capacity) {
-  Dense_Map map = {};
-  map.base   = arena_push_zero(arena, sizeof(void*)*capacity);
-  return map;
-}
-
-void dense_map_put(Dense_Map* map, I32 key, I32 val) {
-  map->base[key] = val;
-}
-
-I32 dense_map_get(Dense_Map map, I32 key) {
-  return map.base[key];
 }

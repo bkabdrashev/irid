@@ -60,11 +60,19 @@ struct Record {
   Hash_Map position_from_name;
 };
 
+typedef struct Type Type;
+typedef struct Var Var;
+struct Var {
+  Str*  name;
+  Ir*   declared;
+  Type* type;
+};
+
 struct Ir {
   Ir_Kind kind;
   union {
     I64 i64;
-    Varid varid;
+    Var*    var;
     Record* record;
     Ir_Pair binary;
     Ir*     unary;
@@ -125,6 +133,7 @@ typedef enum Block_Kind {
 
 struct Block {
   Block_Kind kind;
+  B8 exist;
   I32 pred_count;
   Irs* irs;
   Hash_Map out_var_types;
@@ -172,9 +181,6 @@ struct Irgen {
   Record_Pool records;
   Ir_Pool     irs;
   Ir*     irid_nil;
-  Varid   varid_nil;
-  Varid   varids;
-
   Fun_Stack      fun_stack;
   Scope_Stack    scope_stack;
 };
@@ -227,7 +233,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
-    string_builder_push_i64(sb, ir->varid);
+    string_builder_push_str(sb, ir->var->name);
   break;
   case Ir_Kind_position_offset:
     string_builder_push_cstr(sb, "position offset ");
@@ -399,8 +405,8 @@ Ir* irgen_push_int(I64 i64) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_var(Varid varid) {
-  Ir ir = { Ir_Kind_var, .varid = varid };
+Ir* irgen_push_var(Var* var) {
+  Ir ir = { Ir_Kind_var, .var = var };
   return irgen_push(ir);
 }
 
@@ -505,8 +511,10 @@ void irgen_scope_enter(Hash_Map* scope) {
     }
     Symbol* sym = hash_map_get(scope, key);
     Ir* ir = irgen_ast_node(sym->ast);
-    sym->declared = ir;
-    sym->varid = irgen.varids++;
+    Var* var = arena_push(irgen.perm_arena, sizeof(Var));
+    var->name = key;
+    var->declared = ir;
+    sym->var = var;
   }
   add(irgen.scope_stack, scope);
 }
@@ -578,7 +586,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_name: {
     Symbol* sym = irgen_get_sym(node->str);
     if (sym) {
-      Ir* var_ir = irgen_push_var(sym->varid);
+      Ir* var_ir = irgen_push_var(sym->var);
       result = irgen_push_unary(Ir_Kind_load, var_ir);
     }
     else {
@@ -715,8 +723,6 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.irid_nil = 0;
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
-  irgen.varid_nil = 0;
-  irgen.varids = 1;
 
   irgen_fun_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
@@ -730,7 +736,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Umi source_length    = strlen(source) + 2;
-  Arena arena          = arena_init(KB(8) * source_length);
+  Arena arena          = arena_init(KB(2) * source_length);
                          str_init(&arena, 2*source_length);
   Tokens tokens        = lex_source(&arena, source);
   Ast_Block ast        = parse_tokens(&arena, tokens);

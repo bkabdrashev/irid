@@ -63,12 +63,11 @@ struct Ast {
   Ast_Node* base[];
 };
 
-typedef I32 Varid;
+typedef struct Var Var;
 typedef struct Symbol Symbol;
 struct Symbol {
   Ast_Node* ast;
-  Varid varid;
-  Ir* declared;
+  Var* var;
 };
 
 typedef struct Ast_Block Ast_Block;
@@ -858,7 +857,7 @@ Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
 
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
-  Arena arena   = arena_init(KB(4) * source_length);
+  Arena arena   = arena_init(KB(1) * source_length);
   str_init(&arena, 2*source_length);
   Tokens tokens = lex_source(&arena, source);
   Ast_Block ast = parse_tokens(&arena, tokens);
