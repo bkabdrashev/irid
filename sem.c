@@ -1,5 +1,3 @@
-typedef I32 Typeid;
-typedef I32 Type_Recordid;
 typedef Hash_Set* Recordid_Set;
 
 typedef struct Range Range;
@@ -13,34 +11,30 @@ struct Ranges {
   I32 length;
   Range pairs[];
 };
-typedef Ranges* Intid;
 
-typedef struct Intid_Pair Intid_Pair;
-struct Intid_Pair {
-  Intid one;
-  Intid two;
+typedef struct Ranges_Pair Ranges_Pair;
+struct Ranges_Pair {
+  Ranges* one;
+  Ranges* two;
 };
 
+typedef struct Type Type;
 typedef struct Type_Record Type_Record;
 struct Type_Record {
   I32      length;
-  I32      bit_size;
-  I32      bit_align;
   I32*     offsets;
-  Typeid*  declared;
-  Istr*    names;
+  Type**   declared;
+  Str**    names;
   Hash_Map positions;
 };
 
 typedef struct Type_Field Type_Field;
 struct Type_Field {
-  Istr   name;
+  Str*   name;
   I32    position;
   I32    offset;
-  Typeid declared;
+  Type*  declared;
 };
-
-Type_Field type_field_nil = {istr_nil, 0, 0, 0};
 
 typedef struct Type_Records Type_Records;
 struct Type_Records {
@@ -48,27 +42,10 @@ struct Type_Records {
   I32          length;
 };
 
-typedef enum {
-  Mem_Kind_stack,
-} Mem_Kind;
-
-typedef struct {
-  Mem_Kind kind;
-  Range offset_range;
-  I32 field_offset;
-  I32 field_depth;
-  union {
-    Varid varid;
-  };
-} Mem_Cell;
-
-typedef struct {
-  // TODO: consider optimization where Mem_Stack, Mem_Global, Mem_Heap, Mem_Unkown, Mem_Null
-  //       are used instead Mem_Kind. DOD
-  I32 length;
-  Mem_Cell cells[];
-} Pointer;
-typedef Pointer* Ptrid;
+typedef struct Pointer Pointer;
+struct Pointer {
+  Hash_Set* stack; // varids
+};
 
 typedef enum Type_Kind {
   Type_Kind_none,
@@ -77,28 +54,33 @@ typedef enum Type_Kind {
   Type_Kind_record,
 } Type_Kind;
 
-typedef struct Type Type;
 struct Type {
   Type_Kind kind;
   I32 bit_align;
   I32 bit_size;
   union {
-    Intid intid;
-    Ptrid ptrid;
-    Recordid_Set recordid_set;
+    Ranges*  ranges;
+    Pointer* pointer;
+    Record*  record;
   };
+};
+
+typedef struct Type_Pool Type_Pool;
+struct Type_Pool {
+  Type* base;
+  I32   length;
 };
 
 typedef struct Types Types;
 struct Types {
-  Type* base;
-  I32   length;
+  Type** base;
+  I32    length;
 };
 
 typedef struct Sem_Tasks Sem_Tasks;
 struct Sem_Tasks {
   Hash_Map* out_vars;
-  Typeid* typeids;
+  Type**  types;
   Varid*  varids;
   I32     length;
 };
@@ -109,28 +91,25 @@ struct Sem {
   Arena* perm_arena;
   Funs   funs;
   Dense_Map typeid_of_irids;
-  Types types;
+  Type_Pool types;
+  Types     ir_types;
   Type_Records records;
   Dense_Map workset;
-  Blockids worklist;
+  Blocks worklist;
 };
 
-Typeid typeid_nil = 0;
 Sem sem = {};
 
-typedef struct Typeid_Pair Typeid_Pair;
-struct Typeid_Pair { Typeid one; Typeid two; };
-
 typedef struct Type_Pair Type_Pair;
-struct Type_Pair { Type one; Type two; };
+struct Type_Pair { Type* one; Type* two; };
 
-I64 intid_max(Intid intid) {
-  return intid->pairs[intid->length-1].hi;
+I64 ranges_max(Ranges* ranges) {
+  return ranges->pairs[ranges->length-1].hi;
 }
 
-B8 intid_have(Intid intid, I64 i64) {
-  for (I32 i = 0; i < intid->length; i++) {
-    Range pair = intid->pairs[i];
+B8 ranges_have(Ranges* ranges, I64 i64) {
+  for (I32 i = 0; i < ranges->length; i++) {
+    Range pair = ranges->pairs[i];
     if (pair.lo >= i64 && i64 <= pair.hi) {
       return true;
     }
@@ -138,55 +117,34 @@ B8 intid_have(Intid intid, I64 i64) {
   return false;
 }
 
-I64 intid_min(Intid intid) {
-  return intid->pairs[0].lo;
+I64 ranges_min(Ranges* ranges) {
+  return ranges->pairs[0].lo;
 }
 
-B8 intid_is_single(Intid intid) {
-  I64 min = intid_min(intid);
-  I64 max = intid_max(intid);
+B8 ranges_is_single(Ranges* ranges) {
+  I64 min = ranges_min(ranges);
+  I64 max = ranges_max(ranges);
   return min == max;
 }
 
-Typeid typeid_of_irid(Irid irid) {
-  return dense_map_get(sem.typeid_of_irids, irid);
-}
-
-Type type_of_irid(Irid irid) {
-  Typeid typeid = typeid_of_irid(irid);
-  Type type = get(sem.types, typeid);
+Type* type_of_irid(Ir* ir) {
+  I32 irid = ir - irgen.irs.base;
+  Type* type = get(sem.ir_types, irid);
   return type;
 }
 
-Typeid typeid_of_varid(Blockid blockid, Varid varid) {
-  Block* block = blockid_get(blockid);
-  Typeid typeid = hash_map_get(&block->out_var_typeids, varid);
-  return typeid;
+void type_of_irid_put(Ir* ir, Type* type) {
+  I32 irid = ir - irgen.irs.base;
+  put(sem.ir_types, irid, type);
 }
 
-void typeid_of_varid_put(Blockid blockid, Varid varid, Typeid typeid) {
-  Block* block = blockid_get(blockid);
-  hash_map_put(&block->out_var_typeids, varid, typeid);
-}
-
-Type type_of_varid(Blockid blockid, Varid varid) {
-  Typeid typeid = typeid_of_varid(blockid, varid);
-  Type type = get(sem.types, typeid);
+Type* type_of_varid(Block* block, Varid varid) {
+  Type* type = hash_map_i32_get(&block->out_var_types, varid);
   return type;
 }
 
-void typeid_of_irid_put(Irid irid, Typeid typeid) {
-  dense_map_put(&sem.typeid_of_irids, irid, typeid);
-}
-
-I32 typeid_align(Typeid typeid) {
-  Type type = get(sem.types, typeid);
-  return type.bit_align;
-}
-
-I32 typeid_size(Typeid typeid) {
-  Type type = get(sem.types, typeid);
-  return type.bit_size;
+void type_of_varid_put(Block* block, Varid varid, Type* type) {
+  hash_map_i32_put(&block->out_var_types, varid, type);
 }
 
 Ranges* sem_ranges_init(I32 max_len) {
@@ -195,48 +153,42 @@ Ranges* sem_ranges_init(I32 max_len) {
   return result;
 }
 
-Pointer* sem_pointer_init(I32 max_len) {
-  Pointer* result = arena_push(sem.temp_arena, sizeof(Pointer) + max_len * sizeof(Mem_Cell));
-  result->length = 0;
-  return result;
-}
-
-Typeid typeid_ints(Ranges* ranges) {
-  Typeid typeid = sem.types.length++;
-
-  I64 min = intid_min(ranges);
-  I64 max = intid_max(ranges);
+Type* type_ints(Ranges* ranges) {
+  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  I64 min = ranges_min(ranges);
+  I64 max = ranges_max(ranges);
   I32 bit_size = bits_needed(min, max);
 
-  sem.types.base[typeid].kind = Type_Kind_int;
-  sem.types.base[typeid].intid = ranges;
-  sem.types.base[typeid].bit_align = bit_size;
-  sem.types.base[typeid].bit_size = bit_size;
-  return typeid;
+  new_type->kind = Type_Kind_int;
+  new_type->ranges = ranges;
+  new_type->bit_align = bit_size;
+  new_type->bit_size = bit_size;
+
+  return new_type;
 }
 
-Typeid typeid_int_interval(I64 min, I64 max) {
+Type* type_int_interval(I64 min, I64 max) {
   struct { I32 length; Range pairs[1]; } pair = { .length = 1, .pairs[0].lo = min, .pairs[0].hi = max };
   Ranges* ranges = (Ranges*)&pair;
-  return typeid_ints(ranges);
+  return type_ints(ranges);
 }
 
-Typeid typeid_int(I64 i64) {
-  return typeid_int_interval(i64, i64);
+Type* type_int(I64 i64) {
+  return type_int_interval(i64, i64);
 }
 
-Typeid typeid_intid_offset(Intid intid, I64 offset) {
-  Ranges* ranges = sem_ranges_init(intid->length);
-  ranges->length = intid->length;
-  for (I32 i = 0; i < intid->length; i++) {
-    Range offset_pair = { .lo = intid->pairs[i].lo + offset, .hi = intid->pairs[i].hi + offset };
-    ranges->pairs[i] = offset_pair;
+Type* type_ranges_offset(Ranges* ranges, I64 offset) {
+  Ranges* new_ranges = sem_ranges_init(ranges->length);
+  new_ranges->length = ranges->length;
+  for (I32 i = 0; i < ranges->length; i++) {
+    Range offset_pair = { .lo = ranges->pairs[i].lo + offset, .hi = ranges->pairs[i].hi + offset };
+    new_ranges->pairs[i] = offset_pair;
   }
 
-  return typeid_ints(ranges);
+  return type_ints(ranges);
 }
 
-Typeid typeid_intid_merge(Intid one, Intid two) {
+Type* type_ranges_merge(Ranges* one, Ranges* two) {
   Ranges* new_ints = sem_ranges_init(one->length + two->length);
   I32 len_one = one->length;
   I32 len_two = two->length;
@@ -284,7 +236,7 @@ Typeid typeid_intid_merge(Intid one, Intid two) {
   for (; t < len_two; t++) {
     new_ints->pairs[new_ints->length++] = two->pairs[t];
   }
-  return typeid_ints(new_ints);
+  return type_ints(new_ints);
 }
 
 Typeid typeid_ptr(Pointer* ptr) {
@@ -321,7 +273,7 @@ Type_Field type_recordid_get_by_position(Type_Recordid recordid, I32 position) {
   return field;
 }
 
-Type_Field type_recordid_get_by_name(Type_Recordid recordid, Istr name) {
+Type_Field type_recordid_get_by_name(Type_Recordid recordid, Str* name) {
   Type_Record record = get(sem.records, recordid);
   I32 position = hash_map_get(&record.positions, name);
   return type_recordid_get_by_position(recordid, position);
@@ -393,7 +345,7 @@ Typeid typeid_join(Typeid one, Typeid two) {
     result = one;
   }
   else if (type_one.kind == Type_Kind_int && type_two.kind == Type_Kind_int) {
-    result = typeid_intid_merge(type_one.intid, type_two.intid);
+    result = typeid_ranges_merge(type_one.ranges, type_two.ranges);
   }
   else if (type_one.kind == Type_Kind_record && type_two.kind == Type_Kind_record) {
     assert(0);
@@ -419,16 +371,16 @@ B8 typeid_kind_equal(Typeid one, Typeid two) {
   return type_one.kind == type_two.kind;
 }
 
-Typeid_Pair typeid_of_irid_binary(Irid irid) {
+Type_Pair typeid_of_irid_binary(Irid irid) {
   Irid_Pair pair = irid_binary(irid);
   Typeid one = typeid_of_irid(pair.one);
   Typeid two = typeid_of_irid(pair.two);
-  Typeid_Pair result = { one, two };
+  Type_Pair result = { one, two };
   return result;
 }
 
 Type_Pair type_of_irid_binary(Irid irid) {
-  Typeid_Pair typeids = typeid_of_irid_binary(irid);
+  Type_Pair typeids = typeid_of_irid_binary(irid);
   Type_Pair result = {};
   result.one = get(sem.types, typeids.one);
   result.two = get(sem.types, typeids.two);
@@ -447,11 +399,11 @@ Type type_of_irid_unary(Irid irid) {
   return result;
 }
 
-Intid_Pair intid_pair_of_irid_binary(Irid irid) {
-  Typeid_Pair typeids = typeid_of_irid_binary(irid);
-  Intid_Pair result = {};
-  result.one = get(sem.types, typeids.one).intid;
-  result.two = get(sem.types, typeids.two).intid;
+Ranges_Pair ranges_pair_of_irid_binary(Irid irid) {
+  Type_Pair typeids = typeid_of_irid_binary(irid);
+  Ranges_Pair result = {};
+  result.one = get(sem.types, typeids.one).ranges;
+  result.two = get(sem.types, typeids.two).ranges;
   return result;
 }
 
@@ -461,11 +413,11 @@ Type_Kind typeid_kind(Typeid typeid) {
 }
 
 B8 typeid_kind_of_irid_binary_operands_equal(Irid irid, Type_Kind type_kind) {
-  Typeid_Pair pair = typeid_of_irid_binary(irid);
+  Type_Pair pair = typeid_of_irid_binary(irid);
   return typeid_kind(pair.one) == type_kind && typeid_kind(pair.two) == type_kind;
 }
 
-Typeid typeid_intid_intersection(Intid one, Intid two) {
+Typeid typeid_ranges_intersection(Ranges* one, Ranges* two) {
   Ranges* new_ranges = sem_ranges_init(max(one->length, two->length));
   I32 o = 0; I32 t = 0;
   while (o < one->length && t < two->length) {
@@ -482,10 +434,10 @@ Typeid typeid_intid_intersection(Intid one, Intid two) {
       t++;
     }
   }
-  return typeid_ints(new_ranges);
+  return type_ints(new_ranges);
 }
 
-Typeid typeid_intid_no_intersection(Intid one, Intid two) {
+Typeid typeid_ranges_no_intersection(Ranges* one, Ranges* two) {
   Ranges* new_ranges = sem_ranges_init(max(one->length, two->length));
   I32 o = 0; I32 t = 0;
   Range range1 = one->pairs[o];
@@ -576,40 +528,40 @@ Typeid typeid_intid_no_intersection(Intid one, Intid two) {
     new_ranges->pairs[new_ranges->length++] = range2;
     range2 = two->pairs[t++];
   }
-  return typeid_ints(new_ranges);
+  return type_ints(new_ranges);
 }
 
-Typeid typeid_intid_exclude(Intid intid, I64 val) {
-  Ranges* new_ints = sem_ranges_init(intid->length);
-  for (I32 i = 0; i < intid->length; i++) {
-    if (intid->pairs[i].lo <= val && val <= intid->pairs[i].hi) {
-      if (intid->pairs[i].lo != val || val != intid->pairs[i].hi) {
-        if (intid->pairs[i].lo == val) {
-          Range pair = { .lo = intid->pairs[i].lo+1, .hi = intid->pairs[i].hi };
+Typeid typeid_ranges_exclude(Ranges* ranges, I64 val) {
+  Ranges* new_ints = sem_ranges_init(ranges->length);
+  for (I32 i = 0; i < ranges->length; i++) {
+    if (ranges->pairs[i].lo <= val && val <= ranges->pairs[i].hi) {
+      if (ranges->pairs[i].lo != val || val != ranges->pairs[i].hi) {
+        if (ranges->pairs[i].lo == val) {
+          Range pair = { .lo = ranges->pairs[i].lo+1, .hi = ranges->pairs[i].hi };
           new_ints->pairs[new_ints->length++] = pair;
         }
-        else if (val == intid->pairs[i].hi) {
-          Range pair = { .lo = intid->pairs[i].lo, .hi = intid->pairs[i].hi-1 };
+        else if (val == ranges->pairs[i].hi) {
+          Range pair = { .lo = ranges->pairs[i].lo, .hi = ranges->pairs[i].hi-1 };
           new_ints->pairs[new_ints->length++] = pair;
         }
         else {
-          Range pair1 = { .lo = intid->pairs[i].lo, .hi = val-1 };
+          Range pair1 = { .lo = ranges->pairs[i].lo, .hi = val-1 };
           new_ints->pairs[new_ints->length++] = pair1;
-          Range pair2 = { .lo = val+1, .hi = intid->pairs[i].hi };
+          Range pair2 = { .lo = val+1, .hi = ranges->pairs[i].hi };
           new_ints->pairs[new_ints->length++] = pair2;
         }
       }
       i++;
-      for (; i < intid->length; i++) {
-        new_ints->pairs[new_ints->length++] = intid->pairs[i];
+      for (; i < ranges->length; i++) {
+        new_ints->pairs[new_ints->length++] = ranges->pairs[i];
       }
       break;
     }
     else {
-      new_ints->pairs[new_ints->length++] = intid->pairs[i];
+      new_ints->pairs[new_ints->length++] = ranges->pairs[i];
     }
   }
-  return typeid_ints(new_ints);
+  return type_ints(new_ints);
 }
 
 Type_Field recordid_set_get_by_offset(Recordid_Set recordid_set, I32 offset) {
@@ -671,22 +623,22 @@ void sem_typeid_of_irid_binary_narrow(Sem_Tasks* tasks, Irid irid, Typeid new_ty
 }
 
 void sem_typeid_narrow_int_eq(Sem_Tasks* tasks, Irid irid) {
-  Intid_Pair pair = intid_pair_of_irid_binary(irid);
-  Typeid new_typeid = typeid_intid_intersection(pair.one, pair.two);
+  Ranges_Pair pair = ranges_pair_of_irid_binary(irid);
+  Typeid new_typeid = typeid_ranges_intersection(pair.one, pair.two);
   sem_typeid_of_irid_binary_narrow(tasks, irid, new_typeid, new_typeid);
 }
 
 void sem_typeid_narrow_int_ne(Sem_Tasks* tasks, Irid irid) {
   Irid_Pair binary = irid_binary(irid);
   Type_Pair pair = type_of_irid_binary(irid);
-  if (intid_is_single(pair.one.intid)) {
-    I64 val = intid_min(pair.one.intid);
-    Typeid new_typeid_two = typeid_intid_exclude(pair.two.intid, val);
+  if (ranges_is_single(pair.one.ranges)) {
+    I64 val = ranges_min(pair.one.ranges);
+    Typeid new_typeid_two = typeid_ranges_exclude(pair.two.ranges, val);
     sem_typeid_of_irid_narrow(tasks, binary.two, new_typeid_two);
   }
-  if (intid_is_single(pair.two.intid)) {
-    I64 val = intid_min(pair.two.intid);
-    Typeid new_typeid_one = typeid_intid_exclude(pair.one.intid, val);
+  if (ranges_is_single(pair.two.ranges)) {
+    I64 val = ranges_min(pair.two.ranges);
+    Typeid new_typeid_one = typeid_ranges_exclude(pair.one.ranges, val);
     sem_typeid_of_irid_narrow(tasks, binary.one, new_typeid_one);
   }
 }
@@ -695,9 +647,9 @@ Typeid typeid_narrow_eqz(Typeid typeid) {
   Type type = get(sem.types, typeid);
   switch (type.kind) {
   case Type_Kind_int: {
-    B8 have_zero = intid_have(type.intid, 0);
+    B8 have_zero = ranges_have(type.ranges, 0);
     if (have_zero) {
-      return typeid_int(0);
+      return type_int(0);
     }
     else {
       return typeid_nil;
@@ -712,8 +664,8 @@ Typeid typeid_narrow_nez(Typeid typeid) {
   Type type = get(sem.types, typeid);
   switch (type.kind) {
   case Type_Kind_int: {
-    Intid intid = type.intid;
-    return typeid_intid_exclude(type.intid, 0);
+    Ranges* ranges = type.ranges;
+    return typeid_ranges_exclude(type.ranges, 0);
   } break;
   default: break;
   }
@@ -860,18 +812,18 @@ void sem_ir(Blockid blockid, Irid irid) {
     result = typeid_ptr_var(istr);
   } break;
   case Ir_Kind_join: {
-    Typeid_Pair pair = typeid_of_irid_binary(irid);
+    Type_Pair pair = typeid_of_irid_binary(irid);
     result = typeid_join(pair.one, pair.two);
   } break;
   case Ir_Kind_add: {
     if (typeid_kind_of_irid_binary_operands_equal(irid, Type_Kind_int)) {
       // TODO: overflow/underflow
-      Intid_Pair pair = intid_pair_of_irid_binary(irid);
-      I64 max_one = intid_max(pair.one);
-      I64 max_two = intid_max(pair.two);
+      Ranges_Pair pair = ranges_pair_of_irid_binary(irid);
+      I64 max_one = ranges_max(pair.one);
+      I64 max_two = ranges_max(pair.two);
       I64 max = max_one + max_two;
-      I64 min_one = intid_min(pair.one);
-      I64 min_two = intid_min(pair.two);
+      I64 min_one = ranges_min(pair.one);
+      I64 min_two = ranges_min(pair.two);
       I64 min = min_one + min_two;
       result = typeid_int_interval(min, max);
     }
@@ -1062,9 +1014,9 @@ void string_builder_push_type(String_Builder* sb, Typeid typeid) {
     string_builder_push_cstr(sb, "<none>");
   break;
   case Type_Kind_int: {
-    for (I32 i = 0; i < type.intid->length; i++ ) {
-      I64 one = type.intid->pairs[i].lo;
-      I64 two = type.intid->pairs[i].hi;
+    for (I32 i = 0; i < type.ranges->length; i++ ) {
+      I64 one = type.ranges->pairs[i].lo;
+      I64 two = type.ranges->pairs[i].hi;
       if (one == two) {
         string_builder_push_i64(sb, one);
       }
@@ -1073,13 +1025,13 @@ void string_builder_push_type(String_Builder* sb, Typeid typeid) {
         string_builder_push_cstr(sb, "..");
         string_builder_push_i64(sb, two);
       }
-      if (i+1 < type.intid->length) {
+      if (i+1 < type.ranges->length) {
         string_builder_push_cstr(sb, "\\");
       }
     }
   } break;
   case Type_Kind_ptr: {
-    for (I32 i = 0; i < type.intid->length; i++) {
+    for (I32 i = 0; i < type.ranges->length; i++) {
       Mem_Cell cell = type.ptrid->cells[i];
       switch (cell.kind) {
       case Mem_Kind_stack: {
@@ -1094,7 +1046,7 @@ void string_builder_push_type(String_Builder* sb, Typeid typeid) {
         string_builder_push_cstr(sb, "+");
         string_builder_push_i64(sb, cell.field_offset);
       }
-      if (i+1 < type.intid->length) {
+      if (i+1 < type.ranges->length) {
         string_builder_push_cstr(sb, "\\");
       }
     }
@@ -1223,60 +1175,36 @@ void sem_test(void) {
 /*
 TODO:
 Consider lazy types
-  r = (x=1; y=3)
+  r: (x:1\2; y:3\4) = (x=1; y=3)
   if ... do
     r.x = 2
     r.y = 4
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
+
+  b0 in{}
+    ...
+  out{r=(x=1; y=3)}
+  branch ... b1 b2
+
+  b1 in{r=(x=1; y=3)}
+    t0 = load var r       // (x=1; y=3)
+    t1 = name offset t0.x //
+    store t1 2 // r = (x=2; y=3)
+
+    t2 = load var r
+    t3 = name offset t2.y
+    store t3 4
+  out{r=(x=2; y=4)}
+
+  b2 in{r(x=1; y=3)\(x=2;y=4)
+
 ///////////////////
   r = (x=1; y=3)
   if ... do r = (x=2; y=4)
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
-
-  a = 1
-  b = 2
-  if ... do
-    a = 3
-    b = 4
-  if a == 3 do
-    b // 4
-
-main {
-  .0:
-    r1 = int 1
-    r2 = var a
-    r3 = store r2 r1
-    r4 = int 2
-    r5 = var b
-    r6 = store r5 r4
-    r7 = int 0
-    if r7 then .1 else .2
-  .1: in{a:1; b:2} out{a:3; b:4}
-    r8 = int 3
-    r9 = var a
-    r10 = store r9 r8
-    r11 = int 4
-    r12 = var b
-    r13 = store r12 r11
-    jump .2
-  .2: in{(a:1; b:2) \ (a:3;b:4)}
-    r14 = var a    // @a
-    r15 = load r14 // 1\3
-    r16 = int 3
-    r17 = eq r15 r16 // a == 3
-    if r17 then .3 else .4
-  .3: in{a:3; b:4}
-    r18 = var b
-    r19 = load r18
-    jump .4
-  .4:
-    jump .5
-  .5:
-  ret r1
-}
 */
-  // test("a=(x=1; y=3); b=@a; b@.x = 2", "");
+  // test("a:(x:1; y:3); b=@a; b@.x = 2", "");
 }
 
 #undef test

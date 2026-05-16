@@ -31,7 +31,7 @@ struct String_Builder {
 };
 
 Internal internal = {0};
-Str* str_nil = {0};
+const Str* str_nil = {0};
 String_Kind token_kind_from_str(Str* str) {
   return str->kind;
 }

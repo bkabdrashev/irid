@@ -127,8 +127,8 @@ struct Block {
   Block_Kind kind;
   I32 pred_count;
   Irs* irs;
-  Hash_Map out_var_typeids;
-  Hash_Map in_var_typeids;
+  Hash_Map out_var_types;
+  Hash_Map in_var_types;
   union {
     Jump   jump;
     Branch branch;
