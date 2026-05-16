@@ -42,7 +42,7 @@ struct Type_Records {
 
 typedef struct Pointer Pointer;
 struct Pointer {
-  Hash_Set* stack; // vars
+  Hash_Set stack; // vars
 };
 
 typedef enum Type_Kind {
@@ -134,11 +134,24 @@ void type_of_ir_put(Ir* ir, Type* type) {
 
 Type* type_of_var(Block* block, Var* var) {
   Type* type = hash_map_get(&block->out_var_types, var);
+  if (type) return type;
+  type = type_of_ir(var->declared);
   return type;
 }
 
+B8 type_is_subtype(Type* one, Type* two) {
+  // one is subset of two
+  return true;
+}
+
 void type_of_var_put(Block* block, Var* var, Type* type) {
-  hash_map_put(&block->out_var_types, var, type);
+  Type* var_type = type_of_ir(var->declared);
+  if (type_is_subtype(type, var_type)) {
+    hash_map_put(&block->out_var_types, var, type);
+  }
+  else {
+    assert(0);
+  }
 }
 
 Ranges* sem_ranges_init(I32 max_len) {
@@ -244,6 +257,8 @@ Type* type_ptr(Pointer* ptr) {
 
 Type* type_ptr_var(Var* var) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  pointer->stack = hash_set_init(sem.perm_arena, 1);
+  hash_set_put(&pointer->stack, var);
   return type_ptr(pointer);
 }
 
@@ -267,10 +282,10 @@ Type* type_record(Record* record) {
 
 Type* type_join(Type* one, Type* two) {
   Type* result = 0;
-  if (one->kind == Type_Kind_none) {
+  if (!one) {
     result = two;
   }
-  else if (two->kind == Type_Kind_none) {
+  else if (!two) {
     result = one;
   }
   else if (one->kind == Type_Kind_int && two->kind == Type_Kind_int) {
@@ -713,20 +728,37 @@ void sem_ir(Block* block, Ir* ir) {
     // }
   } break;
   case Ir_Kind_load: {
-    Type* one_type = type_of_ir(ir->unary);
-    if (one_type->kind == Type_Kind_ptr) {
+    Type* ptr_type = type_of_ir(ir->unary);
+    if (ptr_type->kind == Type_Kind_ptr) {
+      Pointer* pointer = ptr_type->pointer;
+      Hash_Set stack = pointer->stack;
+      assert(stack.len >= 1);
+      result = type_of_var(block, stack.list[0]);
+      for (I32 i = 1; i < stack.len; i++) {
+        Var* var = stack.list[i];
+        Type* type = type_of_var(block, var);
+        result = type_join(result, type);
+      }
     }
     else {
+      assert(0);
     }
   } break;
   case Ir_Kind_store: {
-    // Type* lhs = type_of_ir(ir->binary.one);
-    // Type* rhs = type_of_ir(ir->binary.two);
-    // if (lhs->kind == Type_Kind_ptr) {
-    // }
-    // else {
-      // assert(0);
-    // }
+    Type* lhs = type_of_ir(ir->binary.one);
+    Type* rhs = type_of_ir(ir->binary.two);
+    if (lhs->kind == Type_Kind_ptr) {
+      Pointer* pointer = lhs->pointer;
+      Hash_Set stack = pointer->stack;
+      assert(stack.len >= 1);
+      for (I32 i = 0; i < stack.len; i++) {
+        Var* var = stack.list[i];
+        type_of_var_put(block, var, rhs);
+      }
+    }
+    else {
+      assert(0);
+    }
   } break;
   case Ir_Kind_ptr: {
     if (ir->unary->kind == Ir_Kind_load) {
@@ -777,7 +809,7 @@ void sem_block(Block* block) {
   }
 }
 
-Type* sem_funid(Fun* fun) {
+Type* sem_fun(Fun* fun) {
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
@@ -812,7 +844,7 @@ void sem_funs(Arena* arena, Funs funs) {
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
-    sem_funid(fun);
+    sem_fun(fun);
   }
   arena_free(&temp);
 }
@@ -841,7 +873,11 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
     }
   } break;
   case Type_Kind_ptr: {
-    for (I32 i = 0; i < type->ranges->length; i++) {
+    Hash_Set stack = type->pointer->stack;
+    for (I32 i = 0; i < stack.len; i++) {
+      Var* var = stack.list[i];
+      string_builder_push_cstr(sb, "@");
+      string_builder_push_str(sb, var->name);
     }
   } break;
   case Type_Kind_record: {
@@ -992,7 +1028,7 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  test("a:1", "");
+  test("a:1; a=2; a", "");
 }
 
 #undef test

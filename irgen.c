@@ -65,7 +65,6 @@ typedef struct Var Var;
 struct Var {
   Str*  name;
   Ir*   declared;
-  Type* type;
 };
 
 struct Ir {
@@ -503,6 +502,7 @@ Symbol* irgen_get_sym(Str* str) {
 }
 
 void irgen_scope_enter(Hash_Map* scope) {
+  Fun* fun = top(irgen.fun_stack);
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     {
@@ -515,6 +515,8 @@ void irgen_scope_enter(Hash_Map* scope) {
     var->name = key;
     var->declared = ir;
     sym->var = var;
+
+    fun->var_count++;
   }
   add(irgen.scope_stack, scope);
 }
