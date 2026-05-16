@@ -372,6 +372,20 @@ void* hash_map_get(Hash_Map* map, void* key) {
   }
 }
 
+void** hash_map_get_ptr(Hash_Map* map, void* key) {
+  I32 i = hash_u64((U64)key);
+  for (;;) {
+    i &= map->cap - 1;
+    if (!map->keys[i]) {
+      return 0;
+    }
+    else if (map->keys[i] == key) {
+      return &map->vals[i];
+    }
+    i++;
+  }
+}
+
 void hash_map_put_i32(Hash_Map* map, void* key, I32 val) {
   I64 cast = val;
   hash_map_put(map, key, (void*)cast);

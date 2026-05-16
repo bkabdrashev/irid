@@ -16,33 +16,9 @@ struct Ranges_Pair {
   Ranges* two;
 };
 
-typedef struct Type Type;
-typedef struct Type_Record Type_Record;
-struct Type_Record {
-  I32      length;
-  I32*     offsets;
-  Type**   declared;
-  Str**    names;
-  Hash_Map positions;
-};
-
-typedef struct Type_Field Type_Field;
-struct Type_Field {
-  Str*   name;
-  I32    position;
-  I32    offset;
-  Type*  declared;
-};
-
-typedef struct Type_Records Type_Records;
-struct Type_Records {
-  Type_Record* base;
-  I32          length;
-};
-
 typedef struct Pointer Pointer;
 struct Pointer {
-  Hash_Set stack; // vars
+  Hash_Set stack;
 };
 
 typedef enum Type_Kind {
@@ -59,7 +35,7 @@ struct Type {
   union {
     Ranges*  ranges;
     Pointer* pointer;
-    Type_Record* record;
+    Record*  record;
   };
 };
 
@@ -90,7 +66,6 @@ struct Sem {
   Funs   funs;
   Hash_Map  type_of_irs;
   Type_Pool types;
-  Type_Records records;
   Blocks* worklist;
 };
 
@@ -255,29 +230,40 @@ Type* type_ptr(Pointer* ptr) {
   return new_type;
 }
 
-Type* type_ptr_var(Var* var) {
+Type* type_ptr_var(Type** type) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
   pointer->stack = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&pointer->stack, var);
+  hash_set_put(&pointer->stack, type);
   return type_ptr(pointer);
 }
 
-Type_Field type_record_get_by_position(Type_Record* record, I32 position) {
-  Type_Field field = {};
+Field type_record_get_by_position(Record* record, I32 position) {
+  Field field = {};
   field.name     = record->names[position];
   field.declared = record->declared[position];
+  field.assigned = record->assigned[position];
+  field.declared_type = type_of_ir(field.declared);
+  field.assigned_type = type_of_ir(field.assigned);
   field.offset   = record->offsets[position];
   field.position = position;
   return field;
 }
 
-Type_Field type_record_get_by_name(Type_Record* record, Str* name) {
-  I32 position = hash_map_get_i32(&record->positions, name);
+Field type_record_get_by_name(Record* record, Str* name) {
+  I32 position = hash_map_get_i32(&record->position_from_name, name);
   return type_record_get_by_position(record, position);
 }
 
 Type* type_record(Record* record) {
-  return 0;
+  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  for (I32 i = 0; i < record->length; i++) {
+    Ir* ir = record->assigned[i];
+    Type* type = type_of_ir(ir);
+    record->types[i] = type;
+  }
+  new_type->kind = Type_Kind_record;
+  new_type->record = record;
+  return new_type;
 }
 
 Type* type_join(Type* one, Type* two) {
@@ -690,7 +676,16 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_var: {
-    result = type_ptr_var(ir->var);
+    Type** type_ptr = (Type**)hash_map_get_ptr(&block->out_var_types, ir->var);
+    if (type_ptr) {
+      result = type_ptr_var(type_ptr);
+    }
+    else {
+      Type* declared_type = type_of_ir(ir->var->declared);
+      hash_map_put(&block->out_var_types, ir->var, declared_type);
+      type_ptr = (Type**)hash_map_get_ptr(&block->out_var_types, ir->var);
+      result = type_ptr_var(type_ptr);
+    }
   } break;
   case Ir_Kind_join: {
     Type_Pair pair = type_of_ir_binary(ir);
@@ -719,13 +714,14 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_record(ir->record);
   } break;
   case Ir_Kind_name_offset: {
-    // Ir_Kind ir_kind = ir->name.of->kind;
-    // Type* of_type = type_of_ir(ir->name.of);
-    // if (ir_kind == Ir_Kind_load) {
-      // I32 offset = type_record_get_by_name(of_type->record, ir->name.at).offset;
-      // Pointer* ptr = type_of_ir_unary(ir->name.of)->pointer;
-      // assert(0);
-    // }
+    Ir_Kind ir_kind = ir->name.of->kind;
+    Type* of_type = type_of_ir(ir->name.of);
+    if (ir_kind == Ir_Kind_load) {
+      Record* record = of_type->record;
+      I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
+      Type** type = &record->types[position];
+      result = type_ptr_var(type);
+    }
   } break;
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(ir->unary);
@@ -733,11 +729,10 @@ void sem_ir(Block* block, Ir* ir) {
       Pointer* pointer = ptr_type->pointer;
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
-      result = type_of_var(block, stack.list[0]);
+      result = *(Type**)stack.list[0];
       for (I32 i = 1; i < stack.len; i++) {
-        Var* var = stack.list[i];
-        Type* type = type_of_var(block, var);
-        result = type_join(result, type);
+        Type** type = stack.list[i];
+        result = type_join(result, *type);
       }
     }
     else {
@@ -752,8 +747,10 @@ void sem_ir(Block* block, Ir* ir) {
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
       for (I32 i = 0; i < stack.len; i++) {
-        Var* var = stack.list[i];
-        type_of_var_put(block, var, rhs);
+        Type** type = stack.list[i];
+        *type = rhs;
+        // TODO: check against declared type
+        // type_of_var_put(block, var, rhs);
       }
     }
     else {
@@ -835,9 +832,6 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.worklist->length = 0;
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length);
 
-  sem.records.base = arena_push(arena, sizeof(Type_Record)*irgen.irs.length);
-  sem.records.length = 1;
-
   sem.types.base = arena_push(arena, sizeof(Type)*irgen.irs.length);
   sem.types.base[0].kind = Type_Kind_none;
   sem.types.length = 1;
@@ -875,33 +869,34 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
   case Type_Kind_ptr: {
     Hash_Set stack = type->pointer->stack;
     for (I32 i = 0; i < stack.len; i++) {
-      Var* var = stack.list[i];
+      Type** var_type = stack.list[i];
       string_builder_push_cstr(sb, "@");
-      string_builder_push_str(sb, var->name);
+      string_builder_push_type(sb, *var_type);
     }
   } break;
   case Type_Kind_record: {
-    Type_Record* record = type->record;
+    Record* record = type->record;
     string_builder_push_cstr(sb, "record");
     string_builder_push_cstr(sb, "(");
     for (I32 pos = 0; pos < record->length; pos++) {
-      Type_Field field = type_record_get_by_position(record, pos);
+      Field field = type_record_get_by_position(record, pos);
       if (field.name) {
         string_builder_push_str(sb, field.name);
         string_builder_push_cstr(sb, "'");
         string_builder_push_i64(sb, field.offset);
         if (field.declared) {
           string_builder_push_cstr(sb, ":");
-          string_builder_push_type(sb, field.declared);
+          string_builder_push_type(sb, field.declared_type);
         }
       }
       else {
-        string_builder_push_type(sb, field.declared);
+        string_builder_push_type(sb, field.declared_type);
       }
       if (pos+1 < record->length) {
         string_builder_push_cstr(sb, ", ");
       }
     }
+    string_builder_push_cstr(sb, ")");
   } break;
   }
 }
@@ -1028,7 +1023,7 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  test("a:1; a=2; a", "");
+  test("a:(x:1; y:3); a = (x=1; y=3); a.x = 2; a.x+a.y", "");
 }
 
 #undef test

@@ -41,6 +41,7 @@ typedef enum Ir_Kind {
 typedef struct Ir    Ir;
 typedef struct Block Block;
 typedef struct Fun   Fun;
+typedef struct Type  Type;
 
 typedef struct Ir_Pair Ir_Pair;
 struct Ir_Pair { Ir* one; Ir* two; };
@@ -55,6 +56,8 @@ typedef struct Record Record;
 struct Record {
   I32      length;
   Ir**     assigned;
+  Type**   types;
+  I32*     offsets;
   Ir**     declared;
   Str**    names;
   Hash_Map position_from_name;
@@ -96,8 +99,11 @@ typedef struct Field Field;
 struct Field {
   Str* name;
   I32  position;
+  I32  offset;
   Ir*  assigned;
   Ir*  declared;
+  Type* declared_type;
+  Type* assigned_type;
 };
 
 typedef struct Jump Jump;
@@ -186,7 +192,6 @@ struct Irgen {
 
 Irgen irgen = {};
 
-Field field_nil = {0, 0, 0, 0};
 Field record_get_by_name(Record* record, Str* name) {
   Field field = {};
   I32 position = hash_map_get_i32(&record->position_from_name, name);
@@ -440,6 +445,8 @@ Record* record_new(I32 length) {
   new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
   new_record->assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
   new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->types    = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
+  new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
   return new_record;
 }
