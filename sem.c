@@ -780,6 +780,20 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   }
 }
 
+void sem_worklist_sort(void) {
+  for (I32 i = 0; i < sem.worklist->length; i++) {
+    I32 max_i = i;
+    for (I32 j = max_i+1; j < sem.worklist->length; j++) {
+      if (sem.worklist->base[max_i]->sccid < sem.worklist->base[j]->sccid) {
+        max_i = j;
+      }
+    }
+    Block* temp = sem.worklist->base[i];
+    sem.worklist->base[i] = sem.worklist->base[max_i];
+    sem.worklist->base[max_i] = temp;
+  }
+}
+
 void sem_worklist_push(Block* block) {
   if (!block->is_present_in_worklist) {
     block->is_present_in_worklist = true;
@@ -958,9 +972,10 @@ void sem_block(Block* block) {
 }
 
 void sem_scc_block(Block* block);
-I32 sem_scc_block_jump(Block* parent, Block* child) {
-  if (child->is_on_scc_stack) {
-    I32 new_low = min(parent->low_sccid, child->low_sccid);
+I32 sem_scc_block_jump(Block* parent, Block* kid) {
+  sem_scc_block(kid);
+  if (kid->is_on_scc_stack) {
+    I32 new_low = min(parent->low_sccid, kid->low_sccid);
     parent->low_sccid = new_low;
   }
   return parent->low_sccid;
@@ -968,7 +983,6 @@ I32 sem_scc_block_jump(Block* parent, Block* child) {
 
 void sem_scc_block(Block* block) {
   if (block->is_scc_visited) return;
-
   block->is_scc_visited = true;
   I32 sccid = sem.sccid++;
   block->sccid = sccid;
@@ -998,10 +1012,11 @@ Type* sem_fun(Fun* fun) {
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     sem_scc_block(block);
-    // block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
-    // block->in_var_types  = hash_map_init(sem.perm_arena, fun->var_count);
-    // sem_worklist_push(block);
+    block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
+    block->in_var_types  = hash_map_init(sem.perm_arena, fun->var_count);
+    sem_worklist_push(block);
   }
+  sem_worklist_sort();
   // init block with types
 
   while (sem_worklist_is_not_empty()) {
