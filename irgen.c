@@ -138,7 +138,13 @@ typedef enum Block_Kind {
 
 struct Block {
   Block_Kind kind;
-  B8 exist;
+  B8 is_present_in_worklist;
+
+  B8 is_scc_visited;
+  B8 is_on_scc_stack;
+  I32 sccid;
+  I32 low_sccid;
+
   I32 pred_count;
   Irs* irs;
   Hash_Map out_var_types;

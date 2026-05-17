@@ -67,6 +67,9 @@ struct Sem {
   Hash_Map  type_of_irs;
   Type_Pool types;
   Blocks* worklist;
+
+  I32 sccid;
+  Blocks* scc_stack;
 };
 
 Sem sem = {};
@@ -148,9 +151,11 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 
     for (I32 b = 0; b < fun.blocks->length; b++) {
       Block* block = fun.blocks->base[b];
-    string_builder_push_cstr(&sb, "\n  ");
+      string_builder_push_cstr(&sb, "\n  ");
       string_builder_push_blockid(&sb, block);
       string_builder_push_cstr(&sb, ":");
+
+      string_builder_push_i64(&sb, block->sccid);
 
       string_builder_push_cstr(&sb, " in{");
       for (I32 i = 0; i < block->in_var_types.len; i++) {
@@ -776,8 +781,8 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
 }
 
 void sem_worklist_push(Block* block) {
-  if (!block->exist) {
-    block->exist = true;
+  if (!block->is_present_in_worklist) {
+    block->is_present_in_worklist = true;
     fa_add(sem.worklist, block);
   }
 }
@@ -788,7 +793,7 @@ B8 sem_worklist_is_not_empty() {
 
 Block* sem_worklist_pop(void) {
   Block* block = fa_pop(sem.worklist);
-  block->exist = false;
+  block->is_present_in_worklist = false;
   return block;
 }
 
@@ -952,12 +957,50 @@ void sem_block(Block* block) {
   }
 }
 
+void sem_scc_block(Block* block);
+I32 sem_scc_block_jump(Block* parent, Block* child) {
+  if (child->is_on_scc_stack) {
+    I32 new_low = min(parent->low_sccid, child->low_sccid);
+    parent->low_sccid = new_low;
+  }
+  return parent->low_sccid;
+}
+
+void sem_scc_block(Block* block) {
+  if (block->is_scc_visited) return;
+
+  block->is_scc_visited = true;
+  I32 sccid = sem.sccid++;
+  block->sccid = sccid;
+  block->low_sccid = sccid;
+  block->is_on_scc_stack = true;
+  fa_add(sem.scc_stack, block);
+
+  if (block->kind == Block_Kind_jump) {
+    sccid = sem_scc_block_jump(block, block->jump.to_block);
+  }
+  else if (block->kind == Block_Kind_branch) {
+    sccid = sem_scc_block_jump(block, block->branch.nez.to_block);
+    sccid = sem_scc_block_jump(block, block->branch.eqz.to_block);
+  }
+
+  if (block->sccid == sccid) {
+    Block* pop_block;
+    do {
+      pop_block = fa_pop(sem.scc_stack);
+      pop_block->is_on_scc_stack = false;
+      pop_block->sccid = sccid;
+    } while (block != pop_block);
+  }
+}
+
 Type* sem_fun(Fun* fun) {
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
-    block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
-    block->in_var_types  = hash_map_init(sem.perm_arena, fun->var_count);
-    sem_worklist_push(block);
+    sem_scc_block(block);
+    // block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
+    // block->in_var_types  = hash_map_init(sem.perm_arena, fun->var_count);
+    // sem_worklist_push(block);
   }
   // init block with types
 
@@ -976,6 +1019,8 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.funs = funs;
   sem.worklist = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.worklist->length = 0;
+  sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
+  sem.scc_stack->length = 0;
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length);
 
   sem.types.base = arena_push(arena, sizeof(Type)*irgen.irs.length);
