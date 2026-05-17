@@ -74,6 +74,143 @@ Sem sem = {};
 typedef struct Type_Pair Type_Pair;
 struct Type_Pair { Type* one; Type* two; };
 
+Field type_record_get_by_position(Record* record, I32 pos);
+
+void string_builder_push_type(String_Builder* sb, Type* type) {
+  if (!type) return;
+  switch (type->kind) {
+  case Type_Kind_none:
+    string_builder_push_cstr(sb, "<none>");
+  break;
+  case Type_Kind_int: {
+    for (I32 i = 0; i < type->ranges->length; i++ ) {
+      I64 one = type->ranges->pairs[i].lo;
+      I64 two = type->ranges->pairs[i].hi;
+      if (one == two) {
+        string_builder_push_i64(sb, one);
+      }
+      else {
+        string_builder_push_i64(sb, one);
+        string_builder_push_cstr(sb, "..");
+        string_builder_push_i64(sb, two);
+      }
+      if (i+1 < type->ranges->length) {
+        string_builder_push_cstr(sb, "\\");
+      }
+    }
+  } break;
+  case Type_Kind_ptr: {
+    Hash_Set stack = type->pointer->stack;
+    for (I32 i = 0; i < stack.len; i++) {
+      Type** var_type = stack.list[i];
+      string_builder_push_cstr(sb, "@");
+      string_builder_push_type(sb, *var_type);
+    }
+  } break;
+  case Type_Kind_record: {
+    Record* record = type->record;
+    string_builder_push_cstr(sb, "record");
+    string_builder_push_cstr(sb, "(");
+    for (I32 pos = 0; pos < record->length; pos++) {
+      Field field = type_record_get_by_position(record, pos);
+      if (field.name) {
+        string_builder_push_str(sb, field.name);
+        // string_builder_push_cstr(sb, "'");
+        // string_builder_push_i64(sb, field.offset);
+        if (field.declared_type) {
+          string_builder_push_cstr(sb, ":");
+          string_builder_push_type(sb, field.declared_type);
+        }
+        if (field.assigned_type) {
+          string_builder_push_cstr(sb, "=");
+          string_builder_push_type(sb, field.assigned_type);
+        }
+      }
+      else {
+        string_builder_push_type(sb, field.declared_type);
+      }
+      if (pos+1 < record->length) {
+        string_builder_push_cstr(sb, ", ");
+      }
+    }
+    string_builder_push_cstr(sb, ")");
+  } break;
+  }
+}
+
+Cstr cstr_from_sem(Funs funs, C8* buffer) {
+  String_Builder sb = string_builder_begin(buffer);
+  for (I32 f = 0; f < funs.length; f++) {
+    Fun fun = irgen.funs.base[f];
+    string_builder_push_cstr(&sb, "@");
+    string_builder_push_i64(&sb,   f);
+    string_builder_push_cstr(&sb, " {");
+
+    for (I32 b = 0; b < fun.blocks->length; b++) {
+      Block* block = fun.blocks->base[b];
+    string_builder_push_cstr(&sb, "\n  ");
+      string_builder_push_blockid(&sb, block);
+      string_builder_push_cstr(&sb, ":");
+
+      string_builder_push_cstr(&sb, " in{");
+      for (I32 i = 0; i < block->in_var_types.len; i++) {
+        Var* var = block->in_var_types.list[i];
+        Type* type = hash_map_get(&block->in_var_types, var);
+        string_builder_push_str(&sb, var->name);
+        string_builder_push_cstr(&sb, ": ");
+        string_builder_push_type(&sb, type);
+        if (i+1 < block->in_var_types.len) {
+          string_builder_push_cstr(&sb, "; ");
+        }
+      }
+      string_builder_push_cstr(&sb, "}");
+
+      string_builder_push_cstr(&sb, " out{");
+      for (I32 i = 0; i < block->out_var_types.len; i++) {
+        Var* var = block->out_var_types.list[i];
+        Type* type = hash_map_get(&block->out_var_types, var);
+        string_builder_push_str(&sb, var->name);
+        string_builder_push_cstr(&sb, ": ");
+
+        string_builder_push_type(&sb, type);
+        if (i+1 < block->out_var_types.len) {
+          string_builder_push_cstr(&sb, "; ");
+        }
+      }
+      string_builder_push_cstr(&sb, "}");
+      for (I32 i = 0; i < block->irs->length; i++) {
+        Ir* ir = block->irs->base[i];
+        string_builder_push_ir(&sb, ir);
+        string_builder_push_cstr(&sb, " : ");
+        Type* type = hash_map_get(&sem.type_of_irs, ir);
+        string_builder_push_type(&sb, type);
+      }
+      switch (block->kind) {
+      case Block_Kind_none:
+      break;
+      case Block_Kind_jump:
+        string_builder_push_cstr(&sb, "\n    jump ");
+        string_builder_push_blockid(&sb, block->jump.to_block);
+      break;
+      case Block_Kind_branch:
+        string_builder_push_cstr(&sb, "\n    if ");
+        string_builder_push_irid(&sb, block->branch.cond);
+        string_builder_push_cstr(&sb, " then ");
+        string_builder_push_blockid(&sb, block->branch.nez.to_block);
+        string_builder_push_cstr(&sb, " else ");
+        string_builder_push_blockid(&sb, block->branch.eqz.to_block);
+      break;
+      }
+    }
+
+    string_builder_push_cstr(&sb, "\n  ret ");
+    string_builder_push_irid(&sb, fun.return_ir);
+    string_builder_push_cstr(&sb, "\n}");
+  }
+  Cstr result = string_builder_end(&sb);
+  return result;
+}
+
 I64 ranges_max(Ranges* ranges) {
   return ranges->pairs[ranges->length-1].hi;
 }
@@ -230,11 +367,16 @@ Type* type_ptr(Pointer* ptr) {
   return new_type;
 }
 
-Type* type_ptr_var(Type** type) {
+Type* type_ptr_stack(Hash_Set stack) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->stack = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&pointer->stack, type);
+  pointer->stack = stack;
   return type_ptr(pointer);
+}
+
+Type* type_ptr_var(Type** type) {
+  Hash_Set stack = hash_set_init(sem.perm_arena, 1);
+  hash_set_put(&stack, type);
+  return type_ptr_stack(stack);
 }
 
 Field type_record_get_by_position(Record* record, I32 position) {
@@ -278,7 +420,10 @@ Type* type_join(Type* one, Type* two) {
     result = type_ranges_merge(one->ranges, two->ranges);
   }
   else if (one->kind == Type_Kind_record && two->kind == Type_Kind_record) {
-    assert(0);
+  }
+  else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
+    Hash_Set new_stack = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
+    result = type_ptr_stack(new_stack);
   }
   else {
     assert(0);
@@ -750,6 +895,7 @@ void sem_ir(Block* block, Ir* ir) {
         Type** type = stack.list[i];
         *type = rhs;
         // TODO: check against declared type
+        // to do this declared type can be stored within Pointer
         // type_of_var_put(block, var, rhs);
       }
     }
@@ -843,137 +989,6 @@ void sem_funs(Arena* arena, Funs funs) {
   arena_free(&temp);
 }
 
-void string_builder_push_type(String_Builder* sb, Type* type) {
-  if (!type) return;
-  switch (type->kind) {
-  case Type_Kind_none:
-    string_builder_push_cstr(sb, "<none>");
-  break;
-  case Type_Kind_int: {
-    for (I32 i = 0; i < type->ranges->length; i++ ) {
-      I64 one = type->ranges->pairs[i].lo;
-      I64 two = type->ranges->pairs[i].hi;
-      if (one == two) {
-        string_builder_push_i64(sb, one);
-      }
-      else {
-        string_builder_push_i64(sb, one);
-        string_builder_push_cstr(sb, "..");
-        string_builder_push_i64(sb, two);
-      }
-      if (i+1 < type->ranges->length) {
-        string_builder_push_cstr(sb, "\\");
-      }
-    }
-  } break;
-  case Type_Kind_ptr: {
-    Hash_Set stack = type->pointer->stack;
-    for (I32 i = 0; i < stack.len; i++) {
-      Type** var_type = stack.list[i];
-      string_builder_push_cstr(sb, "@");
-      string_builder_push_type(sb, *var_type);
-    }
-  } break;
-  case Type_Kind_record: {
-    Record* record = type->record;
-    string_builder_push_cstr(sb, "record");
-    string_builder_push_cstr(sb, "(");
-    for (I32 pos = 0; pos < record->length; pos++) {
-      Field field = type_record_get_by_position(record, pos);
-      if (field.name) {
-        string_builder_push_str(sb, field.name);
-        string_builder_push_cstr(sb, "'");
-        string_builder_push_i64(sb, field.offset);
-        if (field.declared) {
-          string_builder_push_cstr(sb, ":");
-          string_builder_push_type(sb, field.declared_type);
-        }
-      }
-      else {
-        string_builder_push_type(sb, field.declared_type);
-      }
-      if (pos+1 < record->length) {
-        string_builder_push_cstr(sb, ", ");
-      }
-    }
-    string_builder_push_cstr(sb, ")");
-  } break;
-  }
-}
-
-Cstr cstr_from_sem(Funs funs, C8* buffer) {
-  String_Builder sb = string_builder_begin(buffer);
-  for (I32 f = 0; f < funs.length; f++) {
-    Fun fun = irgen.funs.base[f];
-    string_builder_push_cstr(&sb, "@");
-    string_builder_push_i64(&sb,   f);
-    string_builder_push_cstr(&sb, " {");
-
-    for (I32 b = 0; b < fun.blocks->length; b++) {
-      Block* block = fun.blocks->base[b];
-    string_builder_push_cstr(&sb, "\n  ");
-      string_builder_push_blockid(&sb, block);
-      string_builder_push_cstr(&sb, ":");
-
-      string_builder_push_cstr(&sb, " in{");
-      for (I32 i = 0; i < block->in_var_types.len; i++) {
-        Var* var = block->in_var_types.list[i];
-        Type* type = hash_map_get(&block->in_var_types, var);
-        string_builder_push_str(&sb, var->name);
-        string_builder_push_cstr(&sb, ": ");
-        string_builder_push_type(&sb, type);
-        if (i+1 < block->in_var_types.len) {
-          string_builder_push_cstr(&sb, "; ");
-        }
-      }
-      string_builder_push_cstr(&sb, "}");
-
-      string_builder_push_cstr(&sb, " out{");
-      for (I32 i = 0; i < block->out_var_types.len; i++) {
-        Var* var = block->out_var_types.list[i];
-        Type* type = hash_map_get(&block->out_var_types, var);
-        string_builder_push_str(&sb, var->name);
-        string_builder_push_cstr(&sb, ": ");
-
-        string_builder_push_type(&sb, type);
-        if (i+1 < block->out_var_types.len) {
-          string_builder_push_cstr(&sb, "; ");
-        }
-      }
-      string_builder_push_cstr(&sb, "}");
-      for (I32 i = 0; i < block->irs->length; i++) {
-        Ir* ir = block->irs->base[i];
-        string_builder_push_ir(&sb, ir);
-        string_builder_push_cstr(&sb, " : ");
-        Type* type = hash_map_get(&sem.type_of_irs, ir);
-        string_builder_push_type(&sb, type);
-      }
-      switch (block->kind) {
-      case Block_Kind_none:
-      break;
-      case Block_Kind_jump:
-        string_builder_push_cstr(&sb, "\n    jump ");
-        string_builder_push_blockid(&sb, block->jump.to_block);
-      break;
-      case Block_Kind_branch:
-        string_builder_push_cstr(&sb, "\n    if ");
-        string_builder_push_irid(&sb, block->branch.cond);
-        string_builder_push_cstr(&sb, " then ");
-        string_builder_push_blockid(&sb, block->branch.nez.to_block);
-        string_builder_push_cstr(&sb, " else ");
-        string_builder_push_blockid(&sb, block->branch.eqz.to_block);
-      break;
-      }
-    }
-
-    string_builder_push_cstr(&sb, "\n  ret ");
-    string_builder_push_irid(&sb, fun.return_ir);
-    string_builder_push_cstr(&sb, "\n}");
-  }
-  Cstr result = string_builder_end(&sb);
-  return result;
-}
-
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length    = strlen(source) + 2;
   Arena arena          = arena_init(KB(4) * source_length);
@@ -1023,7 +1038,7 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  test("a:(x:1; y:3); a = (x=1; y=3); a.x = 2; a.x+a.y", "");
+  test("a: 1; b: @1; a=1; b=@a; if 2 do { b@=3 }", "");
 }
 
 #undef test
