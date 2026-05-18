@@ -25,6 +25,7 @@ typedef enum Ir_Kind {
 
   Ir_Kind_load      = Ast_Kind_load | Ir_Flag_unary,
   Ir_Kind_var       = Ast_Kind_name,
+  Ir_Kind_declare   = Ast_Kind_declare,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
@@ -49,6 +50,9 @@ struct Ir_Pair { Ir* one; Ir* two; };
 typedef struct Name_Offset Name_Offset;
 struct Name_Offset { Ir* of; Str* at; };
 
+typedef struct Declare Declare;
+struct Declare { Var* var; Ir* ir; };
+
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Ir* of; I32 at; };
 
@@ -56,7 +60,7 @@ typedef struct Record Record;
 struct Record {
   I32      length;
   Ir**     assigned;
-  Type**   types;
+  Ir**     declared;
   I32*     offsets;
   Str**    names;
   Var**    vars;
@@ -66,8 +70,9 @@ struct Record {
 typedef struct Type Type;
 typedef struct Var Var;
 struct Var {
-  Str*  name;
-  Ir*   declared;
+  Var* parent;
+  Str* name;
+  Type* declared;
 };
 
 struct Ir {
@@ -80,6 +85,7 @@ struct Ir {
     Ir*     unary;
     Position_Offset position;
     Name_Offset     name;
+    Declare         declare;
   };
 };
 
@@ -101,6 +107,7 @@ struct Field {
   I32  position;
   I32  offset;
   Ir*  assigned;
+  Ir*  declared;
   Type* declared_type;
   Type* assigned_type;
   Var*  var;
@@ -223,6 +230,14 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
   string_builder_push_i64(sb, irid);
 }
 
+void string_builder_push_var(String_Builder* sb, Var* var) {
+  if (var->parent) {
+    string_builder_push_var(sb, var->parent);
+    string_builder_push_cstr(sb, ".");
+  }
+  string_builder_push_str(sb, var->name);
+}
+
 void string_builder_push_blockid(String_Builder* sb, Block* block) {
   string_builder_push_cstr(sb, "b");
   I32 blockid = block - irgen.blocks.base;
@@ -241,9 +256,15 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "int ");
     string_builder_push_i64(sb, ir->i64);
   break;
+  case Ir_Kind_declare:
+    string_builder_push_cstr(sb, "declare ");
+    string_builder_push_var(sb, ir->declare.var);
+    string_builder_push_cstr(sb, " : ");
+    string_builder_push_irid(sb, ir->declare.ir);
+  break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
-    string_builder_push_str(sb, ir->var->name);
+    string_builder_push_var(sb, ir->var);
   break;
   case Ir_Kind_position_offset:
     string_builder_push_cstr(sb, "position offset ");
@@ -264,9 +285,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       if (field.name) {
         string_builder_push_cstr(sb, " ");
         string_builder_push_str(sb, field.name);
-        if (field.var->declared != irgen.irid_nil) {
+        if (field.declared != irgen.irid_nil) {
           string_builder_push_cstr(sb, ":");
-          string_builder_push_irid(sb, field.var->declared);
+          string_builder_push_irid(sb, field.declared);
         }
         if (field.assigned != irgen.irid_nil) {
           string_builder_push_cstr(sb, "=");
@@ -419,6 +440,10 @@ Ir* irgen_push_var(Var* var) {
   Ir ir = { Ir_Kind_var, .var = var };
   return irgen_push(ir);
 }
+Ir* irgen_push_declare(Var* var, Ir* rhs_ir) {
+  Ir ir = { Ir_Kind_declare, .declare = {.var = var, .ir = rhs_ir }};
+  return irgen_push(ir);
+}
 
 Ir* irgen_push_unary(Ir_Kind kind, Ir* one) {
   Ir ir = { kind, .unary = one };
@@ -446,20 +471,16 @@ Ir* irgen_push_name_offset(Ir* record, Str* name) {
 }
 
 Record* record_new(I32 length) {
+  Fun* fun = top(irgen.fun_stack);
+
   Record* new_record = &new(irgen.records);
   new_record->length   = length;
   new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
   new_record->assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->types    = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
+  new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
   new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
-  new_record->vars     = arena_push(irgen.perm_arena, length*sizeof(Var*));
-
-  for (I32 i = 0; i < length; i++) {
-    Var* var = arena_push(irgen.perm_arena, sizeof(Var));
-    new_record->vars[i] = var;
-  }
-
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
+  fun->var_count += length;
   return new_record;
 }
 
@@ -469,15 +490,13 @@ void record_push_assign_position(Record* record, I32 position, Ir* value) {
 void record_push_assign_name(Record* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
-  record->vars[position]->name = name;
 }
 void record_push_declare_position(Record* record, I32 position, Ir* value) {
-  record->vars[position]->declared = value;
+  record->declared[position] = value;
 }
 void record_push_declare_name(Record* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
-  record->vars[position]->name = name;
 }
 
 Block* irgen_put_branch(Ir* cond) {
@@ -533,8 +552,9 @@ void irgen_scope_enter(Hash_Map* scope) {
     Symbol* sym = hash_map_get(scope, key);
     Ir* ir = irgen_ast_node(sym->ast);
     Var* var = arena_push(irgen.perm_arena, sizeof(Var));
+    irgen_push_declare(var, ir);
+    var->parent = 0;
     var->name = key;
-    var->declared = ir;
     sym->var = var;
 
     fun->var_count++;

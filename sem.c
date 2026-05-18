@@ -19,6 +19,7 @@ struct Ranges_Pair {
 typedef struct Pointer Pointer;
 struct Pointer {
   Hash_Set stack;
+  Type* unknown;
 };
 
 typedef enum Type_Kind {
@@ -77,7 +78,7 @@ Sem sem = {};
 typedef struct Type_Pair Type_Pair;
 struct Type_Pair { Type* one; Type* two; };
 
-Field type_record_get_by_position(Record* record, Block* block, I32 pos);
+Field type_record_get_by_position(Block* block, Record* record, I32 pos);
 Type* type_of_var(Block* block, Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
@@ -107,9 +108,14 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     Hash_Set stack = type->pointer->stack;
     for (I32 i = 0; i < stack.len; i++) {
       Var* var = stack.list[i];
-      Type* var_type = type_of_var(block, var);
       string_builder_push_cstr(sb, "@");
-      string_builder_push_type(sb, block, var_type);
+      string_builder_push_var(sb, var);
+    }
+    Type* unknown = type->pointer->unknown;
+    if (unknown) {
+      string_builder_push_cstr(sb, "|@");
+      string_builder_push_type(sb, block, unknown);
+      string_builder_push_cstr(sb, "|");
     }
   } break;
   case Type_Kind_record: {
@@ -117,7 +123,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "record");
     string_builder_push_cstr(sb, "(");
     for (I32 pos = 0; pos < record->length; pos++) {
-      Field field = type_record_get_by_position(record, block, pos);
+      Field field = type_record_get_by_position(block, record, pos);
       if (field.name) {
         string_builder_push_str(sb, field.name);
         // string_builder_push_cstr(sb, "'");
@@ -259,13 +265,19 @@ void type_of_ir_put(Ir* ir, Type* type) {
 Type* type_of_var(Block* block, Var* var) {
   Type* type = hash_map_get(&block->out_var_types, var);
   if (type) return type;
-  type = type_of_ir(var->declared);
+  type = var->declared;
   return type;
 }
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
-  Type* var_type = type_of_ir(var->declared);
+  Type* var_type = var->declared;
   if (type_is_subtype(type, var_type)) {
+    if (var_type->kind == Type_Kind_record) {
+      for (I32 i = 0; i < var_type->record->length; i++) {
+        Type* field_type = type_of_ir(type->record->assigned[i]);
+        type_of_var_put(block, var_type->record->vars[i], field_type);
+      }
+    }
     hash_map_put(&block->out_var_types, var, type);
   }
   else {
@@ -380,36 +392,38 @@ Type* type_ptr_stack(Hash_Set stack) {
   return type_ptr(pointer);
 }
 
+Type* type_ptr_unknown(Type* type) {
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  pointer->unknown = type;
+  return type_ptr(pointer);
+}
+
 Type* type_ptr_var(Var* var) {
   Hash_Set stack = hash_set_init(sem.perm_arena, 1);
   hash_set_put(&stack, var);
   return type_ptr_stack(stack);
 }
 
-Field type_record_get_by_position(Record* record, Block* block, I32 position) {
+Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
   field.assigned = record->assigned[position];
+  field.declared = record->declared[position];
   field.var      = record->vars[position];
-  field.declared_type = type_of_ir(field.var->declared);
+  field.declared_type = type_of_ir(field.declared);
   field.assigned_type = type_of_var(block, field.var);
   field.offset   = record->offsets[position];
   field.position = position;
   return field;
 }
 
-Field type_record_get_by_name(Record* record, Block* block, Str* name) {
+Field type_record_get_by_name(Block* block, Record* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
-  return type_record_get_by_position(record, block, position);
+  return type_record_get_by_position(block, record, position);
 }
 
-Type* type_record(Record* record) {
+Type* type_record(Block* block, Record* record) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
-  for (I32 i = 0; i < record->length; i++) {
-    Ir* ir = record->assigned[i];
-    Type* type = type_of_ir(ir);
-    record->types[i] = type;
-  }
   new_type->kind = Type_Kind_record;
   new_type->record = record;
   return new_type;
@@ -427,6 +441,7 @@ Type* type_join(Type* one, Type* two) {
     result = type_ranges_merge(one->ranges, two->ranges);
   }
   else if (one->kind == Type_Kind_record && two->kind == Type_Kind_record) {
+    result = one;
   }
   else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
     Hash_Set new_stack = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
@@ -841,6 +856,21 @@ void sem_ir(Block* block, Ir* ir) {
     I64 i64 = ir->i64;
     result  = type_int(i64);
   } break;
+  case Ir_Kind_declare: {
+    Type* type = type_of_ir(ir->declare.ir);
+    if (type->kind == Type_Kind_record) {
+      type->record->vars = arena_push(irgen.perm_arena, type->record->length*sizeof(Var*));
+
+      for (I32 i = 0; i < type->record->length; i++) {
+        Var* var = arena_push(irgen.perm_arena, sizeof(Var));
+        type->record->vars[i] = var;
+        var->name = type->record->names[i];
+        var->parent = ir->declare.var;
+      }
+    }
+    ir->declare.var->declared = type;
+    result = type;
+  } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
   } break;
@@ -868,7 +898,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_record: {
-    result = type_record(ir->record);
+    result = type_record(block, ir->record);
   } break;
   case Ir_Kind_name_offset: {
     Ir_Kind ir_kind = ir->name.of->kind;
@@ -915,6 +945,10 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_ptr: {
     if (ir->unary->kind == Ir_Kind_load) {
       result = type_of_ir(ir->unary->unary);
+    }
+    else {
+      Type* type = type_of_ir(ir->unary);
+      result = type_ptr_unknown(type);
     }
   } break;
   default: assert(0);
@@ -1088,7 +1122,8 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  test("a: (x:1; y:2); b: @1; a=(x=1; y=2); b=@a.x; if 2 do { b@=3 }", "");
+  // test("a: (x:1; y:2); b: @1; a=(x=1; y=2); b=@a.x; if 2 do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
+  test("a: (x:1; y:2); a.x", "");
 }
 
 #undef test
