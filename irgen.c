@@ -58,8 +58,8 @@ struct Record {
   Ir**     assigned;
   Type**   types;
   I32*     offsets;
-  Ir**     declared;
   Str**    names;
+  Var**    vars;
   Hash_Map position_from_name;
 };
 
@@ -101,9 +101,9 @@ struct Field {
   I32  position;
   I32  offset;
   Ir*  assigned;
-  Ir*  declared;
   Type* declared_type;
   Type* assigned_type;
+  Var*  var;
 };
 
 typedef struct Jump Jump;
@@ -203,7 +203,7 @@ Field record_get_by_name(Record* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
   field.name     = record->names[position];
   field.assigned = record->assigned[position];
-  field.declared = record->declared[position];
+  field.var      = record->vars[position];
   field.position = position;
   return field;
 }
@@ -212,7 +212,7 @@ Field record_get_by_position(Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
   field.assigned = record->assigned[position];
-  field.declared = record->declared[position];
+  field.var      = record->vars[position];
   field.position = position;
   return field;
 }
@@ -264,9 +264,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       if (field.name) {
         string_builder_push_cstr(sb, " ");
         string_builder_push_str(sb, field.name);
-        if (field.declared != irgen.irid_nil) {
+        if (field.var->declared != irgen.irid_nil) {
           string_builder_push_cstr(sb, ":");
-          string_builder_push_irid(sb, field.declared);
+          string_builder_push_irid(sb, field.var->declared);
         }
         if (field.assigned != irgen.irid_nil) {
           string_builder_push_cstr(sb, "=");
@@ -450,9 +450,15 @@ Record* record_new(I32 length) {
   new_record->length   = length;
   new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
   new_record->assigned = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
   new_record->types    = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
   new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
+  new_record->vars     = arena_push(irgen.perm_arena, length*sizeof(Var*));
+
+  for (I32 i = 0; i < length; i++) {
+    Var* var = arena_push(irgen.perm_arena, sizeof(Var));
+    new_record->vars[i] = var;
+  }
+
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
   return new_record;
 }
@@ -465,7 +471,7 @@ void record_push_assign_name(Record* record, Str* name, I32 position) {
   record->names[position] = name;
 }
 void record_push_declare_position(Record* record, I32 position, Ir* value) {
-  record->declared[position] = value;
+  record->vars[position]->declared = value;
 }
 void record_push_declare_name(Record* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);

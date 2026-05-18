@@ -77,9 +77,10 @@ Sem sem = {};
 typedef struct Type_Pair Type_Pair;
 struct Type_Pair { Type* one; Type* two; };
 
-Field type_record_get_by_position(Record* record, I32 pos);
+Field type_record_get_by_position(Record* record, Block* block, I32 pos);
+Type* type_of_var(Block* block, Var* var);
 
-void string_builder_push_type(String_Builder* sb, Type* type) {
+void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
   switch (type->kind) {
   case Type_Kind_none:
@@ -105,9 +106,10 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
   case Type_Kind_ptr: {
     Hash_Set stack = type->pointer->stack;
     for (I32 i = 0; i < stack.len; i++) {
-      Type** var_type = stack.list[i];
+      Var* var = stack.list[i];
+      Type* var_type = type_of_var(block, var);
       string_builder_push_cstr(sb, "@");
-      string_builder_push_type(sb, *var_type);
+      string_builder_push_type(sb, block, var_type);
     }
   } break;
   case Type_Kind_record: {
@@ -115,22 +117,22 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
     string_builder_push_cstr(sb, "record");
     string_builder_push_cstr(sb, "(");
     for (I32 pos = 0; pos < record->length; pos++) {
-      Field field = type_record_get_by_position(record, pos);
+      Field field = type_record_get_by_position(record, block, pos);
       if (field.name) {
         string_builder_push_str(sb, field.name);
         // string_builder_push_cstr(sb, "'");
         // string_builder_push_i64(sb, field.offset);
         if (field.declared_type) {
           string_builder_push_cstr(sb, ":");
-          string_builder_push_type(sb, field.declared_type);
+          string_builder_push_type(sb, block, field.declared_type);
         }
         if (field.assigned_type) {
           string_builder_push_cstr(sb, "=");
-          string_builder_push_type(sb, field.assigned_type);
+          string_builder_push_type(sb, block, field.assigned_type);
         }
       }
       else {
-        string_builder_push_type(sb, field.declared_type);
+        string_builder_push_type(sb, block, field.declared_type);
       }
       if (pos+1 < record->length) {
         string_builder_push_cstr(sb, ", ");
@@ -163,7 +165,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         Type* type = hash_map_get(&block->in_var_types, var);
         string_builder_push_str(&sb, var->name);
         string_builder_push_cstr(&sb, ": ");
-        string_builder_push_type(&sb, type);
+        string_builder_push_type(&sb, block, type);
         if (i+1 < block->in_var_types.len) {
           string_builder_push_cstr(&sb, "; ");
         }
@@ -177,7 +179,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         string_builder_push_str(&sb, var->name);
         string_builder_push_cstr(&sb, ": ");
 
-        string_builder_push_type(&sb, type);
+        string_builder_push_type(&sb, block, type);
         if (i+1 < block->out_var_types.len) {
           string_builder_push_cstr(&sb, "; ");
         }
@@ -188,7 +190,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         string_builder_push_ir(&sb, ir);
         string_builder_push_cstr(&sb, " : ");
         Type* type = hash_map_get(&sem.type_of_irs, ir);
-        string_builder_push_type(&sb, type);
+        string_builder_push_type(&sb, block, type);
       }
       switch (block->kind) {
       case Block_Kind_none:
@@ -240,6 +242,11 @@ B8 ranges_is_single(Ranges* ranges) {
   return min == max;
 }
 
+B8 type_is_subtype(Type* one, Type* two) {
+  // one is subset of two
+  return true;
+}
+
 Type* type_of_ir(Ir* ir) {
   Type* type = hash_map_get(&sem.type_of_irs, ir);
   return type;
@@ -254,11 +261,6 @@ Type* type_of_var(Block* block, Var* var) {
   if (type) return type;
   type = type_of_ir(var->declared);
   return type;
-}
-
-B8 type_is_subtype(Type* one, Type* two) {
-  // one is subset of two
-  return true;
 }
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
@@ -378,27 +380,27 @@ Type* type_ptr_stack(Hash_Set stack) {
   return type_ptr(pointer);
 }
 
-Type* type_ptr_var(Type** type) {
+Type* type_ptr_var(Var* var) {
   Hash_Set stack = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&stack, type);
+  hash_set_put(&stack, var);
   return type_ptr_stack(stack);
 }
 
-Field type_record_get_by_position(Record* record, I32 position) {
+Field type_record_get_by_position(Record* record, Block* block, I32 position) {
   Field field = {};
   field.name     = record->names[position];
-  field.declared = record->declared[position];
   field.assigned = record->assigned[position];
-  field.declared_type = type_of_ir(field.declared);
-  field.assigned_type = type_of_ir(field.assigned);
+  field.var      = record->vars[position];
+  field.declared_type = type_of_ir(field.var->declared);
+  field.assigned_type = type_of_var(block, field.var);
   field.offset   = record->offsets[position];
   field.position = position;
   return field;
 }
 
-Field type_record_get_by_name(Record* record, Str* name) {
+Field type_record_get_by_name(Record* record, Block* block, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
-  return type_record_get_by_position(record, position);
+  return type_record_get_by_position(record, block, position);
 }
 
 Type* type_record(Record* record) {
@@ -840,16 +842,7 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_var: {
-    Type** type_ptr = (Type**)hash_map_get_ptr(&block->out_var_types, ir->var);
-    if (type_ptr) {
-      result = type_ptr_var(type_ptr);
-    }
-    else {
-      Type* declared_type = type_of_ir(ir->var->declared);
-      hash_map_put(&block->out_var_types, ir->var, declared_type);
-      type_ptr = (Type**)hash_map_get_ptr(&block->out_var_types, ir->var);
-      result = type_ptr_var(type_ptr);
-    }
+    result = type_ptr_var(ir->var);
   } break;
   case Ir_Kind_join: {
     Type_Pair pair = type_of_ir_binary(ir);
@@ -878,14 +871,14 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_record(ir->record);
   } break;
   case Ir_Kind_name_offset: {
-    Ir_Kind ir_kind = ir->name.of->kind;
-    Type* of_type = type_of_ir(ir->name.of);
-    if (ir_kind == Ir_Kind_load) {
-      Record* record = of_type->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
-      Type** type = &record->types[position];
-      result = type_ptr_var(type);
-    }
+    // Ir_Kind ir_kind = ir->name.of->kind;
+    // Type* of_type = type_of_ir(ir->name.of);
+    // if (ir_kind == Ir_Kind_load) {
+      // Record* record = of_type->record;
+      // I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
+      // Type** type = &record->types[position];
+      // result = type_ptr_var(type);
+    // }
   } break;
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(ir->unary);
@@ -893,10 +886,10 @@ void sem_ir(Block* block, Ir* ir) {
       Pointer* pointer = ptr_type->pointer;
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
-      result = *(Type**)stack.list[0];
+      result = type_of_var(block, stack.list[0]);
       for (I32 i = 1; i < stack.len; i++) {
-        Type** type = stack.list[i];
-        result = type_join(result, *type);
+        Type* type = type_of_var(block, stack.list[i]);
+        result = type_join(result, type);
       }
     }
     else {
@@ -911,11 +904,8 @@ void sem_ir(Block* block, Ir* ir) {
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
       for (I32 i = 0; i < stack.len; i++) {
-        Type** type = stack.list[i];
-        *type = rhs;
-        // TODO: check against declared type
-        // to do this declared type can be stored within Pointer
-        // type_of_var_put(block, var, rhs);
+        Var* var = stack.list[i];
+        type_of_var_put(block, var, rhs);
       }
     }
     else {
