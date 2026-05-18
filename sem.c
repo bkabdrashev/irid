@@ -248,9 +248,68 @@ B8 ranges_is_single(Ranges* ranges) {
   return min == max;
 }
 
-B8 type_is_subtype(Type* one, Type* two) {
-  // one is subset of two
-  return true;
+B8 ranges_is_subrange(Ranges* one, Ranges* two) {
+  // x in two => x in one
+  // necessary: |one| < |two|
+  I32 o = 0; I32 t = 0;
+  while (o < one->length && t < two->length) {
+    if (one->pairs[o].lo < two->pairs[t].lo) {
+      // 0..
+      //   2..
+      return false;
+    }
+    else if (one->pairs[o].lo > two->pairs[t].hi) {
+      //      2..
+      // 0..1 ...
+      t++;
+    }
+    else if (one->pairs[o].hi <= two->pairs[t].hi) {
+      //   2..4
+      // 0.....5
+      o++;
+    }
+    else {
+      return false;
+    }
+  }
+  return o == one->length;
+}
+
+B8 type_is_subtype(Block* block, Type* one, Type* two) {
+  // is one subtype of two
+  // (1..3) is subtype of 1 -- true
+  // (1..2) is subtype of (1..3) -- false
+
+  if (one->kind != two->kind) return false;
+  switch (one->kind) {
+  case Type_Kind_none: {
+    return true;
+  } break;
+  case Type_Kind_int: {
+    return ranges_is_subrange(one->ranges, two->ranges);
+  } break;
+  case Type_Kind_record: {
+    if (one->record->length != two->record->length) return false;
+
+    for (I32 i = 0; i < one->record->length; i++) {
+      Field field_one = type_record_get_by_position(block, one->record, i);
+      Field field_two = type_record_get_by_position(block, two->record, i);
+      if (!type_is_subtype(block, field_one.assigned_type, field_two.declared_type)) {
+      }
+    }
+    return true;
+  } break;
+  case Type_Kind_ptr: {
+    Hash_Set stack_one = one->pointer->stack;
+    Type* unknown = two->pointer->unknown;
+    for (I32 i = 0; i < stack_one.len; i++) {
+      Var* var = stack_one.list[i];
+      if (!type_is_subtype(block, var->declared, unknown)) return false;
+    }
+    return true;
+  } break;
+  }
+  return false;
 }
 
 Type* type_of_ir(Ir* ir) {
@@ -271,10 +330,12 @@ Type* type_of_var(Block* block, Var* var) {
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
   Type* var_type = var->declared;
-  if (type_is_subtype(type, var_type)) {
+  if (type_is_subtype(block, type, var_type)) {
     if (var_type->kind == Type_Kind_record) {
       for (I32 i = 0; i < var_type->record->length; i++) {
         Type* field_type = type_of_ir(type->record->assigned[i]);
+        type->record->declared = var_type->record->declared;
+        type->record->vars = var_type->record->vars;
         type_of_var_put(block, var_type->record->vars[i], field_type);
       }
     }
@@ -409,9 +470,16 @@ Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   field.name     = record->names[position];
   field.assigned = record->assigned[position];
   field.declared = record->declared[position];
-  field.var      = record->vars[position];
-  field.declared_type = type_of_ir(field.declared);
-  field.assigned_type = type_of_var(block, field.var);
+  if (record->vars) {
+    field.var      = record->vars[position];
+    field.declared_type = field.var->declared;
+    field.assigned_type = type_of_var(block, field.var);
+  }
+  else {
+    field.var = 0;
+    field.declared_type = type_of_ir(field.declared);
+    field.assigned_type = type_of_ir(field.assigned);
+  }
   field.offset   = record->offsets[position];
   field.position = position;
   return field;
@@ -849,6 +917,22 @@ void sem_jump(Block* from_block, Block* to_block) {
   }
 }
 
+void sem_declare(Var* var, Ir* ir) {
+  Type* type = type_of_ir(ir);
+  if (type->kind == Type_Kind_record) {
+    type->record->vars = arena_push(irgen.perm_arena, type->record->length*sizeof(Var*));
+
+    for (I32 i = 0; i < type->record->length; i++) {
+      Var* field_var = arena_push(irgen.perm_arena, sizeof(Var));
+      type->record->vars[i] = field_var;
+      field_var->name = type->record->names[i];
+      field_var->parent = var;
+      sem_declare(field_var, type->record->declared[i]);
+    }
+  }
+  var->declared = type;
+}
+
 void sem_ir(Block* block, Ir* ir) {
   Type* result = type_of_ir(ir);
   switch (ir->kind) {
@@ -857,19 +941,7 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_declare: {
-    Type* type = type_of_ir(ir->declare.ir);
-    if (type->kind == Type_Kind_record) {
-      type->record->vars = arena_push(irgen.perm_arena, type->record->length*sizeof(Var*));
-
-      for (I32 i = 0; i < type->record->length; i++) {
-        Var* var = arena_push(irgen.perm_arena, sizeof(Var));
-        type->record->vars[i] = var;
-        var->name = type->record->names[i];
-        var->parent = ir->declare.var;
-      }
-    }
-    ir->declare.var->declared = type;
-    result = type;
+    sem_declare(ir->declare.var, ir->declare.ir);
   } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
@@ -1122,8 +1194,8 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  // test("a: (x:1; y:2); b: @1; a=(x=1; y=2); b=@a.x; if 2 do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
-  test("a: (x:1; y:2); a.x", "");
+  test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if 2 do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
+  // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x", "");
 }
 
 #undef test

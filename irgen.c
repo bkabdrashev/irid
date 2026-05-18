@@ -589,6 +589,7 @@ void irgen_fun_leave() {
     Block* block = irgen_block_leave();
     block->kind = Block_Kind_jump;
     Block* last = &new(irgen.blocks);
+    memset(last, 0, sizeof(Block));
     block->jump.to_block = last;
     last->kind = Block_Kind_none;
     Irs empty = { .length = 0 };
