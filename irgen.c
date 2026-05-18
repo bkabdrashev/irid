@@ -469,6 +469,7 @@ void record_push_assign_position(Record* record, I32 position, Ir* value) {
 void record_push_assign_name(Record* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
+  record->vars[position]->name = name;
 }
 void record_push_declare_position(Record* record, I32 position, Ir* value) {
   record->vars[position]->declared = value;
@@ -476,6 +477,7 @@ void record_push_declare_position(Record* record, I32 position, Ir* value) {
 void record_push_declare_name(Record* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
+  record->vars[position]->name = name;
 }
 
 Block* irgen_put_branch(Ir* cond) {

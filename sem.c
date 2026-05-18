@@ -871,14 +871,14 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_record(ir->record);
   } break;
   case Ir_Kind_name_offset: {
-    // Ir_Kind ir_kind = ir->name.of->kind;
-    // Type* of_type = type_of_ir(ir->name.of);
-    // if (ir_kind == Ir_Kind_load) {
-      // Record* record = of_type->record;
-      // I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
-      // Type** type = &record->types[position];
-      // result = type_ptr_var(type);
-    // }
+    Ir_Kind ir_kind = ir->name.of->kind;
+    Type* of_type = type_of_ir(ir->name.of);
+    if (ir_kind == Ir_Kind_load) {
+      Record* record = of_type->record;
+      I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
+      Var* var = record->vars[position];
+      result = type_ptr_var(var);
+    }
   } break;
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(ir->unary);
@@ -1088,7 +1088,7 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  test("a: 1; b: @1; a=1; b=@a; if 2 do { b@=3 }", "");
+  test("a: (x:1; y:2); b: @1; a=(x=1; y=2); b=@a.x; if 2 do { b@=3 }", "");
 }
 
 #undef test
