@@ -169,7 +169,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       for (I32 i = 0; i < block->in_var_types.len; i++) {
         Var* var = block->in_var_types.list[i];
         Type* type = hash_map_get(&block->in_var_types, var);
-        string_builder_push_str(&sb, var->name);
+        string_builder_push_var(&sb, var);
         string_builder_push_cstr(&sb, ": ");
         string_builder_push_type(&sb, block, type);
         if (i+1 < block->in_var_types.len) {
@@ -182,7 +182,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       for (I32 i = 0; i < block->out_var_types.len; i++) {
         Var* var = block->out_var_types.list[i];
         Type* type = hash_map_get(&block->out_var_types, var);
-        string_builder_push_str(&sb, var->name);
+        string_builder_push_var(&sb, var);
         string_builder_push_cstr(&sb, ": ");
 
         string_builder_push_type(&sb, block, type);
@@ -702,15 +702,6 @@ Type* type_ranges_exclude(Ranges* ranges, I64 val) {
   return type_ints(new_ints);
 }
 
-void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type);
-void sem_narrow_record(Sem_Tasks* tasks, Name_Offset name_offset, Type* new_type_of_field) {
-  Type* old_type_of_record = type_of_ir(name_offset.of);
-  assert(old_type_of_record->kind == Type_Kind_record);
-}
-
-void sem_tasks_push(Sem_Tasks* tasks, Ir* ir, Type* old_type) {
-}
-
 void sem_tasks_push_var(Sem_Tasks* tasks, Var* var, Type* old) {
   tasks->vars[tasks->length] = var;
   tasks->types[tasks->length] = old;
@@ -719,14 +710,15 @@ void sem_tasks_push_var(Sem_Tasks* tasks, Var* var, Type* old) {
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
   if (ir->kind == Ir_Kind_load) {
-    assert(0);
-    Type* old_type = hash_map_get(tasks->out_vars, ir->var);
-    if (hash_map_change_if_exists(tasks->out_vars, ir->var, new_type)) {
-      sem_tasks_push_var(tasks, ir->var, old_type);
+    Type* ptr_type = type_of_ir(ir->unary);
+    Pointer* ptr = ptr_type->pointer;
+    for (I32 i = 0; i < ptr->stack.len; i++) {
+      Var* var = ptr->stack.list[i];
+      Type* old_type = hash_map_get(tasks->out_vars, var);
+      if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
+        sem_tasks_push_var(tasks, var, old_type);
+      }
     }
-  }
-  else if (ir->kind == Ir_Kind_name_offset) {
-    sem_narrow_record(tasks, ir->name, new_type);
   }
 }
 
@@ -825,12 +817,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
       }
     }
   } break;
-  default: {
-    Type* old_type = type_of_ir(cond_ir);
-    Type* new_type = type_narrow_eqz(old_type);
-    type_of_ir_put(cond_ir, new_type);
-    sem_tasks_push(tasks, cond_ir, old_type);
-  } break;
+  default: {} break;
   }
 }
 
@@ -868,12 +855,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
       }
     }
   } break;
-  default: {
-    Type* old_type = type_of_ir(cond_ir);
-    Type* new_type = type_narrow_eqz(old_type);
-    type_of_ir_put(cond_ir, new_type);
-    sem_tasks_push(tasks, cond_ir, old_type);
-  } break;
+  default: {} break;
   }
 }
 
@@ -1175,8 +1157,6 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
 /*
-TODO:
-Consider lazy types
   r: (x:1\2; y:3\4) = (x=1; y=3)
   if ... do
     r.x = 2
@@ -1208,7 +1188,7 @@ Consider lazy types
 */
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x", "");
-  test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do a", "");
+  test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
 }
 
 #undef test
