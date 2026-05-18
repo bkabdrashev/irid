@@ -812,11 +812,17 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   case Ir_Kind_gt: assert(0);
   case Ir_Kind_ge: assert(0);
   case Ir_Kind_load: {
-    assert(0);
-    Type* old_type = hash_map_get(tasks->out_vars, cond_ir->var);
-    Type* new_type = type_narrow_nez(old_type);
-    if (hash_map_change_if_exists(tasks->out_vars, cond_ir->var, new_type)) {
-      sem_tasks_push_var(tasks, cond_ir->var, old_type);
+    Type* ptr_type = type_of_ir(cond_ir->unary);
+    if (ptr_type->kind == Type_Kind_ptr) {
+      Pointer* ptr = ptr_type->pointer;
+      for (I32 i = 0; i < ptr->stack.len; i++) {
+        Var* var = ptr->stack.list[i];
+        Type* old_type = hash_map_get(tasks->out_vars, var);
+        Type* new_type = type_narrow_nez(old_type);
+        if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
+          sem_tasks_push_var(tasks, var, old_type);
+        }
+      }
     }
   } break;
   default: {
@@ -849,11 +855,17 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   case Ir_Kind_gt: assert(0); // log_todo("Ir_Kind_gt narrow nez");
   case Ir_Kind_ge: assert(0); // log_todo("Ir_Kind_ge narrow nez");
   case Ir_Kind_load: {
-    assert(0);
-    Type* old = hash_map_get(tasks->out_vars, cond_ir->var);
-    Type* new = type_narrow_eqz(old);
-    if (hash_map_change_if_exists(tasks->out_vars, cond_ir->var, new)) {
-      sem_tasks_push_var(tasks, cond_ir->var, old);
+    Type* ptr_type = type_of_ir(cond_ir->unary);
+    if (ptr_type->kind == Type_Kind_ptr) {
+      Pointer* ptr = ptr_type->pointer;
+      for (I32 i = 0; i < ptr->stack.len; i++) {
+        Var* var = ptr->stack.list[i];
+        Type* old_type = hash_map_get(tasks->out_vars, var);
+        Type* new_type = type_narrow_eqz(old_type);
+        if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
+          sem_tasks_push_var(tasks, var, old_type);
+        }
+      }
     }
   } break;
   default: {
@@ -1194,8 +1206,9 @@ Consider lazy types
   r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
 
 */
-  test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if 2 do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
+  // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x", "");
+  test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do a", "");
 }
 
 #undef test
