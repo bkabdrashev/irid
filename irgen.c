@@ -822,7 +822,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a: 1; wh 2 do { a = 1 }", "test");
+  // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
 }
 
 #undef test
