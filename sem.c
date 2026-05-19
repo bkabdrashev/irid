@@ -80,6 +80,7 @@ struct Type_Pair { Type* one; Type* two; };
 
 Field type_record_get_by_position(Block* block, Record* record, I32 pos);
 Type* type_of_var(Block* block, Var* var);
+Type* type_join(Type* one, Type* two);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
@@ -164,6 +165,14 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       string_builder_push_cstr(&sb, ":");
 
       string_builder_push_i64(&sb, block->sccid);
+
+      string_builder_push_cstr(&sb, "|");
+      for (I32 i = 0; i < block->preds.length; i++) {
+        Block* pred = block->preds.base[i];
+        string_builder_push_blockid(&sb, pred);
+        string_builder_push_cstr(&sb, ",");
+      }
+      string_builder_push_cstr(&sb, "|");
 
       string_builder_push_cstr(&sb, " in{");
       for (I32 i = 0; i < block->in_var_types.len; i++) {
@@ -319,40 +328,6 @@ Type* type_of_ir(Ir* ir) {
 
 void type_of_ir_put(Ir* ir, Type* type) {
   hash_map_put(&sem.type_of_irs, ir, type);
-}
-
-Type* type_join(Type* one, Type* two);
-Type* type_of_var(Block* block, Var* var) {
-  Type* type = hash_map_get(&block->out_var_types, var);
-  if (type) return type;
-  for (I32 i = 0; i < block->preds.length; i++) {
-    Block* pred = block->preds.base[i];
-    Type* pred_type = type_of_var(pred, var);
-    type = type_join(type, pred_type);
-  }
-  if (!type) {
-    type = var->declared;
-  }
-  hash_map_put(&block->out_var_types, var, type);
-  return type;
-}
-
-void type_of_var_put(Block* block, Var* var, Type* type) {
-  Type* var_type = var->declared;
-  if (type_is_subtype(block, type, var_type)) {
-    if (var_type->kind == Type_Kind_record) {
-      for (I32 i = 0; i < var_type->record->length; i++) {
-        Type* field_type = type_of_ir(type->record->assigned[i]);
-        type->record->declared = var_type->record->declared;
-        type->record->vars = var_type->record->vars;
-        type_of_var_put(block, var_type->record->vars[i], field_type);
-      }
-    }
-    hash_map_put(&block->out_var_types, var, type);
-  }
-  else {
-    assert(0);
-  }
 }
 
 Ranges* sem_ranges_init(I32 max_len) {
@@ -868,6 +843,79 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   }
 }
 
+void sem_unnarrow(Sem_Tasks tasks) {
+  for (I32 i = 0; i < tasks.length; i++) {
+    Var*  var = tasks.vars[i];
+    Type* old = tasks.types[i];
+    hash_map_put(tasks.out_vars, var, old);
+  }
+}
+
+Type* type_of_var(Block* block, Var* var) {
+  Type* type = hash_map_get(&block->out_var_types, var);
+  if (type) return type;
+  for (I32 i = 0; i < block->preds.length; i++) {
+    Block* pred = block->preds.base[i];
+    if (pred->kind == Block_Kind_branch) {
+      Sem_Tasks tasks = {};
+      tasks.out_vars = &pred->out_var_types;
+      tasks.length = 0;
+      tasks.vars = arena_push(sem.temp_arena, sizeof(Var*) * tasks.out_vars->len);
+      tasks.types = arena_push(sem.temp_arena, sizeof(Type*) * tasks.out_vars->len);
+      { // condition is not equal to zero branch
+        Jump jump = pred->branch.nez;
+        if (jump.to_block == block) {
+          sem_narrow_nez(&tasks, pred);
+          Type* pred_type = type_of_var(pred, var);
+          type = type_join(type, pred_type);
+          sem_unnarrow(tasks);
+          tasks.length = 0;
+        }
+      }
+      { // condition is equal to zero branch
+        Jump jump = pred->branch.eqz;
+        if (jump.to_block == block) {
+          sem_narrow_eqz(&tasks, pred);
+          Type* pred_type = type_of_var(pred, var);
+          type = type_join(type, pred_type);
+          sem_unnarrow(tasks);
+          tasks.length = 0;
+        }
+      }
+
+      arena_release_mark(sem.temp_arena, tasks.vars);
+    }
+    else if (pred->kind == Block_Kind_jump) {
+      Type* pred_type = type_of_var(pred, var);
+      type = type_join(type, pred_type);
+    }
+
+  }
+  if (!type) {
+    type = var->declared;
+  }
+  hash_map_put(&block->out_var_types, var, type);
+  return type;
+}
+
+void type_of_var_put(Block* block, Var* var, Type* type) {
+  Type* var_type = var->declared;
+  if (type_is_subtype(block, type, var_type)) {
+    if (var_type->kind == Type_Kind_record) {
+      for (I32 i = 0; i < var_type->record->length; i++) {
+        Type* field_type = type_of_ir(type->record->assigned[i]);
+        type->record->declared = var_type->record->declared;
+        type->record->vars = var_type->record->vars;
+        type_of_var_put(block, var_type->record->vars[i], field_type);
+      }
+    }
+    hash_map_put(&block->out_var_types, var, type);
+  }
+  else {
+    assert(0);
+  }
+}
+
 void sem_worklist_sort(void) {
   for (I32 i = 0; i < sem.worklist->length; i++) {
     I32 max_i = i;
@@ -1031,42 +1079,9 @@ void sem_ir(Block* block, Ir* ir) {
   type_of_ir_put(ir, result);
 }
 
-void sem_unnarrow(Sem_Tasks tasks) {
-  for (I32 i = 0; i < tasks.length; i++) {
-    Var*  var = tasks.vars[i];
-    Type* old = tasks.types[i];
-    hash_map_put(tasks.out_vars, var, old);
-  }
-}
-
 void sem_block(Block* block) {
   for (I32 i = 0; i < block->irs->length; i++) {
     sem_ir(block, block->irs->base[i]);
-  }
-
-  if (block->kind == Block_Kind_branch) {
-    Sem_Tasks tasks = {};
-    tasks.out_vars = &block->out_var_types;
-    tasks.length = 0;
-    tasks.vars = arena_push(sem.temp_arena, sizeof(Var*) * tasks.out_vars->len);
-    tasks.types = arena_push(sem.temp_arena, sizeof(Type*) * tasks.out_vars->len);
-    { // condition is not equal to zero branch
-      sem_narrow_nez(&tasks, block);
-      Jump jump = block->branch.nez;
-      // sem_jump(block, jump.to_block);
-      sem_unnarrow(tasks);
-      tasks.length = 0;
-    }
-    { // condition is equal to zero branch
-      sem_narrow_eqz(&tasks, block);
-      Jump jump = block->branch.eqz;
-      // sem_jump(block, jump.to_block);
-      sem_unnarrow(tasks);
-      tasks.length = 0;
-    }
-  }
-  else if (block->kind == Block_Kind_jump) {
-    sem_jump(block, block->jump.to_block);
   }
 }
 
@@ -1135,6 +1150,7 @@ void sem_init_block_preds(Block* block) {
 Type* sem_fun(Fun* fun) {
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
+    sem_init_block_preds(block);
     sem_scc_block(block);
     block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
     block->in_var_types  = hash_map_init(sem.perm_arena, fun->var_count);
@@ -1193,7 +1209,9 @@ void sem_test(void) {
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x", "");
   // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
-  test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x + a.y}", "");
+  // test("a: 0\\1; a=1; if 2 do { a = 0 }; a", "");
+  test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
+  // test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x + a.y}", "");
 }
 
 #undef test
