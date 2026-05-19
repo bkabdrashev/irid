@@ -321,10 +321,19 @@ void type_of_ir_put(Ir* ir, Type* type) {
   hash_map_put(&sem.type_of_irs, ir, type);
 }
 
+Type* type_join(Type* one, Type* two);
 Type* type_of_var(Block* block, Var* var) {
   Type* type = hash_map_get(&block->out_var_types, var);
   if (type) return type;
-  type = var->declared;
+  for (I32 i = 0; i < block->preds.length; i++) {
+    Block* pred = block->preds.base[i];
+    Type* pred_type = type_of_var(pred, var);
+    type = type_join(type, pred_type);
+  }
+  if (!type) {
+    type = var->declared;
+  }
+  hash_map_put(&block->out_var_types, var, type);
   return type;
 }
 
@@ -1044,14 +1053,14 @@ void sem_block(Block* block) {
     { // condition is not equal to zero branch
       sem_narrow_nez(&tasks, block);
       Jump jump = block->branch.nez;
-      sem_jump(block, jump.to_block);
+      // sem_jump(block, jump.to_block);
       sem_unnarrow(tasks);
       tasks.length = 0;
     }
     { // condition is equal to zero branch
       sem_narrow_eqz(&tasks, block);
       Jump jump = block->branch.eqz;
-      sem_jump(block, jump.to_block);
+      // sem_jump(block, jump.to_block);
       sem_unnarrow(tasks);
       tasks.length = 0;
     }
@@ -1095,6 +1104,31 @@ void sem_scc_block(Block* block) {
       pop_block->is_on_scc_stack = false;
       pop_block->sccid = sccid;
     } while (block != pop_block);
+  }
+}
+
+void sem_init_block_preds(Block* block) {
+  if (block->preds.base) return;
+
+  block->preds.base = arena_push(sem.perm_arena, block->preds.length * sizeof(Block*));
+  block->preds.length = 0;
+
+  if (block->kind == Block_Kind_jump) {
+    Block* to_block = block->jump.to_block;
+    sem_init_block_preds(to_block);
+    add(to_block->preds, block);
+  }
+  else if (block->kind == Block_Kind_branch) {
+    {
+      Block* to_block = block->branch.nez.to_block;
+      sem_init_block_preds(to_block);
+      add(to_block->preds, block);
+    }
+    {
+      Block* to_block = block->branch.eqz.to_block;
+      sem_init_block_preds(to_block);
+      add(to_block->preds, block);
+    }
   }
 }
 
@@ -1156,39 +1190,10 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-/*
-  r: (x:1\2; y:3\4) = (x=1; y=3)
-  if ... do
-    r.x = 2
-    r.y = 4
-  r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
-
-  b0 in{}
-    ...
-  out{r=(x=1; y=3)}
-  branch ... b1 b2
-
-  b1 in{r=(x=1; y=3)}
-    t0 = load var r       // (x=1; y=3)
-    t1 = name offset t0.x //
-    store t1 2 // r = (x=2; y=3)
-
-    t2 = load var r
-    t3 = name offset t2.y
-    store t3 4
-  out{r=(x=2; y=4)}
-
-  b2 in{r(x=1; y=3)\(x=2;y=4)
-
-///////////////////
-  r = (x=1; y=3)
-  if ... do r = (x=2; y=4)
-  r // (x=1; y=3)\(x=2; y=4) -- not (x=1\2)
-
-*/
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x", "");
-  test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
+  // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
+  test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x + a.y}", "");
 }
 
 #undef test
