@@ -744,7 +744,23 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_link_jump_to_block(&jump_from_eqz->jump, merge_block);
     irgen_link_jump_to_block(&jump_from_nez->jump, merge_block);
   } break;
-  case Ast_Kind_fun: case Ast_Kind_while:
+  case Ast_Kind_while: {
+    Ast_Node* cond = node->binary.lhs;
+    Ast_Node* then = node->binary.rhs;
+    Block* while_entry    = irgen_put_jump();
+    Block* while_header   = irgen_block_new();
+    irgen_link_jump_to_block(&while_entry->jump, while_header);
+    Ir* cond_ir = irgen_ast_node(cond);
+    Block* branch_from_header = irgen_put_branch(cond_ir);
+    Block* body_entry         = irgen_block_new(); // not equal zero
+    irgen_link_jump_to_block(&branch_from_header->branch.nez, body_entry);
+                                irgen_ast_node(then);
+    Block* jump_from_body_to_header = irgen_put_jump();
+    irgen_link_jump_to_block(&jump_from_body_to_header->jump, while_header);
+    Block* while_exit           = irgen_block_new(); // equal zero
+    irgen_link_jump_to_block(&branch_from_header->branch.eqz, while_exit);
+  } break;
+  case Ast_Kind_fun:
   case Ast_Kind_return: case Ast_Kind_break:
   case Ast_Kind_return_value: case Ast_Kind_break_value:
   case Ast_Kind_block_value: case Ast_Kind_iblock:
@@ -806,7 +822,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a:4; a.x", "test");
+  test("a: 1; wh 2 do { a = 1 }", "test");
 }
 
 #undef test

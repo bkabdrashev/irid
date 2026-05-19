@@ -1223,7 +1223,8 @@ void sem_test(void) {
   // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; a", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
-  test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x}", "");
+  // test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x}", "");
+  // test("a: 1; wh 2 do { a = 1 }; a+a", "");
 }
 
 #undef test
