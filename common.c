@@ -253,17 +253,6 @@ B8 hash_set_put(Hash_Set* set, void* key) {
   }
 }
 
-Hash_Set hash_set_join(Arena* arena, Hash_Set* one, Hash_Set* two) {
-  Hash_Set new_set = hash_set_init(arena, one->len + two->len);
-  for (I32 i = 0; i < one->len; i++) {
-    hash_set_put(&new_set, one->list[i]);
-  }
-  for (I32 i = 0; i < two->len; i++) {
-    hash_set_put(&new_set, two->list[i]);
-  }
-  return new_set;
-}
-
 B8 hash_set_exists(Hash_Set* set, void* key) {
   I32 i = hash_u64((U64)key);
   for (;;) {
@@ -276,6 +265,41 @@ B8 hash_set_exists(Hash_Set* set, void* key) {
     }
     i++;
   }
+}
+
+Hash_Set hash_set_meet(Arena* arena, Hash_Set* one, Hash_Set* two) {
+  if (one->len > two->len) {
+    return hash_set_meet(arena, two, one);
+  }
+  Hash_Set new_set = hash_set_init(arena, one->len);
+  for (I32 i = 0; i < one->len; i++) {
+    void* key = one->list[i];
+    if (hash_set_exists(two, key)) {
+      hash_set_put(&new_set, key);
+    }
+  }
+  return new_set;
+}
+
+Hash_Set hash_set_join(Arena* arena, Hash_Set* one, Hash_Set* two) {
+  Hash_Set new_set = hash_set_init(arena, one->len + two->len);
+  for (I32 i = 0; i < one->len; i++) {
+    hash_set_put(&new_set, one->list[i]);
+  }
+  for (I32 i = 0; i < two->len; i++) {
+    hash_set_put(&new_set, two->list[i]);
+  }
+  return new_set;
+}
+
+Hash_Set hash_set_exclude(Arena* arena, Hash_Set* set, void* key) {
+  Hash_Set new_set = hash_set_init(arena, set->len);
+  for (I32 i = 0; i < set->len; i++) {
+    if (set->list[i] != key) {
+      hash_set_put(&new_set, set->list[i]);
+    }
+  }
+  return new_set;
 }
 
 B8 hash_set_is_equal(Hash_Set one, Hash_Set two) {

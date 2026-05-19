@@ -11,16 +11,16 @@ struct Ranges {
 };
 
 typedef struct Ranges_Pair Ranges_Pair;
-struct Ranges_Pair {
-  Ranges* one;
-  Ranges* two;
-};
+struct Ranges_Pair { Ranges* one; Ranges* two; };
 
 typedef struct Pointer Pointer;
 struct Pointer {
   Hash_Set stack;
   Type* unknown;
 };
+
+typedef struct Pointer_Pair Pointer_Pair;
+struct Pointer_Pair { Pointer* one; Pointer* two; };
 
 typedef enum Type_Kind {
   Type_Kind_none,
@@ -204,7 +204,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         Var* var = block->out_var_types.list[i];
         Type* type = hash_map_get(&block->out_var_types, var);
         string_builder_push_var(&sb, var);
-        string_builder_push_cstr(&sb, ": ");
+        string_builder_push_cstr(&sb, "=");
 
         string_builder_push_type(&sb, block, type);
         if (i+1 < block->out_var_types.len) {
@@ -294,6 +294,10 @@ B8 ranges_is_subrange(Ranges* one, Ranges* two) {
     }
   }
   return o == one->length;
+}
+
+B8 pointer_is_single(Pointer* ptr) {
+  return ptr->stack.len == 1;
 }
 
 B8 type_is_subtype(Block* block, Type* one, Type* two) {
@@ -546,6 +550,14 @@ Ranges_Pair ranges_pair_of_ir_binary(Ir* ir) {
   return result;
 }
 
+Pointer_Pair pointer_pair_of_ir_binary(Ir* ir) {
+  Type_Pair types = type_of_ir_binary(ir);
+  Pointer_Pair result = {};
+  result.one = types.one->pointer;
+  result.two = types.two->pointer;
+  return result;
+}
+
 B8 type_kind_of_ir_binary_operands_equal(Ir* ir, Type_Kind type_kind) {
   Type_Pair pair = type_of_ir_binary(ir);
   return pair.one->kind == type_kind && pair.two->kind == type_kind;
@@ -729,6 +741,13 @@ void sem_type_narrow_int_eq(Sem_Tasks* tasks, Ir* ir) {
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
 
+void sem_type_narrow_ptr_eq(Sem_Tasks* tasks, Ir* ir) {
+  Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
+  Hash_Set meet = hash_set_meet(sem.perm_arena, &pair.one->stack, &pair.two->stack);
+  Type* new_type = type_ptr_stack(meet);
+  sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
+}
+
 void sem_type_narrow_int_ne(Sem_Tasks* tasks, Ir* ir) {
   Type_Pair pair = type_of_ir_binary(ir);
   if (ranges_is_single(pair.one->ranges)) {
@@ -739,6 +758,20 @@ void sem_type_narrow_int_ne(Sem_Tasks* tasks, Ir* ir) {
   if (ranges_is_single(pair.two->ranges)) {
     I64 val = ranges_min(pair.two->ranges);
     Type* new_type_one = type_ranges_exclude(pair.one->ranges, val);
+    sem_type_of_ir_narrow(tasks, ir->binary.one, new_type_one);
+  }
+}
+
+void sem_type_narrow_ptr_ne(Sem_Tasks* tasks, Ir* ir) {
+  Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
+  if (pointer_is_single(pair.one)) {
+    Hash_Set new_set_two = hash_set_exclude(sem.perm_arena, &pair.two->stack, pair.one->stack.list[0]);
+    Type* new_type_two = type_ptr_stack(new_set_two);
+    sem_type_of_ir_narrow(tasks, ir->binary.two, new_type_two);
+  }
+  if (pointer_is_single(pair.two)) {
+    Hash_Set new_set_one = hash_set_exclude(sem.perm_arena, &pair.one->stack, pair.two->stack.list[0]);
+    Type* new_type_one = type_ptr_stack(new_set_one);
     sem_type_of_ir_narrow(tasks, ir->binary.one, new_type_one);
   }
 }
@@ -776,13 +809,19 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
       sem_type_narrow_int_eq(tasks, cond_ir);
     }
+    else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
+      sem_type_narrow_ptr_eq(tasks, cond_ir);
+    }
     else {
       assert(0);
     }
   } break;
   case Ir_Kind_ne: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
-      assert(0);
+      sem_type_narrow_int_ne(tasks, cond_ir);
+    }
+    else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
+      sem_type_narrow_ptr_ne(tasks, cond_ir);
     }
     else {
       assert(0);
@@ -824,12 +863,23 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
       sem_type_narrow_int_ne(tasks, cond_ir);
     }
+    else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
+      sem_type_narrow_ptr_ne(tasks, cond_ir);
+    }
     else {
       assert(0);
     }
   } break;
   case Ir_Kind_ne: {
-    assert(0);
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+      sem_type_narrow_int_eq(tasks, cond_ir);
+    }
+    else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
+      sem_type_narrow_ptr_eq(tasks, cond_ir);
+    }
+    else {
+      assert(0);
+    }
   } break;
   case Ir_Kind_lt: {
     assert(0);
@@ -1068,9 +1118,17 @@ void sem_ir(Block* block, Ir* ir) {
       Pointer* pointer = lhs->pointer;
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
-      for (I32 i = 0; i < stack.len; i++) {
-        Var* var = stack.list[i];
+      if (stack.len == 1) {
+        Var* var = stack.list[0];
         type_of_var_put(block, var, rhs);
+      }
+      else {
+        for (I32 i = 0; i < stack.len; i++) {
+          Var* var = stack.list[i];
+          Type* old_type = type_of_var(block, var);
+          Type* new_type = type_join(old_type, rhs);
+          type_of_var_put(block, var, new_type);
+        }
       }
     }
     else {
@@ -1225,6 +1283,8 @@ void sem_test(void) {
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
   // test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x}", "");
   // test("a: 1; wh 2 do { a = 1 }; a+a", "");
+  test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; c @= 1; a+b", "");
+  test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; if c == @a do {c @= 1}; a+b", "");
 }
 
 #undef test
