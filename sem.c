@@ -80,6 +80,7 @@ struct Type_Pair { Type* one; Type* two; };
 
 Field type_record_get_by_position(Block* block, Record* record, I32 pos);
 Type* type_of_var(Block* block, Var* var);
+Type* type_of_ir(Ir* ir);
 Type* type_join(Type* one, Type* two);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
@@ -124,7 +125,18 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "record");
     string_builder_push_cstr(sb, "(");
     for (I32 pos = 0; pos < record->length; pos++) {
-      Field field = type_record_get_by_position(block, record, pos);
+      Field field = {};
+      field.name     = record->names[pos];
+      if (record->vars) {
+        Var* var = record->vars[pos];
+        field.declared_type = var->declared;
+        field.assigned_type = hash_map_get(&block->out_var_types, var);
+      }
+      else {
+        field.declared_type = type_of_ir(record->declared[pos]);
+        field.assigned_type = type_of_ir(record->assigned[pos]);
+      }
+
       if (field.name) {
         string_builder_push_str(sb, field.name);
         // string_builder_push_cstr(sb, "'");
@@ -1210,8 +1222,8 @@ void sem_test(void) {
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x", "");
   // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; a", "");
-  test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
-  // test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x + a.y}", "");
+  // test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
+  test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x}", "");
 }
 
 #undef test
