@@ -321,3 +321,9 @@ A : (xy:Vec2)
 b = B(1; 2)
 B : (x:I32; y:I32)
 ```
+
+- [ ] Static single assignment
+```irid
+b = 10 // b is a ssa variable
+// b = 20 // error, b should have declared type
+```
