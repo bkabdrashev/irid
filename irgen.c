@@ -51,7 +51,7 @@ typedef struct Name_Offset Name_Offset;
 struct Name_Offset { Ir* of; Str* at; };
 
 typedef struct Declare Declare;
-struct Declare { Var* var; Ir* ir; };
+struct Declare { Var* var; };
 
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Ir* of; I32 at; };
@@ -69,10 +69,13 @@ struct Record {
 
 typedef struct Type Type;
 typedef struct Var Var;
+typedef struct Blocks Blocks;
 struct Var {
-  Var* parent;
-  Str* name;
+  Var*  parent;
+  Str*  name;
   Type* declared;
+  Ir*     declared_ir;
+  Blocks* blocks;
 };
 
 struct Ir {
@@ -143,7 +146,6 @@ typedef enum Block_Kind {
   Block_Kind_branch,
 } Block_Kind;
 
-typedef struct Blocks Blocks;
 struct Blocks {
   I32    length;
   Block* base[];
@@ -251,6 +253,7 @@ void string_builder_push_blockid(String_Builder* sb, Block* block) {
   string_builder_push_i64(sb, blockid);
 }
 
+void string_builder_push_block(String_Builder* sb, Block* block);
 void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   string_builder_push_cstr(sb, "\n    ");
   string_builder_push_irid(sb, ir);
@@ -263,12 +266,17 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "int ");
     string_builder_push_i64(sb, ir->i64);
   break;
-  case Ir_Kind_declare:
+  case Ir_Kind_declare: {
+    Var* var = ir->declare.var;
     string_builder_push_cstr(sb, "declare ");
-    string_builder_push_var(sb, ir->declare.var);
-    string_builder_push_cstr(sb, " : ");
-    string_builder_push_irid(sb, ir->declare.ir);
-  break;
+    string_builder_push_var(sb, var);
+    string_builder_push_cstr(sb, ": ");
+    string_builder_push_irid(sb, var->declared_ir);
+    // for (I32 i = 0; i < var->blocks->length; i++) {
+    //   string_builder_push_cstr(sb, "\n      ");
+    //   string_builder_push_block(sb, var->blocks->base[i]);
+    // }
+  } break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
     string_builder_push_var(sb, ir->var);
@@ -335,6 +343,31 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   }
 }
 
+void string_builder_push_block(String_Builder* sb, Block* block) {
+  string_builder_push_blockid(sb, block);
+  string_builder_push_cstr(sb, ":");
+  for (I32 irid = 0; irid < block->irs->length; irid++) {
+    Ir* ir = block->irs->base[irid];
+    string_builder_push_ir(sb, ir);
+  }
+  switch (block->kind) {
+  case Block_Kind_none:
+  break;
+  case Block_Kind_jump:
+    string_builder_push_cstr(sb, "\n    jump ");
+    string_builder_push_blockid(sb, block->jump.to_block);
+  break;
+  case Block_Kind_branch:
+    string_builder_push_cstr(sb, "\n    if ");
+    string_builder_push_irid(sb, block->branch.cond);
+    string_builder_push_cstr(sb, " then ");
+    string_builder_push_blockid(sb, block->branch.nez.to_block);
+    string_builder_push_cstr(sb, " else ");
+    string_builder_push_blockid(sb, block->branch.eqz.to_block);
+  break;
+  }
+}
+
 Cstr cstr_from_funs(C8* buffer, Funs funs) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
@@ -346,28 +379,7 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
     for (I32 b = 0; b < fun.blocks->length; b++) {
       Block* block = fun.blocks->base[b];
       string_builder_push_cstr(&sb, "\n  ");
-      string_builder_push_blockid(&sb, block);
-      string_builder_push_cstr(&sb, ":");
-      for (I32 irid = 0; irid < block->irs->length; irid++) {
-        Ir* ir = block->irs->base[irid];
-        string_builder_push_ir(&sb, ir);
-      }
-      switch (block->kind) {
-      case Block_Kind_none:
-      break;
-      case Block_Kind_jump:
-        string_builder_push_cstr(&sb, "\n    jump ");
-        string_builder_push_blockid(&sb, block->jump.to_block);
-      break;
-      case Block_Kind_branch:
-        string_builder_push_cstr(&sb, "\n    if ");
-        string_builder_push_irid(&sb, block->branch.cond);
-        string_builder_push_cstr(&sb, " then ");
-        string_builder_push_blockid(&sb, block->branch.nez.to_block);
-        string_builder_push_cstr(&sb, " else ");
-        string_builder_push_blockid(&sb, block->branch.eqz.to_block);
-      break;
-      }
+      string_builder_push_block(&sb, block);
     }
 
     string_builder_push_cstr(&sb, "\n  ret ");
@@ -447,8 +459,8 @@ Ir* irgen_push_var(Var* var) {
   Ir ir = { Ir_Kind_var, .var = var };
   return irgen_push(ir);
 }
-Ir* irgen_push_declare(Var* var, Ir* rhs_ir) {
-  Ir ir = { Ir_Kind_declare, .declare = {.var = var, .ir = rhs_ir }};
+Ir* irgen_push_declare(Var* var) {
+  Ir ir = { Ir_Kind_declare, .declare = { .var = var }};
   return irgen_push(ir);
 }
 
@@ -548,6 +560,7 @@ Symbol* irgen_get_sym(Str* str) {
   return 0;
 }
 
+void irgen_link_jump_to_block(Jump* jump, Block* block);
 void irgen_scope_enter(Hash_Map* scope) {
   Fun* fun = top(irgen.fun_stack);
   for (I32 i = 0; i < scope->len; i++) {
@@ -569,8 +582,43 @@ void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
+
+    Fun* temp_fun = &new(irgen.funs);
+    add(irgen.fun_stack, temp_fun);
+    {
+      Block* block = &new(irgen.blocks);
+      memset(block, 0, sizeof(Block));
+      block->irs = irgen_irs_temp();
+      temp_fun->blocks = irgen_blocks_temp();
+      irgen_blocks_push(temp_fun->blocks, block);
+    }
+    Block* decl_block = &new(irgen.blocks);
+    memset(decl_block, 0, sizeof(Block));
+    decl_block->irs = irgen_irs_temp();
+
     Ir* ir = irgen_ast_node(sym->ast);
-    irgen_push_declare(sym->var, ir);
+
+
+    {
+      Block* block = irgen_block_leave();
+      block->kind = Block_Kind_jump;
+      Block* last = &new(irgen.blocks);
+      memset(last, 0, sizeof(Block));
+      irgen_link_jump_to_block(&block->jump, last);
+      last->kind = Block_Kind_none;
+      Irs empty = { .length = 0 };
+      last->irs = irgen_irs_perm(&empty);
+      irgen_blocks_push(temp_fun->blocks, last);
+    }
+
+    sym->var->blocks = irgen_blocks_perm(temp_fun->blocks);
+
+    sym->var->declared_ir = ir;
+
+    del(irgen.fun_stack);
+    del(irgen.funs);
+
+    irgen_push_declare(sym->var);
   }
 }
 
@@ -828,7 +876,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
-  test("a: 1\\2; b:@a", "");
+  // test("b:a; a: 1\\2", "");
+  test("a:1", "");
 }
 
 #undef test
