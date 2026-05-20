@@ -557,6 +557,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       Ast_Kind kind = Ast_Kind_load;
       I32 precedence = parse_left_precedence(kind);
       if (precedence > precedence_to_beat) {
+        lhs = node;
         node = parse_new_unary(parser, kind, lhs);
       }
       else {
@@ -870,6 +871,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a.b@.c",     "((a . b)@ . c)");
   test("a, b -> 1, 2",     "((a, b) -> (1, 2))");
   test("wh 1 do 2",        "while 1 do 2");
   test("(if 1 do 2)",      "if 1 do 2");
