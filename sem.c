@@ -73,6 +73,8 @@ struct Sem {
 
   I32 sccid;
   Blocks* scc_stack;
+
+  Fun* current_fun;
 };
 
 Sem sem = {};
@@ -84,6 +86,9 @@ Field type_record_get_by_position(Block* block, Record* record, I32 pos);
 Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
 Type* type_join(Type* one, Type* two);
+Type* type_meet(Type* one, Type* two);
+Type* type_pointer_declared(Pointer* pointer);
+void  sem_ensure_declared(Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
@@ -115,19 +120,20 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     }
   } break;
   case Type_Kind_ptr: {
-    Hash_Set stack = type->pointer->stack;
-    for (I32 i = 0; i < stack.len; i++) {
-      Var* var = stack.list[i];
-      string_builder_push_cstr(sb, "@");
-      string_builder_push_var(sb, var);
-      if (i+1 < stack.len) {
-        string_builder_push_cstr(sb, "\\");
+    Type* declared = type_pointer_declared(type->pointer);
+    string_builder_push_cstr(sb, "@");
+    string_builder_push_type(sb, block, declared);
+
+    if (type->pointer->stack.len) {
+      string_builder_push_cstr(sb, "|");
+      Hash_Set stack = type->pointer->stack;
+      for (I32 i = 0; i < stack.len; i++) {
+        Var* var = stack.list[i];
+        string_builder_push_var(sb, var);
+        if (i+1 < stack.len) {
+          string_builder_push_cstr(sb, "\\");
+        }
       }
-    }
-    Type* declared = type->pointer->declared;
-    if (declared) {
-      string_builder_push_cstr(sb, "|@");
-      string_builder_push_type(sb, block, declared);
       string_builder_push_cstr(sb, "|");
     }
   } break;
@@ -337,7 +343,7 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
   } break;
   case Type_Kind_ptr: {
     Hash_Set stack_one = one->pointer->stack;
-    Type* declared = two->pointer->declared;
+    Type* declared = type_pointer_declared(two->pointer);
     for (I32 i = 0; i < stack_one.len; i++) {
       Var* var = stack_one.list[i];
       if (!type_is_subtype(block, var->declared, declared)) return false;
@@ -538,20 +544,14 @@ Type* type_ptr(Pointer* ptr) {
 }
 
 Type* type_ptr_stack(Hash_Set stack) {
-  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->stack = stack;
   assert(stack.len >= 1);
-  Var* first_var = stack.list[0];
-  pointer->declared = first_var->declared;
-  for (I32 i = 1; i < stack.len; i++) {
-    Var* var = stack.list[i];
-    pointer->declared = type_meet(pointer->declared, var->declared);
-  }
   return type_ptr(pointer);
 }
 
-Type* type_ptr_declared(Type* type) {
-  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+Type* type_ptr_to(Type* type) {
+  Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->declared = type;
   return type_ptr(pointer);
 }
@@ -560,6 +560,22 @@ Type* type_ptr_var(Var* var) {
   Hash_Set stack = hash_set_init(sem.perm_arena, 1);
   hash_set_put(&stack, var);
   return type_ptr_stack(stack);
+}
+
+Type* type_pointer_declared(Pointer* pointer) {
+  if (pointer->declared) return pointer->declared;
+  Hash_Set stack = pointer->stack;
+  if (stack.len == 0) return 0;
+  Var* first_var = stack.list[0];
+  sem_ensure_declared(first_var);
+  Type* result = first_var->declared;
+  for (I32 i = 1; i < stack.len; i++) {
+    Var* var = stack.list[i];
+    sem_ensure_declared(var);
+    result = type_meet(result, var->declared);
+  }
+  pointer->declared = result;
+  return result;
 }
 
 B8 type_not_equal(Type* one, Type* two) {
@@ -1007,7 +1023,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
 Type* type_of_var(Block* block, Var* var) {
   Type* type = type_of_var_rec(block, var);
   if (type->kind == Type_Kind_none) {
-    type = var->declared;
+    type = var->declared ? var->declared : sem.type_none;
     hash_map_put(&block->out_var_types, var, type);
   }
   return type;
@@ -1083,20 +1099,50 @@ void sem_jump(Block* from_block, Block* to_block) {
   }
 }
 
-void sem_declare(Var* var, Ir* ir) {
-  Type* type = type_of_ir(ir);
-  if (type->kind == Type_Kind_record) {
-    type->record->vars = arena_push(irgen.perm_arena, type->record->length*sizeof(Var*));
+void sem_block(Block* block);
+void sem_init_block_preds(Block* block);
 
-    for (I32 i = 0; i < type->record->length; i++) {
-      Var* field_var = arena_push(irgen.perm_arena, sizeof(Var));
-      type->record->vars[i] = field_var;
-      field_var->name = type->record->names[i];
-      field_var->parent = var;
-      sem_declare(field_var, type->record->declared[i]);
+void sem_record_declare_fields(Var* var, Type* type) {
+  if (!type || type->kind != Type_Kind_record) return;
+  type->record->vars = arena_push(irgen.perm_arena, type->record->length*sizeof(Var*));
+  for (I32 i = 0; i < type->record->length; i++) {
+    Var* field_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    type->record->vars[i] = field_var;
+    field_var->name = type->record->names[i];
+    field_var->parent = var;
+    Type* field_type = type_of_ir(type->record->declared[i]);
+    field_var->declared = field_type;
+    field_var->state = Var_State_resolved;
+    sem_record_declare_fields(field_var, field_type);
+  }
+}
+
+void sem_ensure_declared(Var* var) {
+  if (var->state == Var_State_resolved) return;
+  if (var->state == Var_State_resolving) {
+    assert(0);
+  }
+  var->state = Var_State_resolving;
+
+  if (var->blocks) {
+    I32 cap = sem.current_fun->var_count;
+    if (cap < 16) cap = 16;
+    for (I32 i = 0; i < var->blocks->length; i++) {
+      Block* block = var->blocks->base[i];
+      sem_init_block_preds(block);
+      if (!block->out_var_types.keys) {
+        block->out_var_types = hash_map_init(sem.perm_arena, cap);
+        block->in_var_types  = hash_map_init(sem.perm_arena, cap);
+      }
+      sem_block(block);
     }
   }
+
+  Type* type = type_of_ir(var->declared_ir);
   var->declared = type;
+  sem_record_declare_fields(var, type);
+
+  var->state = Var_State_resolved;
 }
 
 void sem_ir(Block* block, Ir* ir) {
@@ -1107,7 +1153,7 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_declare: {
-    sem_declare(ir->declare.var, ir->declare.ir);
+    sem_ensure_declared(ir->declare.var);
   } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
@@ -1156,6 +1202,9 @@ void sem_ir(Block* block, Ir* ir) {
       Pointer* pointer = ptr_type->pointer;
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
+      for (I32 i = 0; i < stack.len; i++) {
+        sem_ensure_declared(stack.list[i]);
+      }
       result = type_of_var(block, stack.list[0]);
       for (I32 i = 1; i < stack.len; i++) {
         Type* type = type_of_var(block, stack.list[i]);
@@ -1196,7 +1245,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else {
       Type* type = type_of_ir(ir->unary);
-      result = type_ptr_declared(type);
+      result = type_ptr_to(type);
     }
   } break;
   default: assert(0);
@@ -1308,6 +1357,7 @@ void sem_funs(Arena* arena, Funs funs) {
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
+    sem.current_fun = fun;
     sem_fun(fun);
   }
   arena_free(&temp);
@@ -1345,6 +1395,12 @@ void sem_test(void) {
   // test("a: 1\\2; wh 2 do { a = 1 }; a+a", "");
   // test("a: 1\\2\\3; a = 2; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("a: 1\\2; b:@a; b@", "");
+  // test("a: 1", "");
+  // test("b: a; a: 1", "");
+  test("a: b; b: a", ""); // cyclic dependancy
+  // test("b+b; b: a; a: 1", "");
+  // test("a: @b; b: @a; b@", ""); // cycle during string builder
+  // test("a : 1; b : a; c : b+a; c; c", "");
 }
 
 #undef test

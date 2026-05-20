@@ -70,7 +70,15 @@ struct Record {
 typedef struct Type Type;
 typedef struct Var Var;
 typedef struct Blocks Blocks;
+
+typedef enum Var_State {
+  Var_State_unresolved,
+  Var_State_resolving,
+  Var_State_resolved,
+} Var_State;
+
 struct Var {
+  Var_State state;
   Var*  parent;
   Str*  name;
   Type* declared;
@@ -570,8 +578,7 @@ void irgen_scope_enter(Hash_Map* scope) {
       if (sym) assert(0);
     }
     Symbol* sym = hash_map_get(scope, key);
-    Var* var = arena_push(irgen.perm_arena, sizeof(Var));
-    var->parent = 0;
+    Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     var->name = key;
     sym->var = var;
 
