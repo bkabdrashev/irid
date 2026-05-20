@@ -557,9 +557,7 @@ void irgen_scope_enter(Hash_Map* scope) {
       if (sym) assert(0);
     }
     Symbol* sym = hash_map_get(scope, key);
-    Ir* ir = irgen_ast_node(sym->ast);
     Var* var = arena_push(irgen.perm_arena, sizeof(Var));
-    irgen_push_declare(var, ir);
     var->parent = 0;
     var->name = key;
     sym->var = var;
@@ -567,6 +565,13 @@ void irgen_scope_enter(Hash_Map* scope) {
     fun->var_count++;
   }
   add(irgen.scope_stack, scope);
+
+  for (I32 i = 0; i < scope->len; i++) {
+    Str* key = scope->list[i];
+    Symbol* sym = hash_map_get(scope, key);
+    Ir* ir = irgen_ast_node(sym->ast);
+    irgen_push_declare(sym->var, ir);
+  }
 }
 
 void irgen_scope_leave(void) {
@@ -823,6 +828,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
+  test("a: 1\\2; b:@a", "");
 }
 
 #undef test
