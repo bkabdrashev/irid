@@ -272,10 +272,10 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_var(sb, var);
     string_builder_push_cstr(sb, ": ");
     string_builder_push_irid(sb, var->declared_ir);
-    // for (I32 i = 0; i < var->blocks->length; i++) {
-    //   string_builder_push_cstr(sb, "\n      ");
-    //   string_builder_push_block(sb, var->blocks->base[i]);
-    // }
+    for (I32 i = 0; i < var->blocks->length; i++) {
+      string_builder_push_cstr(sb, "\n      ");
+      string_builder_push_block(sb, var->blocks->base[i]);
+    }
   } break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
@@ -606,8 +606,8 @@ void irgen_scope_enter(Hash_Map* scope) {
       memset(last, 0, sizeof(Block));
       irgen_link_jump_to_block(&block->jump, last);
       last->kind = Block_Kind_none;
-      Irs empty = { .length = 0 };
-      last->irs = irgen_irs_perm(&empty);
+      Irs* empty = irgen_irs_temp();
+      last->irs = irgen_irs_perm(empty);
       irgen_blocks_push(temp_fun->blocks, last);
     }
 
@@ -657,8 +657,8 @@ void irgen_fun_leave() {
     memset(last, 0, sizeof(Block));
     irgen_link_jump_to_block(&block->jump, last);
     last->kind = Block_Kind_none;
-    Irs empty = { .length = 0 };
-    last->irs = irgen_irs_perm(&empty);
+    Irs* empty = irgen_irs_temp();
+    last->irs = irgen_irs_perm(empty);
     irgen_blocks_push(fun->blocks, last);
   }
 
@@ -876,8 +876,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
-  // test("b:a; a: 1\\2", "");
-  test("a:1", "");
+  test("b:a; a: 2", "");
+  // test("a:1", "");
 }
 
 #undef test
