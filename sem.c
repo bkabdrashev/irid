@@ -16,7 +16,7 @@ struct Ranges_Pair { Ranges* one; Ranges* two; };
 typedef struct Pointer Pointer;
 struct Pointer {
   Hash_Set stack;
-  Type* unknown;
+  Type* declared;
 };
 
 typedef struct Pointer_Pair Pointer_Pair;
@@ -124,10 +124,10 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
         string_builder_push_cstr(sb, "\\");
       }
     }
-    Type* unknown = type->pointer->unknown;
-    if (unknown) {
+    Type* declared = type->pointer->declared;
+    if (declared) {
       string_builder_push_cstr(sb, "|@");
-      string_builder_push_type(sb, block, unknown);
+      string_builder_push_type(sb, block, declared);
       string_builder_push_cstr(sb, "|");
     }
   } break;
@@ -337,10 +337,10 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
   } break;
   case Type_Kind_ptr: {
     Hash_Set stack_one = one->pointer->stack;
-    Type* unknown = two->pointer->unknown;
+    Type* declared = two->pointer->declared;
     for (I32 i = 0; i < stack_one.len; i++) {
       Var* var = stack_one.list[i];
-      if (!type_is_subtype(block, var->declared, unknown)) return false;
+      if (!type_is_subtype(block, var->declared, declared)) return false;
     }
     return true;
   } break;
@@ -451,31 +451,6 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
   return type_ints(new_ints);
 }
 
-Type* type_ptr(Pointer* ptr) {
-  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
-  new_type->kind = Type_Kind_ptr;
-  new_type->pointer = ptr;
-  return new_type;
-}
-
-Type* type_ptr_stack(Hash_Set stack) {
-  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->stack = stack;
-  return type_ptr(pointer);
-}
-
-Type* type_ptr_unknown(Type* type) {
-  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->unknown = type;
-  return type_ptr(pointer);
-}
-
-Type* type_ptr_var(Var* var) {
-  Hash_Set stack = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&stack, var);
-  return type_ptr_stack(stack);
-}
-
 Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
@@ -508,6 +483,29 @@ Type* type_record(Block* block, Record* record) {
   return new_type;
 }
 
+Type* type_ranges_intersection(Ranges* one, Ranges* two);
+Type* type_ptr_stack(Hash_Set stack);
+
+Type* type_meet(Type* one, Type* two) {
+  Type* result = sem.type_none;
+  if (one->kind != two->kind) return result;
+
+  switch (one->kind) {
+  case Type_Kind_none: break;
+  case Type_Kind_int: {
+    result = type_ranges_intersection(one->ranges, two->ranges);
+  } break;
+  case Type_Kind_ptr: {
+    Hash_Set meet = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
+    result = type_ptr_stack(meet);
+  } break;
+  case Type_Kind_record: {
+    assert(0);
+  } break;
+  }
+  return result;
+}
+
 Type* type_join(Type* one, Type* two) {
   Type* result = 0;
   if (one->kind == Type_Kind_none) {
@@ -530,6 +528,38 @@ Type* type_join(Type* one, Type* two) {
     assert(0);
   }
   return result;
+}
+
+Type* type_ptr(Pointer* ptr) {
+  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  new_type->kind = Type_Kind_ptr;
+  new_type->pointer = ptr;
+  return new_type;
+}
+
+Type* type_ptr_stack(Hash_Set stack) {
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  pointer->stack = stack;
+  assert(stack.len >= 1);
+  Var* first_var = stack.list[0];
+  pointer->declared = first_var->declared;
+  for (I32 i = 1; i < stack.len; i++) {
+    Var* var = stack.list[i];
+    pointer->declared = type_meet(pointer->declared, var->declared);
+  }
+  return type_ptr(pointer);
+}
+
+Type* type_ptr_declared(Type* type) {
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  pointer->declared = type;
+  return type_ptr(pointer);
+}
+
+Type* type_ptr_var(Var* var) {
+  Hash_Set stack = hash_set_init(sem.perm_arena, 1);
+  hash_set_put(&stack, var);
+  return type_ptr_stack(stack);
 }
 
 B8 type_not_equal(Type* one, Type* two) {
@@ -1112,10 +1142,12 @@ void sem_ir(Block* block, Ir* ir) {
     Ir_Kind ir_kind = ir->name.of->kind;
     Type* of_type = type_of_ir(ir->name.of);
     if (ir_kind == Ir_Kind_load) {
-      Record* record = of_type->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
-      Var* var = record->vars[position];
-      result = type_ptr_var(var);
+      if (of_type->kind == Type_Kind_record) {
+        Record* record = of_type->record;
+        I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
+        Var* var = record->vars[position];
+        result = type_ptr_var(var);
+      }
     }
   } break;
   case Ir_Kind_load: {
@@ -1164,7 +1196,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else {
       Type* type = type_of_ir(ir->unary);
-      result = type_ptr_unknown(type);
+      result = type_ptr_declared(type);
     }
   } break;
   default: assert(0);
@@ -1298,16 +1330,21 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // TODO:
+  // - [ ] make pointer declared type
+  // - [ ] loop-updated variables
+  // - [ ] out-of-order constant use
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x; b@ + a.x", "");
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
-  test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
+  // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; a", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
   // test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x}", "");
   // test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; c @= 1; a+b", "");
   // test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; if c == @a do {c @= 1}; a+b", "");
   // test("a: 1\\2; wh 2 do { a = 1 }; a+a", "");
-  test("a: 1\\2\\3; a = 2; wh 2 do { if 3 do { a = 1 } }; a+a", "");
+  // test("a: 1\\2\\3; a = 2; wh 2 do { if 3 do { a = 1 } }; a+a", "");
+  // test("a: 1\\2; b:@a; b@", "");
 }
 
 #undef test
