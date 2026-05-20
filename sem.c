@@ -74,6 +74,8 @@ struct Sem {
   I32 sccid;
   Blocks* scc_stack;
 
+  I32 subtype_visit_limit;
+
   Fun* current_fun;
 };
 
@@ -120,7 +122,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     }
   } break;
   case Type_Kind_ptr: {
-    Type* declared = type_pointer_declared(type->pointer);
+    // Type* declared = type_pointer_declared(type->pointer);
     string_builder_push_cstr(sb, "@");
     // string_builder_push_type(sb, block, declared);
 
@@ -317,7 +319,29 @@ B8 pointer_is_single(Pointer* ptr) {
   return ptr->stack.len == 1;
 }
 
-B8 type_is_subtype(Block* block, Type* one, Type* two) {
+typedef struct Subtype_Visited Subtype_Visited;
+struct Subtype_Visited {
+  I32 length;
+  Pointer_Pair* base;
+};
+
+B8 subtype_visited_contains(Subtype_Visited* v, Pointer* one, Pointer* two) {
+  for (I32 i = 0; i < v->length; i++) {
+    if (v->base[i].one == one && v->base[i].two == two) return true;
+  }
+  return false;
+}
+
+void subtype_visited_push(Subtype_Visited* v, Pointer* one, Pointer* two) {
+  v->base[v->length].one = one;
+  v->base[v->length].two = two;
+  v->length++;
+  if (v->length > sem.subtype_visit_limit) {
+    assert(0);
+  }
+}
+
+B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
   // is one subtype of two
   // (1..3) is subtype of 1 -- true
   // (1..2) is subtype of (1..3) -- false
@@ -336,18 +360,27 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
     for (I32 i = 0; i < one->record->length; i++) {
       Field field_one = type_record_get_by_position(block, one->record, i);
       Field field_two = type_record_get_by_position(block, two->record, i);
-      if (!type_is_subtype(block, field_one.assigned_type, field_two.declared_type)) return false;
+      if (!type_is_subtype_rec(block, field_one.assigned_type, field_two.declared_type, visited)) return false;
     }
     return true;
   } break;
   case Type_Kind_ptr: {
+    if (subtype_visited_contains(visited, one->pointer, two->pointer)) return true;
+    subtype_visited_push(visited, one->pointer, two->pointer);
     Type* one_declared = type_pointer_declared(one->pointer);
     Type* two_declared = type_pointer_declared(two->pointer);
-    if (!type_is_subtype(block, one_declared, two_declared)) return false;
+    if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) return false;
     return true;
   } break;
   }
   return false;
+}
+
+B8 type_is_subtype(Block* block, Type* one, Type* two) {
+  Subtype_Visited visited = {0};
+  // TODO: remove hard limit here
+  visited.base = arena_push(sem.temp_arena, sem.subtype_visit_limit * sizeof(Pointer_Pair));
+  return type_is_subtype_rec(block, one, two, &visited);
 }
 
 Type* type_of_ir(Ir* ir) {
@@ -1344,6 +1377,7 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.type_none = arena_push(arena, sizeof(Type));
   sem.type_none->kind = Type_Kind_none;
+  sem.subtype_visit_limit = 16;
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
@@ -1389,7 +1423,8 @@ void sem_test(void) {
   // test("b+b; b: a; a: 1", "");
   // test("a: @b; b: @a; b@", ""); // cycle during string builder
   // test("a : 1; b : a; c : b+a; c; c", "");
-  test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b", "");
+  // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
+  test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
 }
 
 #undef test

@@ -236,7 +236,6 @@ Field record_get_by_position(Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
   field.assigned = record->assigned[position];
-  field.var      = record->vars[position];
   field.position = position;
   return field;
 }
@@ -904,6 +903,8 @@ void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1", "");
+  // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
+  test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
 }
 
 #undef test
