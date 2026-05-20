@@ -31,8 +31,8 @@ typedef enum Type_Kind {
 
 struct Type {
   Type_Kind kind;
-  I32 bit_align;
-  I32 bit_size;
+  I16 align;
+  I16 size;
   union {
     Ranges*  ranges;
     Pointer* pointer;
@@ -404,10 +404,10 @@ Type* type_ints(Ranges* ranges) {
   I64 max = ranges_max(ranges);
   I32 bit_size = bits_needed(min, max);
 
-  new_type->kind = Type_Kind_int;
+  new_type->kind   = Type_Kind_int;
   new_type->ranges = ranges;
-  new_type->bit_align = bit_size;
-  new_type->bit_size = bit_size;
+  new_type->align  = (bit_size+7) / 8;
+  new_type->size   = (bit_size+7) / 8;
 
   return new_type;
 }
@@ -888,7 +888,7 @@ Type* type_narrow_nez(Type* type) {
   return type;
 }
 
-void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
+B8 sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
@@ -1143,7 +1143,13 @@ void sem_record_declare_fields(Var* var, Type* type) {
     field_var->declared = field_type;
     field_var->state = Var_State_resolved;
     sem_record_declare_fields(field_var, field_type);
+
+    type->align = max(type->align, field_type->align);
+    type->size = align_up(type->size, field_type->align);
+    type->record->offsets[i] = type->size;
+    type->size += field_type->size;
   }
+  type->size = align_up(type->size, type->align);
 }
 
 void sem_ensure_declared(Var* var) {
