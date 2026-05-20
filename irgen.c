@@ -458,6 +458,13 @@ Ir* irgen_push(Ir ir) {
   return new_ir;
 }
 
+Ir* irgen_pop(void) {
+  Block* block = irgen_top_block();
+  Ir* new_ir = &pop(irgen.irs);
+  fa_del(block->irs);
+  return new_ir;
+}
+
 Ir* irgen_push_int(I64 i64) {
   Ir ir = { Ir_Kind_int, .i64 = i64 };
   return irgen_push(ir);
@@ -591,6 +598,7 @@ void irgen_scope_enter(Hash_Map* scope) {
     Symbol* sym = hash_map_get(scope, key);
 
     Fun* temp_fun = &new(irgen.funs);
+    temp_fun->var_count = 0;
     add(irgen.fun_stack, temp_fun);
     {
       Block* block = &new(irgen.blocks);
@@ -605,6 +613,7 @@ void irgen_scope_enter(Hash_Map* scope) {
 
     Ir* ir = irgen_ast_node(sym->ast);
 
+    fun->var_count += temp_fun->var_count;
 
     {
       Block* block = irgen_block_leave();
@@ -757,7 +766,17 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
     irgen_scope_leave();
   } break;
-  case Ast_Kind_ptr: case Ast_Kind_load:
+  case Ast_Kind_ptr: {
+    Ir* unary = irgen_ast_node(node->unary);
+    if (unary->kind == Ir_Kind_load) {
+      result = unary->unary;
+      irgen_pop();
+    }
+    else {
+      result = irgen_push_unary(Ir_Kind_ptr, unary);
+    }
+  } break;
+  case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg: {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
@@ -883,7 +902,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
-  test("b:a; a: 2", "");
+  // test("b:a; a: 2", "");
   // test("a:1", "");
 }
 
