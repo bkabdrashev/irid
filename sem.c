@@ -376,6 +376,40 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   return false;
 }
 
+B8 type_is_false(Type* type) {
+  B8 result = false;
+  switch (type->kind) {
+  case Type_Kind_int: {
+    if (ranges_is_single(type->ranges)) {
+      I64 val = ranges_min(type->ranges);
+      result = val == 0;
+    }
+    else {
+      result = false;
+    }
+  } break;
+  default: assert(0);
+  }
+  return result;
+}
+
+B8 type_is_true(Type* type) {
+  B8 result = false;
+  switch (type->kind) {
+  case Type_Kind_int: {
+    if (ranges_is_single(type->ranges)) {
+      I64 val = ranges_min(type->ranges);
+      result = val == 1;
+    }
+    else {
+      result = false;
+    }
+  } break;
+  default: assert(0);
+  }
+  return result;
+}
+
 B8 type_is_subtype(Block* block, Type* one, Type* two) {
   Subtype_Visited visited = {0};
   // TODO: remove hard limit here
@@ -890,6 +924,9 @@ Type* type_narrow_nez(Type* type) {
 
 B8 sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
+  Type* cond_type = type_of_ir(cond_ir);
+  if (type_is_false(cond_type)) return false;
+
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
@@ -940,10 +977,13 @@ B8 sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   } break;
   default: {} break;
   }
+  return true;
 }
 
-void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
+B8 sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
+  Type* cond_type = type_of_ir(cond_ir);
+  if (type_is_true(cond_type)) return false;
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
@@ -989,6 +1029,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   } break;
   default: {} break;
   }
+  return true;
 }
 
 void sem_unnarrow(Sem_Tasks tasks) {
@@ -1019,21 +1060,23 @@ Type* type_of_var_rec(Block* block, Var* var) {
       { // condition is not equal to zero branch
         Jump jump = pred->branch.nez;
         if (jump.to_block == block) {
-          sem_narrow_nez(&tasks, pred);
-          Type* pred_type = type_of_var_rec(pred, var);
-          type = type_join(type, pred_type);
-          sem_unnarrow(tasks);
-          tasks.length = 0;
+          if (sem_narrow_nez(&tasks, pred)) {
+            Type* pred_type = type_of_var_rec(pred, var);
+            type = type_join(type, pred_type);
+            sem_unnarrow(tasks);
+            tasks.length = 0;
+          }
         }
       }
       { // condition is equal to zero branch
         Jump jump = pred->branch.eqz;
         if (jump.to_block == block) {
-          sem_narrow_eqz(&tasks, pred);
-          Type* pred_type = type_of_var_rec(pred, var);
-          type = type_join(type, pred_type);
-          sem_unnarrow(tasks);
-          tasks.length = 0;
+          if (sem_narrow_eqz(&tasks, pred)) {
+            Type* pred_type = type_of_var_rec(pred, var);
+            type = type_join(type, pred_type);
+            sem_unnarrow(tasks);
+            tasks.length = 0;
+          }
         }
       }
 
@@ -1411,6 +1454,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // TODO:
+  // - [ ] find unreachable blocks and don't pollute types
   // - [ ] loop-updated variables
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x; b@ + a.x", "");
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
@@ -1430,7 +1474,8 @@ void sem_test(void) {
   // test("a: @b; b: @a; b@", ""); // cycle during string builder
   // test("a : 1; b : a; c : b+a; c; c", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
-  test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
+  // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
+  test("a: 1\\2; a = 1; if 0 do {a = 2}; a+a", "");
 }
 
 #undef test
