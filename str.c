@@ -98,6 +98,12 @@ Str* str_from_range(Cstr begin, Cstr end) {
   }
 }
 
+Str* str_from_cstr(Cstr cstr) {
+  I32 len = strlen(cstr);
+  Cstr end = cstr + len;
+  return str_from_range(cstr, end);
+}
+
 void str_init(Arena* arena, I32 capacity) {
   internal.arena = arena;
   internal.set = hash_set_init(arena, capacity);

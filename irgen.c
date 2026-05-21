@@ -873,6 +873,18 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
 
+  {
+    Hash_Map* builtins = arena_push(irgen.perm_arena, sizeof(Hash_Map));
+    *builtins = hash_map_init(irgen.perm_arena, 1);
+    Str* bits_str = str_from_cstr("bits");
+    Symbol* bits_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
+    Var* bits_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    bits_sym->var = bits_var;
+    bits_var->name = bits_str;
+    hash_map_put(builtins, bits_str, bits_sym);
+    add(irgen.scope_stack, builtins);
+  }
+
   irgen_fun_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
     irgen_ast_node(ast.list->base[i]);
@@ -899,11 +911,12 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
+  test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
-  test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
+  // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
+  // test("bits", "");
 }
 
 #undef test
