@@ -608,9 +608,6 @@ void irgen_scope_enter(Hash_Map* scope) {
       temp_fun->blocks = irgen_blocks_temp();
       irgen_blocks_push(temp_fun->blocks, block);
     }
-    Block* decl_block = &new(irgen.blocks);
-    memset(decl_block, 0, sizeof(Block));
-    decl_block->irs = irgen_irs_temp();
 
     Ir* ir = irgen_ast_node(sym->ast);
 
