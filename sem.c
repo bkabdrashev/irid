@@ -1045,7 +1045,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];
-    if (pred->is_reachable) {
+    if (pred->is_reachable || !block->is_reachable) {
       if (pred->kind == Block_Kind_branch) {
         Sem_Tasks tasks = {};
         tasks.out_vars = &pred->out_var_types;
@@ -1477,7 +1477,6 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // TODO:
-  // - [ ] find unreachable blocks and don't pollute types
   // - [ ] loop-updated variables
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x; b@ + a.x", "");
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
@@ -1498,7 +1497,7 @@ void sem_test(void) {
   // test("a : 1; b : a; c : b+a; c; c", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
-  test("a: 1\\2\\3; a = 1; if 0 do {a = 2}; a+a", "");
+  test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
 }
 
 #undef test
