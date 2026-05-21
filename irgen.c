@@ -37,6 +37,9 @@ typedef enum Ir_Kind {
 
   Ir_Kind_fun  = 136,
 
+  Ir_Kind_range = 137 | Ir_Flag_binary,
+  Ir_Kind_bits  = 138 | Ir_Flag_binary,
+
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -219,6 +222,7 @@ struct Irgen {
   Ir_Pool     irs;
   Ir*     irid_nil;
   Fun_Stack      fun_stack;
+  Hash_Map* builtins;
   Scope_Stack    scope_stack;
 };
 
@@ -338,6 +342,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_le: string_builder_push_cstr(sb, "le "); break;
   case Ir_Kind_gt: string_builder_push_cstr(sb, "gt "); break;
   case Ir_Kind_ge: string_builder_push_cstr(sb, "ge "); break;
+  case Ir_Kind_call: string_builder_push_cstr(sb, "call "); break;
+  case Ir_Kind_range: string_builder_push_cstr(sb, "range "); break;
+  case Ir_Kind_bits: string_builder_push_cstr(sb, "bits "); break;
   default: {
     assert(0);
   } break;
@@ -874,15 +881,52 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   add(irgen.irs, ir_nil);
 
   {
-    Hash_Map* builtins = arena_push(irgen.perm_arena, sizeof(Hash_Map));
-    *builtins = hash_map_init(irgen.perm_arena, 1);
-    Str* bits_str = str_from_cstr("bits");
-    Symbol* bits_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-    Var* bits_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    bits_sym->var = bits_var;
-    bits_var->name = bits_str;
-    hash_map_put(builtins, bits_str, bits_sym);
-    add(irgen.scope_stack, builtins);
+    irgen.builtins = arena_push(irgen.perm_arena, sizeof(Hash_Map));
+    *irgen.builtins = hash_map_init(irgen.perm_arena, 1);
+    Str* i32_str = str_from_cstr("I32");
+    Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
+    Var* i32_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    i32_sym->var = i32_var;
+    i32_var->name = i32_str;
+
+    Fun* temp_fun = &new(irgen.funs);
+    temp_fun->var_count = 0;
+    add(irgen.fun_stack, temp_fun);
+    {
+      Block* block = &new(irgen.blocks);
+      memset(block, 0, sizeof(Block));
+      block->irs = irgen_irs_temp();
+      temp_fun->blocks = irgen_blocks_temp();
+      irgen_blocks_push(temp_fun->blocks, block);
+    }
+
+    Ir* i32_min = irgen_push_int(I32_MIN);
+    Ir* i32_max = irgen_push_int(I32_MAX);
+    Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
+    Ir* i32_bits = irgen_push_int(32);
+    i32_var->declared_ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
+    hash_map_put(irgen.builtins, i32_str, i32_sym);
+    add(irgen.scope_stack, irgen.builtins);
+
+    {
+      Block* block = irgen_block_leave();
+      block->kind = Block_Kind_jump;
+      Block* last = &new(irgen.blocks);
+      memset(last, 0, sizeof(Block));
+      irgen_link_jump_to_block(&block->jump, last);
+      last->kind = Block_Kind_none;
+      Irs* empty = irgen_irs_temp();
+      last->irs = irgen_irs_perm(empty);
+      irgen_blocks_push(temp_fun->blocks, last);
+    }
+
+    i32_var->blocks = irgen_blocks_perm(temp_fun->blocks);
+
+
+    del(irgen.fun_stack);
+    del(irgen.funs);
+
+    // irgen_push_declare(i32_var);
   }
 
   irgen_fun_enter(ast.scope);
@@ -916,7 +960,7 @@ void irgen_test(void) {
   // test("a:1", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
-  // test("bits", "");
+  test("a:I32", "");
 }
 
 #undef test
