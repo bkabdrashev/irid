@@ -197,6 +197,9 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 
       string_builder_push_i64(&sb, block->sccid);
 
+      string_builder_push_cstr(&sb, "$");
+      string_builder_push_i64(&sb, block->is_reachable);
+
       string_builder_push_cstr(&sb, "|");
       for (I32 i = 0; i < block->preds.length; i++) {
         Block* pred = block->preds.base[i];
@@ -922,11 +925,8 @@ Type* type_narrow_nez(Type* type) {
   return type;
 }
 
-B8 sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
+void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
-  Type* cond_type = type_of_ir(cond_ir);
-  if (type_is_false(cond_type)) return false;
-
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
@@ -977,13 +977,10 @@ B8 sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   } break;
   default: {} break;
   }
-  return true;
 }
 
-B8 sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
+void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
-  Type* cond_type = type_of_ir(cond_ir);
-  if (type_is_true(cond_type)) return false;
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
@@ -1029,7 +1026,6 @@ B8 sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   } break;
   default: {} break;
   }
-  return true;
 }
 
 void sem_unnarrow(Sem_Tasks tasks) {
@@ -1049,42 +1045,42 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];
-    if (pred->kind == Block_Kind_branch) {
-      Sem_Tasks tasks = {};
-      tasks.out_vars = &pred->out_var_types;
-      tasks.length = 0;
-      tasks.vars = arena_push(sem.temp_arena, sizeof(Var*) * tasks.out_vars->len);
-      tasks.types = arena_push(sem.temp_arena, sizeof(Type*) * tasks.out_vars->len);
-      // TODO: this does narrowing again and again for each variable load
-      //       either do it once for all variables, or, narrow only a requested variable
-      { // condition is not equal to zero branch
-        Jump jump = pred->branch.nez;
-        if (jump.to_block == block) {
-          if (sem_narrow_nez(&tasks, pred)) {
+    if (pred->is_reachable) {
+      if (pred->kind == Block_Kind_branch) {
+        Sem_Tasks tasks = {};
+        tasks.out_vars = &pred->out_var_types;
+        tasks.length = 0;
+        tasks.vars = arena_push(sem.temp_arena, sizeof(Var*) * tasks.out_vars->len);
+        tasks.types = arena_push(sem.temp_arena, sizeof(Type*) * tasks.out_vars->len);
+        // TODO: this does narrowing again and again for each variable load
+        //       either do it once for all variables, or, narrow only a requested variable
+        { // condition is not equal to zero branch
+          Jump jump = pred->branch.nez;
+          if (jump.to_block == block) {
+            sem_narrow_nez(&tasks, pred);
             Type* pred_type = type_of_var_rec(pred, var);
             type = type_join(type, pred_type);
             sem_unnarrow(tasks);
             tasks.length = 0;
           }
         }
-      }
-      { // condition is equal to zero branch
-        Jump jump = pred->branch.eqz;
-        if (jump.to_block == block) {
-          if (sem_narrow_eqz(&tasks, pred)) {
+        { // condition is equal to zero branch
+          Jump jump = pred->branch.eqz;
+          if (jump.to_block == block) {
+            sem_narrow_eqz(&tasks, pred);
             Type* pred_type = type_of_var_rec(pred, var);
             type = type_join(type, pred_type);
             sem_unnarrow(tasks);
             tasks.length = 0;
           }
         }
-      }
 
-      arena_release_mark(sem.temp_arena, tasks.vars);
-    }
-    else if (pred->kind == Block_Kind_jump) {
-      Type* pred_type = type_of_var_rec(pred, var);
-      type = type_join(type, pred_type);
+        arena_release_mark(sem.temp_arena, tasks.vars);
+      }
+      else if (pred->kind == Block_Kind_jump) {
+        Type* pred_type = type_of_var_rec(pred, var);
+        type = type_join(type, pred_type);
+      }
     }
   }
 
@@ -1254,8 +1250,16 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
-      // TODO: special cases
-      result = type_int_range(0, 1);
+      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+      if (ranges_is_single(pair.one) && ranges_is_single(pair.two)) {
+        I64 val_one = ranges_min(pair.one);
+        I64 val_two = ranges_min(pair.two);
+        I64 val = val_one == val_two;
+        result = type_int(val);
+      }
+      else {
+        result = type_int_range(0, 1);
+      }
     }
   } break;
   case Ir_Kind_record: {
@@ -1329,6 +1333,24 @@ void sem_block(Block* block) {
   for (I32 i = 0; i < block->irs->length; i++) {
     sem_ir(block, block->irs->base[i]);
   }
+  if (block->is_reachable) {
+    if (block->kind == Block_Kind_branch) {
+      Type* cond_type = type_of_ir(block->branch.cond);
+      if (type_is_true(cond_type)) {
+        block->branch.nez.to_block->is_reachable = true;
+      }
+      else if (type_is_false(cond_type)) {
+        block->branch.eqz.to_block->is_reachable = true;
+      }
+      else {
+        block->branch.nez.to_block->is_reachable = true;
+        block->branch.eqz.to_block->is_reachable = true;
+      }
+    }
+    else if (block->kind == Block_Kind_jump) {
+        block->jump.to_block->is_reachable = true;
+    }
+  }
 }
 
 void sem_scc_block(Block* block);
@@ -1394,6 +1416,7 @@ void sem_init_block_preds(Block* block) {
 }
 
 Type* sem_fun(Fun* fun) {
+  fun->blocks->base[0]->is_reachable = true;
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
@@ -1475,7 +1498,7 @@ void sem_test(void) {
   // test("a : 1; b : a; c : b+a; c; c", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
-  test("a: 1\\2; a = 1; if 0 do {a = 2}; a+a", "");
+  test("a: 1\\2\\3; a = 1; if 0 do {a = 2}; a+a", "");
 }
 
 #undef test
