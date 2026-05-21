@@ -39,6 +39,7 @@ typedef enum Token_Kind {
   Token_Kind_greater_equal      = 44,
   Token_Kind_greater            = 45,
   Token_Kind_backslash          = 46,
+  Token_Kind_quote              = 47,
 
   Token_Kind_name               = String_Kind_name,
   Token_Kind_if                 = String_Kind_if,
@@ -278,6 +279,10 @@ Tokens lex_source(Arena* arena, Cstr source) {
       token.kind = Token_Kind_backslash;
       lexer.stream++;
     } break;
+    case '\'': {
+      token.kind = Token_Kind_quote;
+      lexer.stream++;
+    } break;
     default: {
       lexer.stream++;
     } break;
@@ -392,6 +397,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_comma:
       string_builder_push_cstr(&sb, ",");
+    break;
+    case Token_Kind_quote:
+      string_builder_push_cstr(&sb, "'");
     break;
     case Token_Kind_backslash:
       string_builder_push_cstr(&sb, "\\");

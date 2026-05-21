@@ -540,6 +540,22 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
         return node;
       }
     } break;
+    case Token_Kind_quote: {
+      Ast_Kind kind = Ast_Kind_call;
+      I32 precedence = parse_left_precedence(kind);
+      if (precedence > precedence_to_beat) {
+        lhs = node;
+        I32 right_precedence = parse_right_precedence(kind);
+        Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+        node = parse_new_node(parser, kind);
+        node->binary.lhs = rhs;
+        node->binary.rhs = lhs;
+      }
+      else {
+        parser->tok--;
+        return node;
+      }
+    } break;
     case Token_Kind_brace_open: {
       Ast_Kind kind = Ast_Kind_subscript;
       I32 precedence = parse_left_precedence(kind);
@@ -871,6 +887,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a'b",     "(b a)");
+
   test("a.b@.c",     "((a . b)@ . c)");
   test("a, b -> 1, 2",     "((a, b) -> (1, 2))");
   test("wh 1 do 2",        "while 1 do 2");
