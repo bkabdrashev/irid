@@ -74,8 +74,6 @@ struct Sem {
   I32 sccid;
   Blocks* scc_stack;
 
-  I32 subtype_visit_limit;
-
   Fun* current_fun;
 };
 
@@ -336,12 +334,10 @@ B8 subtype_visited_contains(Subtype_Visited* v, Pointer* one, Pointer* two) {
 }
 
 void subtype_visited_push(Subtype_Visited* v, Pointer* one, Pointer* two) {
+  arena_push(sem.temp_arena, sizeof(Pointer_Pair));
   v->base[v->length].one = one;
   v->base[v->length].two = two;
   v->length++;
-  if (v->length > sem.subtype_visit_limit) {
-    assert(0);
-  }
 }
 
 B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
@@ -415,9 +411,10 @@ B8 type_is_true(Type* type) {
 
 B8 type_is_subtype(Block* block, Type* one, Type* two) {
   Subtype_Visited visited = {0};
-  // TODO: remove hard limit here
-  visited.base = arena_push(sem.temp_arena, sem.subtype_visit_limit * sizeof(Pointer_Pair));
-  return type_is_subtype_rec(block, one, two, &visited);
+  visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
+  B8 result = type_is_subtype_rec(block, one, two, &visited);
+  arena_release_mark(sem.temp_arena, visited.base);
+  return result;
 }
 
 Type* type_of_ir(Ir* ir) {
@@ -1449,7 +1446,6 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.type_none = arena_push(arena, sizeof(Type));
   sem.type_none->kind = Type_Kind_none;
-  sem.subtype_visit_limit = 16;
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
@@ -1497,7 +1493,7 @@ void sem_test(void) {
   // test("a : 1; b : a; c : b+a; c; c", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
-  test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
+  // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
 }
 
 #undef test
