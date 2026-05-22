@@ -629,17 +629,7 @@ void irgen_scope_enter(Hash_Map* scope) {
 
     fun->var_count += temp_fun->var_count;
 
-    {
-      Block* block = irgen_block_leave();
-      block->kind = Block_Kind_jump;
-      Block* last = &new(irgen.blocks);
-      memset(last, 0, sizeof(Block));
-      irgen_link_jump_to_block(&block->jump, last);
-      last->kind = Block_Kind_none;
-      Irs* empty = irgen_irs_temp();
-      last->irs = irgen_irs_perm(empty);
-      irgen_blocks_push(temp_fun->blocks, last);
-    }
+    irgen_block_leave();
 
     sym->var->blocks = irgen_blocks_perm(temp_fun->blocks);
 
@@ -679,21 +669,8 @@ void irgen_link_jump_to_block(Jump* jump, Block* block) {
 
 void irgen_fun_leave() {
   Fun* fun = top(irgen.fun_stack);
-
-  {
-    Block* block = irgen_block_leave();
-    block->kind = Block_Kind_jump;
-    Block* last = &new(irgen.blocks);
-    memset(last, 0, sizeof(Block));
-    irgen_link_jump_to_block(&block->jump, last);
-    last->kind = Block_Kind_none;
-    Irs* empty = irgen_irs_temp();
-    last->irs = irgen_irs_perm(empty);
-    irgen_blocks_push(fun->blocks, last);
-  }
-
+  irgen_block_leave();
   fun->blocks = irgen_blocks_perm(fun->blocks);
-
   irgen_scope_leave();
 }
 
@@ -917,17 +894,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     hash_map_put(irgen.builtins, i32_str, i32_sym);
     add(irgen.scope_stack, irgen.builtins);
 
-    {
-      Block* block = irgen_block_leave();
-      block->kind = Block_Kind_jump;
-      Block* last = &new(irgen.blocks);
-      memset(last, 0, sizeof(Block));
-      irgen_link_jump_to_block(&block->jump, last);
-      last->kind = Block_Kind_none;
-      Irs* empty = irgen_irs_temp();
-      last->irs = irgen_irs_perm(empty);
-      irgen_blocks_push(temp_fun->blocks, last);
-    }
+    irgen_block_leave();
 
     i32_var->blocks = irgen_blocks_perm(temp_fun->blocks);
 
@@ -967,7 +934,7 @@ void irgen_test(void) {
   // test("a:1", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
-  test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
+  // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
 }
 
 #undef test

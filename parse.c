@@ -897,8 +897,6 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a != b",     "(b a)");
-  return;
   test("a'b",     "(b a)");
 
   test("a.b@.c",     "((a . b)@ . c)");

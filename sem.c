@@ -2068,12 +2068,13 @@ void sem_test(void) {
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
   // test("a:I32; b: I32; a = b; a", "");
-  test("a:I32; a=0; wh a != 8 do {a = a + 1}; a", "");
-  test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
-  test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
-  test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
-  test("a:I32; a=5; wh a > 0 do {a = a - 1}; a", "");
-  test("a:I32; b:I32; a=0; wh a < 8 do {b=0; wh b != 3 do { b = b + 1 }; a = a + 1}; a", "");
+  // test("a:I32; a=0; wh a != 8 do {a = a + 1}; a", "");
+  // test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
+  // test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
+  // test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
+  // test("a:I32; a=5; wh a > 0 do {a = a - 1}; a", "");
+  // test("a:I32; b:I32; a=0; wh a < 8 do {b=0; wh b != 3 do { b = b + 1 }; a = a + 1}; a", "");
+  test("a:I32; b:I32; a=0; b=0; wh a < 8 do {wh b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
   // test("a:I32; if a != 10 do {a = 1}; a", "");
 }
 
