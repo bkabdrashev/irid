@@ -32,6 +32,7 @@ typedef enum Token_Kind {
   Token_Kind_semicolon          = 25,
   Token_Kind_comma              = 26,
   Token_Kind_arrow              = 33,
+  Token_Kind_bang               = 35,
   Token_Kind_bang_equal         = 40,
   Token_Kind_equal_equal        = 41,
   Token_Kind_less_equal         = 42,
@@ -217,6 +218,14 @@ Tokens lex_source(Arena* arena, Cstr source) {
       token.kind = Token_Kind_star;
       lexer.stream++;
     } break;
+    case '!': {
+      token.kind = Token_Kind_bang;
+      lexer.stream++;
+      if (*lexer.stream == '=') {
+        token.kind = Token_Kind_bang_equal;
+        lexer.stream++;
+      }
+    } break;
     case '=': {
       token.kind = Token_Kind_equal;
       lexer.stream++;
@@ -330,6 +339,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
       string_builder_push_cstr(&sb, "-");
     break;
     case Token_Kind_minus_prefix:
+      string_builder_push_cstr(&sb, "p-");
+    break;
+    case Token_Kind_bang:
       string_builder_push_cstr(&sb, "p-");
     break;
     case Token_Kind_star:

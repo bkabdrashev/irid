@@ -107,6 +107,12 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_mul:          result = "*"; break;
   case Ast_Kind_neg:          result = "-"; break;
   case Ast_Kind_pos:          result = "+"; break;
+  case Ast_Kind_eq:           result = "=="; break;
+  case Ast_Kind_ne:           result = "!="; break;
+  case Ast_Kind_lt:           result = "<"; break;
+  case Ast_Kind_le:           result = "<="; break;
+  case Ast_Kind_gt:           result = ">"; break;
+  case Ast_Kind_ge:           result = ">="; break;
   case Ast_Kind_ptr:          result = "@"; break;
   case Ast_Kind_load:         result = "@"; break;
   case Ast_Kind_dot:          result = "."; break;
@@ -340,7 +346,9 @@ I32 parse_right_precedence(Ast_Kind kind) {
     return 1;
   case Ast_Kind_tuple:
     return 3;
-  case Ast_Kind_eq:
+  case Ast_Kind_ne: case Ast_Kind_eq:
+  case Ast_Kind_lt: case Ast_Kind_le:
+  case Ast_Kind_gt: case Ast_Kind_ge:
     return 6;
   case Ast_Kind_join:
     return 8;
@@ -370,7 +378,9 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return 1;
   case Ast_Kind_tuple:
     return 3;
-  case Ast_Kind_eq:
+  case Ast_Kind_ne: case Ast_Kind_eq:
+  case Ast_Kind_lt: case Ast_Kind_le:
+  case Ast_Kind_gt: case Ast_Kind_ge:
     return 5;
   case Ast_Kind_join:
     return 7;
@@ -887,6 +897,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a != b",     "(b a)");
+  return;
   test("a'b",     "(b a)");
 
   test("a.b@.c",     "((a . b)@ . c)");
