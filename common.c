@@ -67,7 +67,15 @@ U64 bit_width(U64 x) {
   return w + 1;
 }
 
-I32 bits_needed(I64 min, I64 max) {
+I64 bits_max(I16 bits) {
+  return (1LL << (bits-1)) - 1;
+}
+
+I64 bits_min(I16 bits) {
+  return -(1LL << (bits-1));
+}
+
+I16 bits_needed(I64 min, I64 max) {
   // if (min == max) return 0;
 
   if (min >= 0) {

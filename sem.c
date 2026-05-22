@@ -27,11 +27,11 @@ typedef enum Type_Kind {
   Type_Kind_int,
   Type_Kind_ptr,
   Type_Kind_record,
-  Type_Kind_bits,
 } Type_Kind;
 
 struct Type {
   Type_Kind kind;
+  B8  size_defined;
   I16 bits_align;
   I16 bits_size;
   union {
@@ -94,17 +94,15 @@ void  sem_ensure_declared(Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
+  if (type->size_defined) {
+    string_builder_push_cstr(sb, "bits(");
+    string_builder_push_i64(sb, type->bits_size);
+    string_builder_push_cstr(sb, ", ");
+  }
   switch (type->kind) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "<none>");
   break;
-  case Type_Kind_bits: {
-    string_builder_push_cstr(sb, "bits(");
-    string_builder_push_i64(sb, type->bits_size);
-    string_builder_push_cstr(sb, ", ");
-    string_builder_push_type(sb, block, type->bits_of);
-    string_builder_push_cstr(sb, ") ");
-  } break;
   case Type_Kind_int: {
     if (type->ranges->length > 1) {
       string_builder_push_cstr(sb, "(");
@@ -185,6 +183,9 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     }
     string_builder_push_cstr(sb, ")");
   } break;
+  }
+  if (type->size_defined) {
+    string_builder_push_cstr(sb, ") ");
   }
 }
 
@@ -350,18 +351,14 @@ void subtype_visited_push(Subtype_Visited* v, Pointer* one, Pointer* two) {
 }
 
 B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
-  // is one subtype of two
-  // (1..3) is subtype of 1 -- true
-  // (1..2) is subtype of (1..3) -- false
+  //    one is subtype of two
+  // (1..3) is subtype of 1 -- false
+  // (1..2) is subtype of (1..3) -- true
 
-  if (two->kind == Type_Kind_bits) return type_is_subtype_rec(block, one, two->bits_of, visited);
   if (one->kind != two->kind) return false;
   switch (one->kind) {
   case Type_Kind_none: {
     return true;
-  } break;
-  case Type_Kind_bits: {
-    assert(0);
   } break;
   case Type_Kind_int: {
     return ranges_is_subrange(one->ranges, two->ranges);
@@ -411,7 +408,7 @@ B8 type_is_true(Type* type) {
   case Type_Kind_int: {
     if (ranges_is_single(type->ranges)) {
       I64 val = ranges_min(type->ranges);
-      result = val == 1;
+      result = val != 0;
     }
     else {
       result = false;
@@ -575,9 +572,6 @@ Type* type_meet(Type* one, Type* two) {
 
   switch (one->kind) {
   case Type_Kind_none: break;
-  case Type_Kind_bits: {
-    assert(0);
-  } break;
   case Type_Kind_int: {
     result = type_ranges_intersection(one->ranges, two->ranges);
   } break;
@@ -658,12 +652,12 @@ Type* type_pointer_declared(Pointer* pointer) {
   return result;
 }
 
-Type* type_bits(I32 bits_size, Type* bits_of) {
+Type* type_define_size(I32 bits_size, Type* bits_of) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
-  new_type->kind = Type_Kind_bits;
-  new_type->bits_size  = bits_size;
+  *new_type = *bits_of;
+  new_type->size_defined = true;
+  new_type->bits_size = bits_size;
   new_type->bits_align = bits_size;
-  new_type->bits_of  = bits_of;
   return new_type;
 }
 
@@ -824,7 +818,7 @@ Type* type_ranges_no_intersection(Ranges* one, Ranges* two) {
 }
 
 Type* type_ranges_exclude(Ranges* ranges, I64 val) {
-  Ranges* new_ints = sem_ranges_init(ranges->length);
+  Ranges* new_ints = sem_ranges_init(ranges->length+1);
   for (I32 i = 0; i < ranges->length; i++) {
     if (ranges->pairs[i].lo <= val && val <= ranges->pairs[i].hi) {
       if (ranges->pairs[i].lo != val || val != ranges->pairs[i].hi) {
@@ -869,6 +863,9 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     for (I32 i = 0; i < ptr->stack.len; i++) {
       Var* var = ptr->stack.list[i];
       Type* old_type = hash_map_get(tasks->out_vars, var);
+      new_type->size_defined = old_type->size_defined;
+      new_type->bits_size = old_type->bits_size;
+      new_type->bits_align = old_type->bits_align;
       if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
         sem_tasks_push_var(tasks, var, old_type);
       }
@@ -963,10 +960,11 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
     }
   } break;
   case Ir_Kind_ne: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    Type_Pair types = type_of_ir_binary(cond_ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       sem_type_narrow_int_ne(tasks, cond_ir);
     }
-    else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
+    else if (types.one->kind == Type_Kind_ptr && types.two->kind == Type_Kind_ptr) {
       sem_type_narrow_ptr_ne(tasks, cond_ir);
     }
     else {
@@ -1122,9 +1120,6 @@ Type* type_of_var(Block* block, Var* var) {
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
   Type* var_type = var->declared;
-  if (type->kind == Type_Kind_bits) {
-    type = type->bits_of;
-  }
   if (type_is_subtype(block, type, var_type)) {
     if (var_type->kind == Type_Kind_record) {
       for (I32 i = 0; i < var_type->record->length; i++) {
@@ -1134,9 +1129,9 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
         type_of_var_put(block, var_type->record->vars[i], field_type);
       }
     }
-    else if (var_type->kind == Type_Kind_bits) {
-      type = type_bits(var_type->bits_size, type);
-    }
+    type->size_defined = var_type->size_defined;
+    type->bits_size = var_type->bits_size;
+    type->bits_align = var_type->bits_align;
     hash_map_put(&block->out_var_types, var, type);
   }
   else {
@@ -1265,7 +1260,8 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_join(pair.one, pair.two);
   } break;
   case Ir_Kind_add: {
-    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       // TODO: overflow/underflow
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
       I64 max_one = ranges_max(pair.one);
@@ -1275,6 +1271,39 @@ void sem_ir(Block* block, Ir* ir) {
       I64 min_two = ranges_min(pair.two);
       I64 min = min_one + min_two;
       result = type_int_range(min, max);
+      if (types.one->size_defined && types.two->size_defined) {
+        I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
+        if (result->bits_size > bits_max_size) {
+          min = bits_min(bits_max_size);
+          max = bits_max(bits_max_size);
+          result->bits_size = bits_max_size;
+          result->bits_align = bits_max_size;
+          result->ranges->pairs[0].lo = min;
+          result->ranges->pairs[0].hi = max;
+        }
+      }
+      else if (types.one->size_defined) {
+        I16 bits_max_size = types.one->bits_size;
+        if (result->bits_size > bits_max_size) {
+          min = bits_min(bits_max_size);
+          max = bits_max(bits_max_size);
+          result->bits_size = bits_max_size;
+          result->bits_align = bits_max_size;
+          result->ranges->pairs[0].lo = min;
+          result->ranges->pairs[0].hi = max;
+        }
+      }
+      else if (types.two->size_defined) {
+        I16 bits_max_size = types.two->bits_size;
+        if (result->bits_size > bits_max_size) {
+          min = bits_min(bits_max_size);
+          max = bits_max(bits_max_size);
+          result->bits_size = bits_max_size;
+          result->bits_align = bits_max_size;
+          result->ranges->pairs[0].lo = min;
+          result->ranges->pairs[0].hi = max;
+        }
+      }
     }
   } break;
   case Ir_Kind_eq: {
@@ -1284,6 +1313,23 @@ void sem_ir(Block* block, Ir* ir) {
         I64 val_one = ranges_min(pair.one);
         I64 val_two = ranges_min(pair.two);
         I64 val = val_one == val_two;
+        result = type_int(val);
+      }
+      else {
+        result = type_int_range(0, 1);
+      }
+    }
+  } break;
+  case Ir_Kind_ne: {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+      Ranges_Pair ranges = {};
+      ranges.one = types.one->ranges;
+      ranges.two = types.two->ranges;
+      if (ranges_is_single(ranges.one) && ranges_is_single(ranges.two)) {
+        I64 val_one = ranges_min(ranges.one);
+        I64 val_two = ranges_min(ranges.two);
+        I64 val = val_one != val_two;
         result = type_int(val);
       }
       else {
@@ -1382,7 +1428,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (ranges_is_single(two_type->ranges)) {
         I64 val = ranges_min(two_type->ranges);
         if (val < I16_MAX) {
-          result = type_bits(val, one_type);
+          result = type_define_size(val, one_type);
         }
         else {
           assert(0);
@@ -1570,13 +1616,39 @@ void sem_test(void) {
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
   /*
-  a := I32 0
-  wh a < 10 do {
+  a:I32 = 0
+  wh a != 10 do {
     a = a + 1
   }
-
+{
+  b2: { a:I32 = 0 }
+    r9 = int 0
+    r10 = var a
+    r11 = store r10 r9
+    jump b5
+  b5: { a: I32 = 0 }
+    r12 = var a
+    r13 = load r12          // 0
+    r14 = int 10            // 10
+    r15 = ne r13 r14        // 1
+    if r15 then b6 else b7  // b6
+  b6: { a: I32 = 1 }
+    r16 = var a             //
+    r17 = load r16          // 0
+    r18 = int 1             // 1
+    r19 = add r17 r18       // 1
+    r20 = var a             //
+    r21 = store r20 r19     //
+    jump b5
+  b7:
+    jump b8
+  b8:
+  ret r5
+}
   */
-  test("a:I32; b: I32; a = b; a", "");
+  // test("a:I32; b: I32; a = b; a", "");
+  test("a:I32; a=0; wh a != 8 do {a = a + 1}; a", "");
+  // test("a:I32; if a != 10 do {a = 1}; a", "");
 }
 
 #undef test
