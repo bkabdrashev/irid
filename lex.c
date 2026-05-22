@@ -234,6 +234,22 @@ Tokens lex_source(Arena* arena, Cstr source) {
         lexer.stream++;
       }
     } break;
+    case '<': {
+      token.kind = Token_Kind_less;
+      lexer.stream++;
+      if (*lexer.stream == '=') {
+        token.kind = Token_Kind_less_equal;
+        lexer.stream++;
+      }
+    } break;
+    case '>': {
+      token.kind = Token_Kind_greater;
+      lexer.stream++;
+      if (*lexer.stream == '=') {
+        token.kind = Token_Kind_greater_equal;
+        lexer.stream++;
+      }
+    } break;
     case ':': {
       token.kind = Token_Kind_colon;
       lexer.stream++;
