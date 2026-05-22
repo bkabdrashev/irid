@@ -185,11 +185,14 @@ struct Block {
   I32 sccid;
   I32 low_sccid;
 
+  B8 is_dfs_visited;
+  I32 rpo;
+  Block* idom;
+
   Block_List preds;
 
   Irs* irs;
   Hash_Map out_var_types;
-  Hash_Map in_var_types;
   union {
     Jump   jump;
     Branch branch;

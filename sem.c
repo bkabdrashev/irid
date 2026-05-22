@@ -71,7 +71,6 @@ struct Sem {
   Type_Pool types;
 
   Type* type_none;
-  Blocks* worklist;
 
   I32 sccid;
   Blocks* scc_stack;
@@ -215,19 +214,6 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         string_builder_push_cstr(&sb, ",");
       }
       string_builder_push_cstr(&sb, "|");
-
-      string_builder_push_cstr(&sb, " in{");
-      for (I32 i = 0; i < block->in_var_types.len; i++) {
-        Var* var = block->in_var_types.list[i];
-        Type* type = hash_map_get(&block->in_var_types, var);
-        string_builder_push_var(&sb, var);
-        string_builder_push_cstr(&sb, ": ");
-        string_builder_push_type(&sb, block, type);
-        if (i+1 < block->in_var_types.len) {
-          string_builder_push_cstr(&sb, "; ");
-        }
-      }
-      string_builder_push_cstr(&sb, "}");
 
       string_builder_push_cstr(&sb, " out{");
       for (I32 i = 0; i < block->out_var_types.len; i++) {
@@ -919,6 +905,62 @@ void sem_type_narrow_ptr_ne(Sem_Tasks* tasks, Ir* ir) {
   }
 }
 
+I64 sem_sat_dec(I64 x) { return x == I64_MIN ? I64_MIN : x - 1; }
+I64 sem_sat_inc(I64 x) { return x == I64_MAX ? I64_MAX : x + 1; }
+
+Type* sem_ranges_clamp(Ranges* ranges, I64 lo, I64 hi) {
+  Ranges* line = sem_ranges_init(1);
+  line->length = 1;
+  line->pairs[0].lo = lo;
+  line->pairs[0].hi = hi;
+  return type_ranges_intersection(ranges, line);
+}
+
+Ir_Kind sem_cmp_negate(Ir_Kind op) {
+  switch (op) {
+  case Ir_Kind_lt: return Ir_Kind_ge;
+  case Ir_Kind_le: return Ir_Kind_gt;
+  case Ir_Kind_gt: return Ir_Kind_le;
+  case Ir_Kind_ge: return Ir_Kind_lt;
+  default:         return op;
+  }
+}
+
+// narrows both operands of `ir` assuming `one op two` holds
+void sem_type_narrow_int_cmp(Sem_Tasks* tasks, Ir* ir, Ir_Kind op) {
+  Type_Pair pair = type_of_ir_binary(ir);
+  Ranges* ra = pair.one->ranges;
+  Ranges* rb = pair.two->ranges;
+  I64 amin = ranges_min(ra);
+  I64 amax = ranges_max(ra);
+  I64 bmin = ranges_min(rb);
+  I64 bmax = ranges_max(rb);
+  Type* na = 0;
+  Type* nb = 0;
+  switch (op) {
+  case Ir_Kind_lt:
+    na = sem_ranges_clamp(ra, I64_MIN, sem_sat_dec(bmax));
+    nb = sem_ranges_clamp(rb, sem_sat_inc(amin), I64_MAX);
+  break;
+  case Ir_Kind_le:
+    na = sem_ranges_clamp(ra, I64_MIN, bmax);
+    nb = sem_ranges_clamp(rb, amin, I64_MAX);
+  break;
+  case Ir_Kind_gt:
+    na = sem_ranges_clamp(ra, sem_sat_inc(bmin), I64_MAX);
+    nb = sem_ranges_clamp(rb, I64_MIN, sem_sat_dec(amax));
+  break;
+  case Ir_Kind_ge:
+    na = sem_ranges_clamp(ra, bmin, I64_MAX);
+    nb = sem_ranges_clamp(rb, I64_MIN, amax);
+  break;
+  default:
+    assert(0);
+  break;
+  }
+  sem_type_of_ir_binary_narrow(tasks, ir, na, nb);
+}
+
 Type* type_narrow_eqz(Type* type) {
   switch (type->kind) {
   case Type_Kind_int: {
@@ -971,17 +1013,12 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
       assert(0);
     }
   } break;
-  case Ir_Kind_lt: {
+  case Ir_Kind_lt: case Ir_Kind_le:
+  case Ir_Kind_gt: case Ir_Kind_ge: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
-      assert(0);
-    }
-    else {
-      assert(0);
+      sem_type_narrow_int_cmp(tasks, cond_ir, cond_ir->kind);
     }
   } break;
-  case Ir_Kind_le: assert(0);
-  case Ir_Kind_gt: assert(0);
-  case Ir_Kind_ge: assert(0);
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(cond_ir->unary);
     if (ptr_type->kind == Type_Kind_ptr) {
@@ -1025,12 +1062,12 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
       assert(0);
     }
   } break;
-  case Ir_Kind_lt: {
-    assert(0);
+  case Ir_Kind_lt: case Ir_Kind_le:
+  case Ir_Kind_gt: case Ir_Kind_ge: {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+      sem_type_narrow_int_cmp(tasks, cond_ir, sem_cmp_negate(cond_ir->kind));
+    }
   } break;
-  case Ir_Kind_le: assert(0); // log_todo("Ir_Kind_le narrow nez");
-  case Ir_Kind_gt: assert(0); // log_todo("Ir_Kind_gt narrow nez");
-  case Ir_Kind_ge: assert(0); // log_todo("Ir_Kind_ge narrow nez");
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(cond_ir->unary);
     if (ptr_type->kind == Type_Kind_ptr) {
@@ -1139,58 +1176,6 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
   }
 }
 
-void sem_worklist_sort(void) {
-  for (I32 i = 0; i < sem.worklist->length; i++) {
-    I32 max_i = i;
-    for (I32 j = max_i+1; j < sem.worklist->length; j++) {
-      if (sem.worklist->base[max_i]->sccid < sem.worklist->base[j]->sccid) {
-        max_i = j;
-      }
-    }
-    Block* temp = sem.worklist->base[i];
-    sem.worklist->base[i] = sem.worklist->base[max_i];
-    sem.worklist->base[max_i] = temp;
-  }
-}
-
-void sem_worklist_push(Block* block) {
-  if (!block->is_present_in_worklist) {
-    block->is_present_in_worklist = true;
-    fa_add(sem.worklist, block);
-  }
-}
-
-B8 sem_worklist_is_not_empty() {
-  return sem.worklist->length != 0;
-}
-
-Block* sem_worklist_pop(void) {
-  Block* block = fa_pop(sem.worklist);
-  block->is_present_in_worklist = false;
-  return block;
-}
-
-void sem_jump(Block* from_block, Block* to_block) {
-  B8 is_jump_updates_var_type = false;
-  Hash_Map* outvars = &from_block->out_var_types;
-  Hash_Map* invars  = &to_block->in_var_types;
-  for (I32 i = 0; i < outvars->len; i++) {
-    Var* var = outvars->list[i];
-    Type* out_var_type = hash_map_get(outvars, var);
-    Type* old_var_type = hash_map_get(invars,  var);
-    Type* new_var_type = type_join(out_var_type, old_var_type);
-
-    if (type_not_equal(new_var_type, old_var_type)) {
-      hash_map_put(invars, var, new_var_type);
-      hash_map_put(&to_block->out_var_types, var, new_var_type);
-      is_jump_updates_var_type = true;
-    }
-  }
-  if (is_jump_updates_var_type) {
-    sem_worklist_push(to_block);
-  }
-}
-
 void sem_block(Block* block);
 void sem_init_block_preds(Block* block);
 
@@ -1229,7 +1214,6 @@ void sem_ensure_declared(Var* var) {
       sem_init_block_preds(block);
       if (!block->out_var_types.keys) {
         block->out_var_types = hash_map_init(sem.perm_arena, cap);
-        block->in_var_types  = hash_map_init(sem.perm_arena, cap);
       }
       sem_block(block);
     }
@@ -1306,30 +1290,58 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
   } break;
-  case Ir_Kind_eq: {
-    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
+  case Ir_Kind_sub: {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      if (ranges_is_single(pair.one) && ranges_is_single(pair.two)) {
-        I64 val_one = ranges_min(pair.one);
-        I64 val_two = ranges_min(pair.two);
-        I64 val = val_one == val_two;
-        result = type_int(val);
+      I64 max_one = ranges_max(pair.one);
+      I64 max_two = ranges_max(pair.two);
+      I64 max = max_one - max_two;
+      I64 min_one = ranges_min(pair.one);
+      I64 min_two = ranges_min(pair.two);
+      I64 min = min_one - min_two;
+      result = type_int_range(min, max);
+      if (types.one->size_defined && types.two->size_defined) {
+        I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
+        result->bits_size  = bits_max_size;
+        result->bits_align = bits_max_size;
+        result->ranges->pairs[0].lo = bits_min(bits_max_size);
+        result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
-      else {
-        result = type_int_range(0, 1);
+      else if (types.one->size_defined) {
+        I16 bits_max_size = types.one->bits_size;
+        result->bits_size  = bits_max_size;
+        result->bits_align = bits_max_size;
+        result->ranges->pairs[0].lo = bits_min(bits_max_size);
+        result->ranges->pairs[0].hi = bits_max(bits_max_size);
+      }
+      else if (types.two->size_defined) {
+        I16 bits_max_size = types.two->bits_size;
+        result->bits_size  = bits_max_size;
+        result->bits_align = bits_max_size;
+        result->ranges->pairs[0].lo = bits_min(bits_max_size);
+        result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
     }
   } break;
-  case Ir_Kind_ne: {
-    Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      Ranges_Pair ranges = {};
-      ranges.one = types.one->ranges;
-      ranges.two = types.two->ranges;
-      if (ranges_is_single(ranges.one) && ranges_is_single(ranges.two)) {
-        I64 val_one = ranges_min(ranges.one);
-        I64 val_two = ranges_min(ranges.two);
-        I64 val = val_one != val_two;
+  case Ir_Kind_eq: case Ir_Kind_ne:
+  case Ir_Kind_lt: case Ir_Kind_le:
+  case Ir_Kind_gt: case Ir_Kind_ge: {
+    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
+      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+      if (ranges_is_single(pair.one) && ranges_is_single(pair.two)) {
+        I64 x = ranges_min(pair.one);
+        I64 y = ranges_min(pair.two);
+        I64 val = 0;
+        switch (ir->kind) {
+        case Ir_Kind_eq: val = x == y; break;
+        case Ir_Kind_ne: val = x != y; break;
+        case Ir_Kind_lt: val = x <  y; break;
+        case Ir_Kind_le: val = x <= y; break;
+        case Ir_Kind_gt: val = x >  y; break;
+        case Ir_Kind_ge: val = x >= y; break;
+        default: break;
+        }
         result = type_int(val);
       }
       else {
@@ -1539,6 +1551,437 @@ void sem_init_block_preds(Block* block) {
   }
 }
 
+typedef struct Loop Loop;
+struct Loop {
+  Block*   header;
+  Block*   preheader;
+  Block*   latch;
+  Block*   exit;
+  Block*   body_entry;
+  Hash_Set body;
+  Loop*    parent;
+  I32      depth;
+};
+
+typedef struct Loops Loops;
+struct Loops {
+  Loop* base;
+  I32   length;
+};
+
+typedef struct Loop_Var Loop_Var;
+struct Loop_Var {
+  Var* var;
+  Ir*  store;
+  I32  store_count;
+  I64  step;
+  B8   clean;
+  B8   affine;
+};
+
+typedef struct Loop_Count Loop_Count;
+struct Loop_Count {
+  B8  known;
+  I64 n;
+};
+
+void sem_dfs_postorder(Block* block, Blocks* postorder) {
+  if (block->is_dfs_visited) return;
+  block->is_dfs_visited = true;
+  if (block->kind == Block_Kind_jump) {
+    sem_dfs_postorder(block->jump.to_block, postorder);
+  }
+  else if (block->kind == Block_Kind_branch) {
+    sem_dfs_postorder(block->branch.nez.to_block, postorder);
+    sem_dfs_postorder(block->branch.eqz.to_block, postorder);
+  }
+  fa_add(postorder, block);
+}
+
+Blocks* sem_cfg_rpo(Fun* fun) {
+  I32 n = fun->blocks->length;
+  Blocks* postorder = arena_push(sem.temp_arena, sizeof(Blocks) + n*sizeof(Block*));
+  postorder->length = 0;
+  sem_dfs_postorder(fun->blocks->base[0], postorder);
+
+  Blocks* rpo = arena_push(sem.temp_arena, sizeof(Blocks) + postorder->length*sizeof(Block*));
+  rpo->length = 0;
+  for (I32 i = postorder->length-1; i >= 0; i--) {
+    Block* block = postorder->base[i];
+    block->rpo = rpo->length;
+    fa_add(rpo, block);
+  }
+  return rpo;
+}
+
+Block* sem_dom_intersect(Block* one, Block* two) {
+  while (one != two) {
+    while (one->rpo > two->rpo) one = one->idom;
+    while (two->rpo > one->rpo) two = two->idom;
+  }
+  return one;
+}
+
+void sem_cfg_doms(Fun* fun, Blocks* rpo) {
+  for (I32 i = 0; i < fun->blocks->length; i++) {
+    fun->blocks->base[i]->idom = 0;
+  }
+  Block* entry = rpo->base[0];
+  entry->idom = entry;
+  B8 changed = true;
+  while (changed) {
+    changed = false;
+    for (I32 i = 1; i < rpo->length; i++) {
+      Block* block = rpo->base[i];
+      Block* new_idom = 0;
+      for (I32 p = 0; p < block->preds.length; p++) {
+        Block* pred = block->preds.base[p];
+        if (pred->idom) {
+          new_idom = new_idom ? sem_dom_intersect(new_idom, pred) : pred;
+        }
+      }
+      if (new_idom && block->idom != new_idom) {
+        block->idom = new_idom;
+        changed = true;
+      }
+    }
+  }
+}
+
+B8 sem_dominates(Block* one, Block* two) {
+  for (;;) {
+    if (two == one) return true;
+    if (!two->idom || two->idom == two) return false;
+    two = two->idom;
+  }
+}
+
+Hash_Set sem_natural_loop(Fun* fun, Block* header, Block* latch) {
+  I32 n = fun->blocks->length;
+  Hash_Set body = hash_set_init(sem.temp_arena, n);
+  hash_set_put(&body, header);
+  Block** stack = arena_push(sem.temp_arena, n*sizeof(Block*));
+  I32 sp = 0;
+  if (hash_set_put(&body, latch)) {
+    stack[sp++] = latch;
+  }
+  while (sp > 0) {
+    Block* block = stack[--sp];
+    for (I32 i = 0; i < block->preds.length; i++) {
+      Block* pred = block->preds.base[i];
+      if (hash_set_put(&body, pred)) {
+        stack[sp++] = pred;
+      }
+    }
+  }
+  return body;
+}
+
+Loops sem_loops_discover(Fun* fun, Blocks* rpo) {
+  I32 n = fun->blocks->length;
+  Loops loops = {};
+  loops.base = arena_push(sem.temp_arena, 2*n*sizeof(Loop));
+  loops.length = 0;
+
+  for (I32 i = 0; i < rpo->length; i++) {
+    Block* tail = rpo->base[i];
+    Block* succs[2];
+    I32    ns = 0;
+    if (tail->kind == Block_Kind_jump) {
+      succs[ns++] = tail->jump.to_block;
+    }
+    else if (tail->kind == Block_Kind_branch) {
+      succs[ns++] = tail->branch.nez.to_block;
+      succs[ns++] = tail->branch.eqz.to_block;
+    }
+    for (I32 s = 0; s < ns; s++) {
+      Block* head = succs[s];
+      if (sem_dominates(head, tail)) {
+        Loop* loop = &loops.base[loops.length++];
+        memset(loop, 0, sizeof(Loop));
+        loop->header = head;
+        loop->latch  = tail;
+        loop->body   = sem_natural_loop(fun, head, tail);
+      }
+    }
+  }
+
+  for (I32 l = 0; l < loops.length; l++) {
+    Loop* loop = &loops.base[l];
+    Block* head = loop->header;
+    for (I32 p = 0; p < head->preds.length; p++) {
+      Block* pred = head->preds.base[p];
+      if (!hash_set_exists(&loop->body, pred)) {
+        loop->preheader = pred;
+      }
+    }
+    if (head->kind == Block_Kind_branch) {
+      Block* nez = head->branch.nez.to_block;
+      Block* eqz = head->branch.eqz.to_block;
+      if (hash_set_exists(&loop->body, nez)) {
+        loop->body_entry = nez;
+        loop->exit       = eqz;
+      }
+      else {
+        loop->body_entry = eqz;
+        loop->exit       = nez;
+      }
+    }
+  }
+
+  for (I32 a = 0; a < loops.length; a++) {
+    Loop* la = &loops.base[a];
+    for (I32 b = 0; b < loops.length; b++) {
+      if (a == b) continue;
+      Loop* lb = &loops.base[b];
+      if (lb->header == la->header) continue;
+      if (hash_set_exists(&lb->body, la->header)) {
+        if (!la->parent || lb->body.len < la->parent->body.len) {
+          la->parent = lb;
+        }
+      }
+    }
+  }
+  for (I32 a = 0; a < loops.length; a++) {
+    Loop* la = &loops.base[a];
+    I32 depth = 0;
+    for (Loop* p = la->parent; p; p = p->parent) depth++;
+    la->depth = depth;
+  }
+
+  return loops;
+}
+
+Hash_Map sem_loops_innermost(Fun* fun, Loops loops) {
+  Hash_Map map = hash_map_init(sem.temp_arena, fun->blocks->length);
+  for (I32 l = 0; l < loops.length; l++) {
+    Loop* loop = &loops.base[l];
+    for (I32 i = 0; i < loop->body.len; i++) {
+      Block* block = loop->body.list[i];
+      Loop* cur = hash_map_get(&map, block);
+      if (!cur || loop->body.len < cur->body.len) {
+        hash_map_put(&map, block, loop);
+      }
+    }
+  }
+  return map;
+}
+
+B8 sem_ir_is_load_of_var(Ir* ir, Var* var) {
+  return ir->kind == Ir_Kind_load
+      && ir->unary->kind == Ir_Kind_var
+      && ir->unary->var == var;
+}
+
+B8 sem_loop_invariant_int(Loop* loop, Hash_Map* loopvars, Ir* ir, I64* out) {
+  if (ir->kind == Ir_Kind_int) {
+    *out = ir->i64;
+    return true;
+  }
+  if (ir->kind == Ir_Kind_load && ir->unary->kind == Ir_Kind_var) {
+    Var* var = ir->unary->var;
+    if (hash_map_get(loopvars, var)) return false;
+    sem_ensure_declared(var);
+    Type* type = type_of_var(loop->preheader, var);
+    if (type && type->kind == Type_Kind_int && ranges_is_single(type->ranges)) {
+      *out = ranges_min(type->ranges);
+      return true;
+    }
+  }
+  return false;
+}
+
+B8 sem_loop_affine(Loop* loop, Hash_Map* loopvars, Var* var, Ir* store, I64* step_out) {
+  Ir* rhs = store->binary.two;
+  if (rhs->kind != Ir_Kind_add && rhs->kind != Ir_Kind_sub) return false;
+  Ir* other     = 0;
+  B8  self_left = false;
+  if (sem_ir_is_load_of_var(rhs->binary.one, var)) {
+    other     = rhs->binary.two;
+    self_left = true;
+  }
+  else if (sem_ir_is_load_of_var(rhs->binary.two, var)) {
+    other     = rhs->binary.one;
+    self_left = false;
+  }
+  else {
+    return false;
+  }
+  if (rhs->kind == Ir_Kind_sub && !self_left) return false;
+  I64 val;
+  if (!sem_loop_invariant_int(loop, loopvars, other, &val)) return false;
+  *step_out = (rhs->kind == Ir_Kind_sub) ? -val : val;
+  return true;
+}
+
+Loop_Count sem_loop_count(Loop* loop, Hash_Map* loopvars) {
+  Loop_Count result = {};
+  Ir* cond  = loop->header->branch.cond;
+  if (cond->kind != Ir_Kind_eq && cond->kind != Ir_Kind_ne && cond->kind != Ir_Kind_lt
+   && cond->kind != Ir_Kind_le && cond->kind != Ir_Kind_gt && cond->kind != Ir_Kind_ge) {
+    return result;
+  }
+  Ir* cond_lhs = cond->binary.one;
+  Ir* cond_rhs = cond->binary.two;
+
+  Var* v      = 0;
+  Ir*  bound_ir = 0;
+  B8   v_left   = false;
+  if (cond_lhs->kind == Ir_Kind_load && cond_lhs->unary->kind == Ir_Kind_var) {
+    Loop_Var* lv = hash_map_get(loopvars, cond_lhs->unary->var);
+    if (lv && lv->affine) { v = cond_lhs->unary->var; bound_ir = cond_rhs; v_left = true; }
+  }
+  if (!v && cond_rhs->kind == Ir_Kind_load && cond_rhs->unary->kind == Ir_Kind_var) {
+    Loop_Var* lv = hash_map_get(loopvars, cond_rhs->unary->var);
+    if (lv && lv->affine) { v = cond_rhs->unary->var; bound_ir = cond_lhs; v_left = false; }
+  }
+  if (!v) return result;
+
+  I64 bound;
+  if (!sem_loop_invariant_int(loop, loopvars, bound_ir, &bound)) return result;
+
+  Loop_Var* lv = hash_map_get(loopvars, v);
+  I64 step = lv->step;
+
+  sem_ensure_declared(v);
+  Type* v0_type = type_of_var(loop->preheader, v);
+  if (!v0_type || v0_type->kind != Type_Kind_int || !ranges_is_single(v0_type->ranges)) {
+    return result;
+  }
+  I64 v0 = ranges_min(v0_type->ranges);
+
+  Ir_Kind op = cond->kind;
+  if (!v_left) {
+    switch (cond->kind) {
+    case Ir_Kind_lt: op = Ir_Kind_gt; break;
+    case Ir_Kind_le: op = Ir_Kind_ge; break;
+    case Ir_Kind_gt: op = Ir_Kind_lt; break;
+    case Ir_Kind_ge: op = Ir_Kind_le; break;
+    default:         op = cond->kind;          break;
+    }
+  }
+
+  I64 d = bound - v0;
+  switch (op) {
+  case Ir_Kind_ne: {
+    if (step == 0) {
+      if (d == 0) { result.known = true; result.n = 0; }
+      return result;
+    }
+    if (d % step == 0 && d / step >= 0) {
+      result.known = true;
+      result.n     = d / step;
+    }
+    return result;
+  }
+  case Ir_Kind_eq: {
+    if (v0 != bound) { result.known = true; result.n = 0; return result; }
+    if (step == 0) return result;
+    result.known = true; result.n = 1;
+    return result;
+  }
+  case Ir_Kind_lt: {
+    if (v0 >= bound) { result.known = true; result.n = 0; return result; }
+    if (step <= 0) return result;
+    result.known = true; result.n = (d + step - 1) / step;
+    return result;
+  }
+  case Ir_Kind_le: {
+    if (v0 > bound) { result.known = true; result.n = 0; return result; }
+    if (step <= 0) return result;
+    result.known = true; result.n = d / step + 1;
+    return result;
+  }
+  case Ir_Kind_gt: {
+    if (v0 <= bound) { result.known = true; result.n = 0; return result; }
+    if (step >= 0) return result;
+    I64 dd = v0 - bound;
+    I64 ss = -step;
+    result.known = true; result.n = (dd + ss - 1) / ss;
+    return result;
+  }
+  case Ir_Kind_ge: {
+    if (v0 < bound) { result.known = true; result.n = 0; return result; }
+    if (step >= 0) return result;
+    I64 dd = v0 - bound;
+    I64 ss = -step;
+    result.known = true; result.n = dd / ss + 1;
+    return result;
+  }
+  default: return result;
+  }
+}
+
+void sem_loop_seed(Loop* loop, Hash_Map* innermost) {
+  if (!loop->preheader) return;
+  if (loop->header->kind != Block_Kind_branch) return;
+
+  I32 cap = sem.current_fun->var_count + 1;
+  Hash_Map  loopvars = hash_map_init(sem.temp_arena, cap);
+  Loop_Var* pool     = arena_push(sem.temp_arena, cap*sizeof(Loop_Var));
+  I32       pool_len = 0;
+
+  for (I32 i = 0; i < loop->body.len; i++) {
+    Block* block = loop->body.list[i];
+    for (I32 j = 0; j < block->irs->length; j++) {
+      Ir* ir = block->irs->base[j];
+      if (ir->kind != Ir_Kind_store) continue;
+      if (ir->binary.one->kind != Ir_Kind_var) continue;
+      Var* var = ir->binary.one->var;
+      Loop_Var* lv = hash_map_get(&loopvars, var);
+      if (!lv) {
+        lv = &pool[pool_len++];
+        memset(lv, 0, sizeof(Loop_Var));
+        lv->var   = var;
+        lv->clean = true;
+        hash_map_put(&loopvars, var, lv);
+      }
+      lv->store_count++;
+      lv->store = ir;
+      B8 exclusive = (Loop*)hash_map_get(innermost, block) == loop;
+      B8 once      = sem_dominates(block, loop->latch);
+      if (!exclusive || !once) lv->clean = false;
+    }
+  }
+
+  for (I32 i = 0; i < pool_len; i++) {
+    Loop_Var* lv = &pool[i];
+    if (lv->store_count == 1 && lv->clean) {
+      I64 step;
+      if (sem_loop_affine(loop, &loopvars, lv->var, lv->store, &step)) {
+        lv->affine = true;
+        lv->step   = step;
+      }
+    }
+  }
+
+  Loop_Count count = sem_loop_count(loop, &loopvars);
+
+  for (I32 i = 0; i < pool_len; i++) {
+    Loop_Var* lv  = &pool[i];
+    Var*      var = lv->var;
+    sem_ensure_declared(var);
+    Type* seeded = 0;
+    if (lv->affine && count.known) {
+      Type* v0_type = type_of_var(loop->preheader, var);
+      if (v0_type && v0_type->kind == Type_Kind_int && ranges_is_single(v0_type->ranges)) {
+        I64 v0    = ranges_min(v0_type->ranges);
+        I64 final = v0 + count.n * lv->step;
+        seeded = type_int_range(min(v0, final), max(v0, final));
+        if (var->declared) {
+          seeded->size_defined = var->declared->size_defined;
+          seeded->bits_size    = var->declared->bits_size;
+          seeded->bits_align   = var->declared->bits_align;
+        }
+      }
+    }
+    if (!seeded) {
+      seeded = var->declared ? var->declared : sem.type_none;
+    }
+    hash_map_put(&loop->header->out_var_types, var, seeded);
+  }
+}
+
 Type* sem_fun(Fun* fun) {
   fun->blocks->base[0]->state = Block_State_reachable;
   for (I32 b = 0; b < fun->blocks->length; b++) {
@@ -1546,14 +1989,20 @@ Type* sem_fun(Fun* fun) {
     sem_init_block_preds(block);
     sem_scc_block(block);
     block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
-    block->in_var_types  = hash_map_init(sem.perm_arena, fun->var_count);
-    sem_worklist_push(block);
   }
-  sem_worklist_sort();
-  // init block with types
 
-  while (sem_worklist_is_not_empty()) {
-    Block* block = sem_worklist_pop();
+  Blocks*  rpo       = sem_cfg_rpo(fun);
+                       sem_cfg_doms(fun, rpo);
+  Loops    loops     = sem_loops_discover(fun, rpo);
+  Hash_Map innermost = sem_loops_innermost(fun, loops);
+
+  for (I32 i = 0; i < rpo->length; i++) {
+    Block* block = rpo->base[i];
+    for (I32 l = 0; l < loops.length; l++) {
+      if (loops.base[l].header == block) {
+        sem_loop_seed(&loops.base[l], &innermost);
+      }
+    }
     sem_block(block);
   }
 
@@ -1565,8 +2014,7 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.perm_arena = arena;
   sem.temp_arena = &temp;
   sem.funs = funs;
-  sem.worklist = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
-  sem.worklist->length = 0;
+  sem.sccid = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length);
@@ -1599,8 +2047,6 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // TODO:
-  // - [ ] loop-updated variables
   // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x; b@ + a.x", "");
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
   // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
@@ -1621,39 +2067,13 @@ void sem_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
-  /*
-  a:I32 = 0
-  wh a != 10 do {
-    a = a + 1
-  }
-{
-  b2: { a:I32 = 0 }
-    r9 = int 0
-    r10 = var a
-    r11 = store r10 r9
-    jump b5
-  b5: { a: I32 = 0 }
-    r12 = var a
-    r13 = load r12          // 0
-    r14 = int 10            // 10
-    r15 = ne r13 r14        // 1
-    if r15 then b6 else b7  // b6
-  b6: { a: I32 = 1 }
-    r16 = var a             //
-    r17 = load r16          // 0
-    r18 = int 1             // 1
-    r19 = add r17 r18       // 1
-    r20 = var a             //
-    r21 = store r20 r19     //
-    jump b5
-  b7:
-    jump b8
-  b8:
-  ret r5
-}
-  */
   // test("a:I32; b: I32; a = b; a", "");
   test("a:I32; a=0; wh a != 8 do {a = a + 1}; a", "");
+  test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
+  test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
+  test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
+  test("a:I32; a=5; wh a > 0 do {a = a - 1}; a", "");
+  test("a:I32; b:I32; a=0; wh a < 8 do {b=0; wh b != 3 do { b = b + 1 }; a = a + 1}; a", "");
   // test("a:I32; if a != 10 do {a = 1}; a", "");
 }
 
