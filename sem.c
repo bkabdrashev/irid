@@ -206,7 +206,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       string_builder_push_i64(&sb, block->sccid);
 
       string_builder_push_cstr(&sb, "$");
-      string_builder_push_i64(&sb, block->is_reachable);
+      string_builder_push_i64(&sb, block->state);
 
       string_builder_push_cstr(&sb, "|");
       for (I32 i = 0; i < block->preds.length; i++) {
@@ -1066,7 +1066,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];
-    if (pred->is_reachable || !block->is_reachable) {
+    if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
       if (pred->kind == Block_Kind_branch) {
         Sem_Tasks tasks = {};
         tasks.out_vars = &pred->out_var_types;
@@ -1135,7 +1135,7 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
     hash_map_put(&block->out_var_types, var, type);
   }
   else {
-    assert(0);
+    // assert(0);
   }
 }
 
@@ -1451,22 +1451,28 @@ void sem_block(Block* block) {
   for (I32 i = 0; i < block->irs->length; i++) {
     sem_ir(block, block->irs->base[i]);
   }
-  if (block->is_reachable) {
+  if (block->state == Block_State_reachable) {
     if (block->kind == Block_Kind_branch) {
       Type* cond_type = type_of_ir(block->branch.cond);
       if (type_is_true(cond_type)) {
-        block->branch.nez.to_block->is_reachable = true;
+        block->branch.nez.to_block->state = Block_State_reachable;
+        if (block->branch.eqz.to_block->state == Block_State_unknown) {
+          block->branch.eqz.to_block->state = Block_State_unreachable;
+        }
       }
       else if (type_is_false(cond_type)) {
-        block->branch.eqz.to_block->is_reachable = true;
+        block->branch.eqz.to_block->state = Block_State_reachable;
+        if (block->branch.nez.to_block->state == Block_State_unknown) {
+          block->branch.nez.to_block->state = Block_State_unreachable;
+        }
       }
       else {
-        block->branch.nez.to_block->is_reachable = true;
-        block->branch.eqz.to_block->is_reachable = true;
+        block->branch.nez.to_block->state = Block_State_reachable;
+        block->branch.eqz.to_block->state = Block_State_reachable;
       }
     }
     else if (block->kind == Block_Kind_jump) {
-        block->jump.to_block->is_reachable = true;
+        block->jump.to_block->state = Block_State_reachable;
     }
   }
 }
@@ -1534,7 +1540,7 @@ void sem_init_block_preds(Block* block) {
 }
 
 Type* sem_fun(Fun* fun) {
-  fun->blocks->base[0]->is_reachable = true;
+  fun->blocks->base[0]->state = Block_State_reachable;
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);

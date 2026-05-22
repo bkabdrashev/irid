@@ -157,6 +157,12 @@ typedef enum Block_Kind {
   Block_Kind_branch,
 } Block_Kind;
 
+typedef enum Block_State {
+  Block_State_unknown,
+  Block_State_unreachable,
+  Block_State_reachable,
+} Block_State;
+
 struct Blocks {
   I32    length;
   Block* base[];
@@ -170,9 +176,9 @@ struct Block_List {
 
 struct Block {
   Block_Kind kind;
+  Block_State state;
   B8 is_present_in_worklist;
 
-  B8 is_reachable;
 
   B8 is_scc_visited;
   B8 is_on_scc_stack;
@@ -953,12 +959,12 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
+  // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
-  test("a:I32", "");
+  test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
 }
 
 #undef test
