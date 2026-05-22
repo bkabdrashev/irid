@@ -354,6 +354,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   // (1..3) is subtype of 1 -- true
   // (1..2) is subtype of (1..3) -- false
 
+  if (two->kind == Type_Kind_bits) return type_is_subtype_rec(block, one, two->bits_of, visited);
   if (one->kind != two->kind) return false;
   switch (one->kind) {
   case Type_Kind_none: {
@@ -361,7 +362,6 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   } break;
   case Type_Kind_bits: {
     assert(0);
-    return false;
   } break;
   case Type_Kind_int: {
     return ranges_is_subrange(one->ranges, two->ranges);
@@ -656,6 +656,15 @@ Type* type_pointer_declared(Pointer* pointer) {
   }
   pointer->declared = result;
   return result;
+}
+
+Type* type_bits(I32 bits_size, Type* bits_of) {
+  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  new_type->kind = Type_Kind_bits;
+  new_type->bits_size  = bits_size;
+  new_type->bits_align = bits_size;
+  new_type->bits_of  = bits_of;
+  return new_type;
 }
 
 B8 type_not_equal(Type* one, Type* two) {
@@ -1113,6 +1122,9 @@ Type* type_of_var(Block* block, Var* var) {
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
   Type* var_type = var->declared;
+  if (type->kind == Type_Kind_bits) {
+    type = type->bits_of;
+  }
   if (type_is_subtype(block, type, var_type)) {
     if (var_type->kind == Type_Kind_record) {
       for (I32 i = 0; i < var_type->record->length; i++) {
@@ -1121,6 +1133,9 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
         type->record->vars = var_type->record->vars;
         type_of_var_put(block, var_type->record->vars[i], field_type);
       }
+    }
+    else if (var_type->kind == Type_Kind_bits) {
+      type = type_bits(var_type->bits_size, type);
     }
     hash_map_put(&block->out_var_types, var, type);
   }
@@ -1367,12 +1382,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (ranges_is_single(two_type->ranges)) {
         I64 val = ranges_min(two_type->ranges);
         if (val < I16_MAX) {
-          Type* new_type  = arena_push(sem.perm_arena, sizeof(Type));
-          new_type->kind  = Type_Kind_bits;
-          new_type->bits_size  = val;
-          new_type->bits_align = val;
-          new_type->bits_of  = one_type;
-          result = new_type;
+          result = type_bits(val, one_type);
         }
         else {
           assert(0);
@@ -1559,7 +1569,14 @@ void sem_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
-  test("a:I32; a", "");
+  /*
+  a := I32 0
+  wh a < 10 do {
+    a = a + 1
+  }
+
+  */
+  test("a:I32; b: I32; a = b; a", "");
 }
 
 #undef test

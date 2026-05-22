@@ -925,8 +925,6 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 
     del(irgen.fun_stack);
     del(irgen.funs);
-
-    // irgen_push_declare(i32_var);
   }
 
   irgen_fun_enter(ast.scope);
