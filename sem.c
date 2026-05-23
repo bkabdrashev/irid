@@ -75,7 +75,7 @@ struct Sem {
   I32 sccid;
   Blocks* scc_stack;
 
-  Fun* current_fun;
+  I32 current_fun_var_count;
 };
 
 Sem sem = {};
@@ -1172,7 +1172,8 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
     hash_map_put(&block->out_var_types, var, type);
   }
   else {
-    // assert(0);
+    printf("not subtype\n");
+    assert(0);
   }
 }
 
@@ -1208,13 +1209,11 @@ void sem_ensure_declared(Var* var) {
   var->state = Var_State_resolving;
 
   if (var->blocks) {
-    I32 cap = sem.current_fun->var_count;
+    I32 cap = sem.current_fun_var_count;
     for (I32 i = 0; i < var->blocks->length; i++) {
       Block* block = var->blocks->base[i];
       sem_init_block_preds(block);
-      if (!block->out_var_types.keys) {
-        block->out_var_types = hash_map_init(sem.perm_arena, cap);
-      }
+      block->out_var_types = hash_map_init(sem.perm_arena, cap);
       sem_block(block);
     }
   }
@@ -1921,7 +1920,7 @@ void sem_loop_seed(Loop* loop, Hash_Map* innermost) {
   if (!loop->preheader) return;
   if (loop->header->kind != Block_Kind_branch) return;
 
-  I32 cap = sem.current_fun->var_count + 1;
+  I32 cap = sem.current_fun_var_count + 1;
   Hash_Map  loopvars = hash_map_init(sem.temp_arena, cap);
   Loop_Var* pool     = arena_push(sem.temp_arena, cap*sizeof(Loop_Var));
   I32       pool_len = 0;
@@ -2027,9 +2026,16 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.type_none = arena_push(arena, sizeof(Type));
   sem.type_none->kind = Type_Kind_none;
 
+  sem.current_fun_var_count = irgen.builtins->len;
+  for (I32 i = 0; i < irgen.builtins->len; i++) {
+    Str* str = irgen.builtins->list[i];
+    Symbol* sym = hash_map_get(irgen.builtins, str);
+    sem_ensure_declared(sym->var);
+  }
+
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
-    sem.current_fun = fun;
+    sem.current_fun_var_count = fun->var_count;
     sem_fun(fun);
   }
   arena_free(&temp);
@@ -2073,7 +2079,6 @@ void sem_test(void) {
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
   // test("a:I32; b: I32; a = b; a", "");
-  test("a:I32; b:0'@I32; a=0; b = @a; wh a < 8 do { a = a + 1;}; a", "");
   // test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
   // test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
   // test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
@@ -2081,6 +2086,8 @@ void sem_test(void) {
   // test("a:I32; b:I32; a=0; wh a < 8 do {b=0; wh b != 3 do { b = b + 1 }; a = a + 1}; a", "");
   // test("a:I32; b:I32; a=0; b=0; wh a < 8 do {wh b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
   // test("a:I32; if a != 10 do {a = 1}; a", "");
+  // test("I32 = 0; I32", "");
+  test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
 }
 
 #undef test

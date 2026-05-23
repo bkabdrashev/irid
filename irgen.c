@@ -657,7 +657,7 @@ Fun* irgen_fun_enter(Hash_Map* scope) {
     irgen_blocks_push(fun->blocks, block);
   }
   fun->return_ir = &top(irgen.irs);
-  fun->var_count = 0;
+  fun->var_count = irgen.builtins->len;
   irgen_scope_enter(scope);
   return fun;
 }
@@ -897,7 +897,6 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen_block_leave();
 
     i32_var->blocks = irgen_blocks_perm(temp_fun->blocks);
-
 
     del(irgen.fun_stack);
     del(irgen.funs);

@@ -137,7 +137,7 @@ z // undefined
 1, 2 match (x:1; y) and (x:2; z)
 ```
 
-- [ ] Narrow a name for that scope
+- [x] Narrow a name for that scope
 ```irid
 Vec2 : (x:I32; y:I32)
 sum : Vec2 -> Vec2.x + Vec2.y
