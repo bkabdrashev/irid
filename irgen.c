@@ -626,18 +626,12 @@ void irgen_scope_enter(Hash_Map* scope) {
     }
 
     Ir* ir = irgen_ast_node(sym->ast);
-
     fun->var_count += temp_fun->var_count;
-
     irgen_block_leave();
-
     sym->var->blocks = irgen_blocks_perm(temp_fun->blocks);
-
     sym->var->declared_ir = ir;
-
     del(irgen.fun_stack);
     del(irgen.funs);
-
     irgen_push_declare(sym->var);
   }
 }

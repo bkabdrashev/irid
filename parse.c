@@ -96,6 +96,18 @@ struct Ast_Node {
   };
 };
 
+typedef struct Ast_Decl Ast_Decl;
+struct Ast_Decl {
+  Str*      name;
+  Ast_Node* rhs;
+};
+
+typedef struct Ast_Decls Ast_Decls;
+struct Ast_Decls {
+  I32 length;
+  Ast_Decl base[];
+};
+
 Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   Cstr result = "unknown";
   switch (ast_kind & 0xff) {
@@ -409,6 +421,14 @@ B8 parse_match_token(Parser* parser, Token_Kind kind) {
   return false;
 }
 
+B8 parse_is_token(Parser* parser, Token_Kind kind) {
+  Token token = parser->tokens.base[parser->tok];
+  if (token.kind == kind) {
+    return true;
+  }
+  return false;
+}
+
 B8 parse_expect_token(Parser* parser, Token_Kind kind) {
   Token token = parser->tokens.base[parser->tok];
   if (token.kind == kind) {
@@ -442,28 +462,28 @@ Ast* parse_list_perm(Parser* parser, Ast* temp_list) {
   return perm_list;
 }
 
-Ast* parse_map_temp(Parser* parser) {
-  return arena_push_zero(parser->map_arena, sizeof(Ast));
+Ast_Decls* parse_map_temp(Parser* parser) {
+  return arena_push_zero(parser->map_arena, sizeof(Ast_Decls));
 }
 
-void parse_map_push(Parser* parser, Ast* temp_map, Ast_Node* node) {
-  arena_push(parser->map_arena, sizeof(Ast_Node*));
-  temp_map->base[temp_map->length++] = node;
+void parse_map_push(Parser* parser, Ast_Decls* temp_map, Str* name, Ast_Node* rhs) {
+  arena_push(parser->map_arena, sizeof(Ast_Decl));
+  Ast_Decl decl = { name, rhs };
+  fa_add(temp_map, decl);
 }
 
-Hash_Map* parse_map_perm(Parser* parser, Ast* temp_list) {
+Hash_Map* parse_map_perm(Parser* parser, Ast_Decls* temp_list) {
   Hash_Map* map = arena_push(parser->perm_arena, sizeof(Hash_Map));
   *map = hash_map_init(parser->perm_arena, temp_list->length+1);
   for (I32 i = 0; i < temp_list->length; i++) {
-    Ast_Node* node = temp_list->base[i];
+    Ast_Decl decl = temp_list->base[i];
     {
-      Symbol* sym = hash_map_get(map, node->declare.str);
+      Symbol* sym = hash_map_get(map, decl.name);
       if (sym) assert(0);
     }
-    assert(node->kind == Ast_Kind_declare);
     Symbol* sym = arena_push(parser->perm_arena, sizeof(Symbol));
-    sym->ast = node->declare.rhs;
-    hash_map_put(map, node->declare.str, sym);
+    sym->ast = decl.rhs;
+    hash_map_put(map, decl.name, sym);
   }
   arena_release_mark(parser->map_arena, temp_list);
   return map;
@@ -471,6 +491,7 @@ Hash_Map* parse_map_perm(Parser* parser, Ast* temp_list) {
 
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat);
 Ast_Node* parse_statement(Parser* parser);
+Ast_Node* parse_statement_with_decls(Parser* parser, Ast_Decls* temp_map, Token_Kind end_token_kind);
 
 Ast_Node* parse_new_node(Parser* parser, Ast_Kind kind) {
   Ast_Node* node = arena_push(parser->perm_arena, sizeof(Ast_Node));
@@ -635,7 +656,7 @@ Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
 }
 
 Ast_Node* parse_prefix_or_atom(Parser* parser) {
-  Ast_Node* node;
+  Ast_Node* node = 0;
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
@@ -728,16 +749,10 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   } break;
   case Token_Kind_curly_open: {
     Ast* temp_ast = parse_list_temp(parser);
-    Ast* temp_map = parse_map_temp(parser);
+    Ast_Decls* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
-      Ast_Node* statement = parse_statement(parser);
-      if (statement->kind == Ast_Kind_declare) {
-        parse_map_push(parser, temp_map, statement);
-      }
-      else {
-        parse_list_push(parser, temp_ast, statement);
-      }
-      parse_match_token(parser, Token_Kind_semicolon);
+      Ast_Node* statement = parse_statement_with_decls(parser, temp_map, Token_Kind_curly_close);
+      parse_list_push(parser, temp_ast, statement);
     }
     node = parse_new_node(parser, Ast_Kind_block_value);
     node->block.list = parse_list_perm(parser, temp_ast);
@@ -768,7 +783,7 @@ Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_beat) {
 }
 
 Ast_Node* parse_statement(Parser* parser) {
-  Ast_Node* node;
+  Ast_Node* node = 0;
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
   case Token_Kind_if: {
@@ -815,16 +830,10 @@ Ast_Node* parse_statement(Parser* parser) {
   } break;
   case Token_Kind_curly_open: {
     Ast* temp_ast = parse_list_temp(parser);
-    Ast* temp_map = parse_map_temp(parser);
+    Ast_Decls* temp_map = parse_map_temp(parser);
     while (!parse_match_token(parser, Token_Kind_curly_close)) {
-      Ast_Node* statement = parse_statement(parser);
-      if (statement->kind == Ast_Kind_declare) {
-        parse_map_push(parser, temp_map, statement);
-      }
-      else {
-        parse_list_push(parser, temp_ast, statement);
-      }
-      parse_match_token(parser, Token_Kind_semicolon);
+      Ast_Node* statement = parse_statement_with_decls(parser, temp_map, Token_Kind_curly_close);
+      parse_list_push(parser, temp_ast, statement);
     }
     node = parse_new_node(parser, Ast_Kind_block);
     node->block.list = parse_list_perm(parser, temp_ast);
@@ -840,19 +849,48 @@ Ast_Node* parse_statement(Parser* parser) {
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
     }
-    else if (parse_match_token(parser, Token_Kind_colon)) {
-      Ast_Node* lhs = node;
-      if (lhs->kind == Ast_Kind_name) {
-        Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
-        node = parse_new_node(parser, Ast_Kind_declare);
-        node->declare.str = lhs->str;
-        node->declare.rhs = rhs;
+  }
+  }
+  return node;
+}
+
+Ast_Node* parse_statement_with_decls(Parser* parser, Ast_Decls* temp_map, Token_Kind end_token_kind) {
+  Ast_Node* node = 0;
+  while (!node && !parse_is_token(parser, end_token_kind)) {
+    node = parse_statement(parser);
+    if (parse_match_token(parser, Token_Kind_colon)) {
+      if (node->kind == Ast_Kind_name) {
+        if (parse_match_token(parser, Token_Kind_equal)) {
+          // name : = exp
+          Ast_Node* lhs = node;
+          Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
+          parse_map_push(parser, temp_map, lhs->str, rhs);
+          node = parse_new_node(parser, Ast_Kind_assign);
+          node->binary.lhs = lhs;
+          node->binary.rhs = rhs;
+        }
+        else {
+          // name : exp
+          Ast_Node* decl_rhs = parse_fun_tuple_or_exp(parser);
+          parse_map_push(parser, temp_map, node->str, decl_rhs);
+          if (parse_match_token(parser, Token_Kind_equal)) {
+            // name : exp = exp
+            Ast_Node* lhs = node;
+            Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
+            node = parse_new_node(parser, Ast_Kind_assign);
+            node->binary.lhs = lhs;
+            node->binary.rhs = rhs;
+          }
+          else {
+            node = 0;
+          }
+        }
       }
       else {
         assert(0);
       }
     }
-  }
+    parse_match_token(parser, Token_Kind_semicolon);
   }
   return node;
 }
@@ -867,16 +905,10 @@ Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
   parser.tokens = tokens;
   parser.tok    = 1;
   Ast* temp_ast = parse_list_temp(&parser);
-  Ast* temp_map = parse_map_temp(&parser);
+  Ast_Decls* temp_map = parse_map_temp(&parser);
   while (!parse_match_token(&parser, Token_Kind_source_leave)) {
-    Ast_Node* node = parse_statement(&parser);
-    if (node->kind == Ast_Kind_declare) {
-      parse_map_push(&parser, temp_map, node);
-    }
-    else {
-      parse_list_push(&parser, temp_ast, node);
-    }
-    parse_match_token(&parser, Token_Kind_semicolon);
+    Ast_Node* node = parse_statement_with_decls(&parser, temp_map, Token_Kind_source_leave);
+    parse_list_push(&parser, temp_ast, node);
   }
   parser.ast.list = parse_list_perm(&parser, temp_ast);
   parser.ast.scope = parse_map_perm(&parser, temp_map);
@@ -900,6 +932,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a : 1;", "");
+  return;
+  test("a:1=2",     "[2](2 + 3)");
   test("[2]\\ 2+3",     "[2](2 + 3)");
   test("a'b",     "(b a)");
   test("if 2 br 3",     "if 2 do break 3");
