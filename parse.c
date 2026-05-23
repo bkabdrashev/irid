@@ -655,9 +655,12 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node->bits = token.bits;
     // parse_final_push(parser, node);
   } break;
+  case Token_Kind_backslash: {
+    node = parse_new_expression(parser, 0);
+  } break;
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);
-    parse_expect_token(parser, Token_Kind_do);
+    parse_match_token(parser, Token_Kind_do);
     Ast_Node* if_value = parse_new_expression(parser, 0);
     node = parse_new_node(parser, Ast_Kind_if_value);
     node->binary.lhs = cond;
@@ -672,7 +675,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   } break;
   case Token_Kind_while: {
     Ast_Node* cond = parse_new_expression(parser, 0);
-    parse_expect_token(parser, Token_Kind_do);
+    parse_match_token(parser, Token_Kind_do);
     Ast_Node* while_block = parse_indented_block(parser, token.indent);
     node = parse_new_node(parser, Ast_Kind_while);
     node->binary.lhs = cond;
@@ -770,7 +773,7 @@ Ast_Node* parse_statement(Parser* parser) {
   switch (token.kind) {
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);
-    parse_expect_token(parser, Token_Kind_do);
+    parse_match_token(parser, Token_Kind_do);
     Ast_Node* if_block = parse_indented_block(parser, token.indent);
     node = parse_new_node(parser, Ast_Kind_if);
     node->binary.lhs = cond;
@@ -785,7 +788,7 @@ Ast_Node* parse_statement(Parser* parser) {
   } break;
   case Token_Kind_while: {
     Ast_Node* cond = parse_new_expression(parser, 0);
-    parse_expect_token(parser, Token_Kind_do);
+    parse_match_token(parser, Token_Kind_do);
     Ast_Node* while_block = parse_indented_block(parser, token.indent);
     node = parse_new_node(parser, Ast_Kind_while);
     node->binary.lhs = cond;
@@ -897,8 +900,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("[2]\\ 2+3",     "[2](2 + 3)");
   test("a'b",     "(b a)");
-
+  test("if 2 br 3",     "if 2 do break 3");
   test("a.b@.c",     "((a . b)@ . c)");
   test("a, b -> 1, 2",     "((a, b) -> (1, 2))");
   test("wh 1 do 2",        "while 1 do 2");

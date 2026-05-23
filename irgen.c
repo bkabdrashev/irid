@@ -757,6 +757,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
     irgen_scope_leave();
   } break;
+  case Ast_Kind_iblock: {
+    for (I32 i = 0; i < node->list->length; i++) {
+      Ast_Node* exp = node->list->base[i];
+      irgen_ast_node(exp);
+    }
+  } break;
   case Ast_Kind_ptr: {
     Ir* unary = irgen_ast_node(node->unary);
     if (unary->kind == Ir_Kind_load) {
@@ -833,7 +839,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_fun:
   case Ast_Kind_return: case Ast_Kind_break:
   case Ast_Kind_return_value: case Ast_Kind_break_value:
-  case Ast_Kind_block_value: case Ast_Kind_iblock:
+  case Ast_Kind_block_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:
   case Ast_Kind_none: { assert(0); }
   case Ast_Kind_declare: { assert(0); }

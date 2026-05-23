@@ -25,7 +25,7 @@ fo i in arr.len do
 arr[arr.len++] = 0
 ```
 
-- [ ] `foo : (a=1) -> a; foo(a:1)`
+- [x] `foo : (a:1) -> a; foo(a=1)`
 
 - [x] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
 
@@ -37,16 +37,21 @@ arr[arr.len++] = 0
 ```irid
 alignof, align
 bitsof, bits
-sizeof, bytes
+sizeof, size
+```
+
+- [ ] Arbitrary compiler-time execution
+```irid
+#println("Hello from compiler")
 ```
 
 - [ ] Remove char \' syntax, instead:
 ```irid
-char : (str = string) -> {
-  str:len is 1
-  -> str.0
+char : (str : string) -> {
+  str.len is 1
+  re str.0
 }
-char "a"
+#char "a"
 ```
 
 - [ ] Foreigh functions should be metaprogram instead of #c syntax:
@@ -56,9 +61,9 @@ Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
 
 - [ ] Pointer types can incorporate pointer location:
 ```irid
-a = 10
-b = 20
-c = @a\@b // can only points to a or b
+a:I32
+b:I32
+c : @a\@b // can only points to a or b
 ```
 
 - [ ] Define constants and use them at the same time
@@ -82,7 +87,7 @@ $foo(1, 2)
 - [ ] Subtypes $:
 ```irid
 // here a and b are the same type T that is subtype of U32
-(a = U32 $ T, b = T, c = I32) -> (a+b, c)
+(a: U32 $ T, b: T, c = I32) -> (a+b, c)
 a:$T = I32 1
 b:T = 2
 
@@ -97,13 +102,13 @@ sqrt.F32(a) // auto casts a to F32
 - [ ] implicit function call:
 ```irid
 entity:(
-  object : (position = Vec3; health = U32)
+  object : (position: Vec3; health: U32)
   length : 1024
   pool   : [length]object
-  get    : (id = handle) -> pool[id]@
+  get    : (id: handle) -> @pool[id]
   handle : U32 implicit get
   new    : object -> handle
-  udpate : (e = object) -> {}
+  udpate : (e: object) -> {}
 )
 
 e = entity.new((1,1,1), 100)
@@ -258,7 +263,7 @@ zap : () -> (x:I32; y:I32) { // error since the second returned value have to sw
 }
 ```
 
-- [ ] Optional do
+- [x] Optional do
 ```irid
 if 1 do 2
 if 3 do br 4
@@ -274,7 +279,7 @@ str_from_vec:(v: Vec) -> Str {
 }
 ```
 
-- [ ] Prefix Join  `a = [2]\0\1\2`
+- [x] Prefix backslash  `a = [2]\0\2`
 
 - [ ] Linear types
 ```irid
@@ -301,7 +306,7 @@ if () do {
 free(ptrb)               // memory #1 is freed
 ```
 
-- [ ] Python-like identation based if/while blocks, that are not lexical scopes
+- [x] Python-like identation based if/while blocks, that are not lexical scopes
 ```irid
 if () do
   a = 1
