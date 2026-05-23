@@ -199,20 +199,15 @@ a = wh 1 {
 { y, x } = vec
 ```
 
-- [ ] type assertion
+- [ ] methods syntax using closures
 ```irid
-b = 10
-a = I32'b
-```
-
-- [ ] methods syntax
-```irid
-Vec : (x: i32; y: i32).{
-  dot : (vec: Vec) -> x*vec.x + y*vec.y
-}
+Vec : (x: I32; y: I32)
+dot : (lhs: Vec) -> (rhs: Vec) -> lhs.x*rhs.x + lhs.y*rhs.y
 a = Vec(1,2)
 b = Vec(3,4)
-c = a.dot b // 3 + 8
+c = a'dot b // 1*3 + 2*4
+c = dot a b // 1*3 + 2*4
+c = b'a'dot // 1*3 + 2*4
 ```
 
 - [ ] function return value type checking
@@ -315,7 +310,7 @@ el
 a // 1\3
 ```
 
-- [ ] Declarations can be used out-of-order.
+- [x] Declarations can be used out-of-order.
 ```irid
 A : (xy:Vec2)
 b = B(1; 2)

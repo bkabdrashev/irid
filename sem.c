@@ -1637,7 +1637,12 @@ void sem_cfg_doms(Fun* fun, Blocks* rpo) {
       for (I32 p = 0; p < block->preds.length; p++) {
         Block* pred = block->preds.base[p];
         if (pred->idom) {
-          new_idom = new_idom ? sem_dom_intersect(new_idom, pred) : pred;
+          if (new_idom) {
+            new_idom = sem_dom_intersect(new_idom, pred);
+          }
+          else {
+            new_idom = pred;
+          }
         }
       }
       if (new_idom && block->idom != new_idom) {
@@ -2068,13 +2073,13 @@ void sem_test(void) {
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
   // test("a:I32; b: I32; a = b; a", "");
-  // test("a:I32; a=0; wh a != 8 do {a = a + 1}; a", "");
+  test("a:I32; b:0'@I32; a=0; b = @a; wh a < 8 do { a = a + 1;}; a", "");
   // test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
   // test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
   // test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
   // test("a:I32; a=5; wh a > 0 do {a = a - 1}; a", "");
   // test("a:I32; b:I32; a=0; wh a < 8 do {b=0; wh b != 3 do { b = b + 1 }; a = a + 1}; a", "");
-  test("a:I32; b:I32; a=0; b=0; wh a < 8 do {wh b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
+  // test("a:I32; b:I32; a=0; b=0; wh a < 8 do {wh b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
   // test("a:I32; if a != 10 do {a = 1}; a", "");
 }
 
