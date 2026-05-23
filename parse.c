@@ -855,6 +855,7 @@ Ast_Node* parse_statement(Parser* parser) {
 }
 
 Ast_Node* parse_statement_with_decls(Parser* parser, Ast_Decls* temp_map, Token_Kind end_token_kind) {
+  // TODO: instead of per statement, all statement/declarations should be handled in this function.
   Ast_Node* node = 0;
   while (!node && !parse_is_token(parser, end_token_kind)) {
     node = parse_statement(parser);
