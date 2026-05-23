@@ -25,10 +25,6 @@ fo i in arr.len do
 arr[arr.len++] = 0
 ```
 
-- [x] `foo : (a:1) -> a; foo(a=1)`
-
-- [x] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
-
 - [ ] Ranges `..`
 
 - [ ] For loop
@@ -140,15 +136,6 @@ z // undefined
 - [ ] dynamic assignment pattern resolution
 ```irid
 1, 2 match (x:1; y) and (x:2; z)
-```
-
-- [x] Narrow a name for that scope
-```irid
-Vec2 : (x:I32; y:I32)
-sum : Vec2 -> Vec2.x + Vec2.y
-sum(1, 2) // 3
-Vec2 = 3, 4
-Vec2.x + Vec.y // 7
 ```
 
 - [ ] {} syntax for creating records with matching field names. This conflicts with expression block syntax.
@@ -263,13 +250,6 @@ zap : () -> (x:I32; y:I32) { // error since the second returned value have to sw
 }
 ```
 
-- [x] Optional do
-```irid
-if 1 do 2
-if 3 do br 4
-if 5 br 6
-```
-
 - [ ] Packages
 ```irid
 package Vec, Str
@@ -278,8 +258,6 @@ str_from_vec:(v: Vec) -> Str {
   return str_from_i32(v.x) " " str_from_i32(v.y)
 }
 ```
-
-- [x] Prefix backslash  `a = [2]\0\2`
 
 - [ ] Linear types
 ```irid
@@ -306,6 +284,34 @@ if () do {
 free(ptrb)               // memory #1 is freed
 ```
 
+- [ ] Static single assignment
+```irid
+b = 10 // b is a ssa variable
+// b = 20 // error, b should have declared type
+```
+
+- [x] Optional do
+```irid
+if 1 do 2
+if 3 do br 4
+if 5 br 6
+```
+
+- [x] Narrow a name for that scope
+```irid
+Vec2 : (x:I32; y:I32)
+sum : Vec2 -> Vec2.x + Vec2.y
+sum(1, 2) // 3
+Vec2 = 3, 4
+Vec2.x + Vec.y // 7
+```
+
+- [x] `foo : (a:1) -> a; foo(a=1)`
+
+- [x] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
+
+- [x] Prefix backslash  `a = [2]\0\2`
+
 - [x] Python-like identation based if/while blocks, that are not lexical scopes
 ```irid
 if () do
@@ -320,10 +326,4 @@ a // 1\3
 A : (xy:Vec2)
 b = B(1; 2)
 B : (x:I32; y:I32)
-```
-
-- [ ] Static single assignment
-```irid
-b = 10 // b is a ssa variable
-// b = 20 // error, b should have declared type
 ```
