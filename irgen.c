@@ -685,6 +685,7 @@ void irgen_scope_leave(void) {
 Fun* irgen_fun_enter(void) {
   Fun* fun = &new(irgen.funs);
   fun->name = 0;
+  fun->type = 0;
   add(irgen.fun_stack, fun);
   {
     Block* block = &new(irgen.blocks);
@@ -876,6 +877,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_fun: {
     irgen_fun_enter();
     Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    arg_var->name = str_from_cstr("#arg");
     irgen_decl_var(arg_var, node->binary.lhs);
     Hash_Map scope;
     {
@@ -983,6 +985,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   {
     Fun* fun = irgen_fun_enter();
     Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    arg_var->name = str_from_cstr("#arg");
+
     Ast_Node* node = arena_push(irgen.perm_arena, sizeof(Ast_Node));
     node->kind = Ast_Kind_record;
     node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));

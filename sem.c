@@ -202,6 +202,8 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
+    string_builder_push_cstr(&sb, " : ");
+    string_builder_push_type(&sb, fun->blocks->base[0], fun->type);
     string_builder_push_cstr(&sb, " {");
 
     for (I32 b = 0; b < fun->blocks->length; b++) {
@@ -1434,12 +1436,25 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_fun: {
     I32 save_count = sem.current_fun_var_count;
     sem.current_fun_var_count = ir->fun->var_count;
-    sem_fun(ir->fun);
+    result = sem_fun(ir->fun);
     sem.current_fun_var_count = save_count;
-    Type* type = type_of_ir(ir->unary);
-    result = type_ptr_to(type);
   } break;
   case Ir_Kind_call: {
+    Type_Pair types = type_of_ir_binary(ir);
+    Type* call = types.one;
+    Type* arg  = types.two;
+    if (call->kind == Type_Kind_fun) {
+      if (type_is_subtype(block, arg, call->fun->arg)) {
+        result = call->fun->ret;
+      }
+      else {
+        printf("call not subtype\n");
+        assert(0);
+      }
+    }
+    else {
+      assert(0);
+    }
   } break;
 
   case Ir_Kind_range: {
@@ -2022,6 +2037,8 @@ Type* sem_fun(Fun* fun) {
   Type* fun_type = type_of_fun(fun);
   if (fun_type) return fun_type;
 
+  sem_ensure_declared(fun->arg);
+
   Block* entry_block = fun->blocks->base[0];
   entry_block->state = Block_State_reachable;
   for (I32 b = 0; b < fun->blocks->length; b++) {
@@ -2049,7 +2066,7 @@ Type* sem_fun(Fun* fun) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
   new_type->kind = Type_Kind_fun;
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
-  new_type->fun->arg = type_of_var(entry_block, fun->arg);
+  new_type->fun->arg = fun->arg->declared;
   new_type->fun->ret = type_of_ir(fun->return_ir);
   fun->type = new_type;
   return new_type;
@@ -2131,7 +2148,7 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  test("foo:(a:I32; b:I32) -> a+b; foo", "");
+  test("foo:(a:I32; b:I32) -> a+b; foo(1, 2)", "");
 }
 
 #undef test
