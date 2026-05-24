@@ -934,6 +934,7 @@ void irgen_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
+  test("a := 2; a", "");
 }
 
 #undef test
