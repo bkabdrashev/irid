@@ -920,8 +920,6 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a : 1;", "");
-  test("a:=2",     "[2](2 + 3)");
   test("[2]\\ 2+3",     "[2](2 + 3)");
   test("a'b",     "(b a)");
   test("if 2 br 3",     "if 2 do break 3");

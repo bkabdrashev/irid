@@ -36,9 +36,10 @@ typedef enum Ir_Kind {
   Ir_Kind_name_update     = 135,
 
   Ir_Kind_fun  = 136,
+  Ir_Kind_arg  = 137,
 
-  Ir_Kind_range = 137 | Ir_Flag_binary,
-  Ir_Kind_bits  = 138 | Ir_Flag_binary,
+  Ir_Kind_range = 138 | Ir_Flag_binary,
+  Ir_Kind_bits  = 139 | Ir_Flag_binary,
 
 } Ir_Kind;
 
@@ -94,6 +95,7 @@ struct Ir {
   union {
     I64 i64;
     Var*    var;
+    Fun*    fun;
     Record* record;
     Ir_Pair binary;
     Ir*     unary;
@@ -206,7 +208,9 @@ struct Record_Pool {
 };
 
 struct Fun {
+  Str*    name;
   Blocks* blocks;
+  Var*    arg;
   Ir*     return_ir;
   I32     var_count;
 };
@@ -269,6 +273,17 @@ void string_builder_push_var(String_Builder* sb, Var* var) {
   string_builder_push_str(sb, var->name);
 }
 
+void string_builder_push_fun(String_Builder* sb, Fun* fun) {
+  string_builder_push_cstr(sb, "@");
+  if (fun->name) {
+    string_builder_push_str(sb, fun->name);
+  }
+  else {
+    I32 fun_offset = fun - irgen.funs.base;
+    string_builder_push_i64(sb, fun_offset);
+  }
+}
+
 void string_builder_push_blockid(String_Builder* sb, Block* block) {
   string_builder_push_cstr(sb, "b");
   I32 blockid = block - irgen.blocks.base;
@@ -302,6 +317,10 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
     string_builder_push_var(sb, ir->var);
+  break;
+  case Ir_Kind_fun:
+    string_builder_push_cstr(sb, "fun ");
+    string_builder_push_fun(sb, ir->fun);
   break;
   case Ir_Kind_position_offset:
     string_builder_push_cstr(sb, "position offset ");
@@ -396,26 +415,25 @@ void string_builder_push_block(String_Builder* sb, Block* block) {
 Cstr cstr_from_funs(C8* buffer, Funs funs) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
-    Fun fun = irgen.funs.base[f];
-    string_builder_push_cstr(&sb, "@");
-    string_builder_push_i64(&sb,   f);
+    Fun* fun = &irgen.funs.base[f];
+    string_builder_push_fun(&sb,   fun);
     string_builder_push_cstr(&sb, " {");
 
-    for (I32 b = 0; b < fun.blocks->length; b++) {
-      Block* block = fun.blocks->base[b];
+    for (I32 b = 0; b < fun->blocks->length; b++) {
+      Block* block = fun->blocks->base[b];
       string_builder_push_cstr(&sb, "\n  ");
       string_builder_push_block(&sb, block);
     }
 
     string_builder_push_cstr(&sb, "\n  ret ");
-    string_builder_push_irid(&sb, fun.return_ir);
-    string_builder_push_cstr(&sb, "\n}");
+    string_builder_push_irid(&sb, fun->return_ir);
+    string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
   return result;
 }
 
-void irgen_print() {
+void irgen_print(void) {
   assert(0);
 }
 
@@ -461,7 +479,7 @@ Blocks* irgen_blocks_perm(Blocks* temp_list) {
   return perm_list;
 }
 
-Block* irgen_top_block() {
+Block* irgen_top_block(void) {
   Fun* fun = top(irgen.fun_stack);
   Block* block = fun->blocks->base[fun->blocks->length-1];
   return block;
@@ -491,6 +509,17 @@ Ir* irgen_push_var(Var* var) {
   Ir ir = { Ir_Kind_var, .var = var };
   return irgen_push(ir);
 }
+
+Ir* irgen_push_fun(Fun* fun) {
+  Ir ir = { Ir_Kind_fun, .fun = fun };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_arg(void) {
+  Ir ir = { Ir_Kind_arg, {0} };
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_declare(Var* var) {
   Ir ir = { Ir_Kind_declare, .declare = { .var = var }};
   return irgen_push(ir);
@@ -563,7 +592,7 @@ Block* irgen_put_jump(void) {
   return block;
 }
 
-Block* irgen_block_leave() {
+Block* irgen_block_leave(void) {
   Block* block = irgen_top_block();
   block->irs = irgen_irs_perm(block->irs);
   return block;
@@ -592,6 +621,28 @@ Symbol* irgen_get_sym(Str* str) {
   return 0;
 }
 
+void irgen_decl_var(Var* var, Ast_Node* node) {
+  Fun* fun = top(irgen.fun_stack);
+  Fun* temp_fun = &new(irgen.funs);
+  temp_fun->var_count = 0;
+  add(irgen.fun_stack, temp_fun);
+  {
+    Block* block = &new(irgen.blocks);
+    memset(block, 0, sizeof(Block));
+    block->irs = irgen_irs_temp();
+    temp_fun->blocks = irgen_blocks_temp();
+    irgen_blocks_push(temp_fun->blocks, block);
+  }
+
+  Ir* ir = irgen_ast_node(node);
+  fun->var_count += temp_fun->var_count;
+  irgen_block_leave();
+  var->blocks = irgen_blocks_perm(temp_fun->blocks);
+  var->declared_ir = ir;
+  del(irgen.fun_stack);
+  del(irgen.funs);
+}
+
 void irgen_link_jump_to_block(Jump* jump, Block* block);
 void irgen_scope_enter(Hash_Map* scope) {
   Fun* fun = top(irgen.fun_stack);
@@ -601,10 +652,10 @@ void irgen_scope_enter(Hash_Map* scope) {
       Symbol* sym = irgen_get_sym(key);
       if (sym) assert(0);
     }
-    Symbol* sym = hash_map_get(scope, key);
     Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    var->name = key;
+    Symbol* sym = hash_map_get(scope, key);
     sym->var = var;
+    var->name = key;
 
     fun->var_count++;
   }
@@ -613,25 +664,7 @@ void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
-
-    Fun* temp_fun = &new(irgen.funs);
-    temp_fun->var_count = 0;
-    add(irgen.fun_stack, temp_fun);
-    {
-      Block* block = &new(irgen.blocks);
-      memset(block, 0, sizeof(Block));
-      block->irs = irgen_irs_temp();
-      temp_fun->blocks = irgen_blocks_temp();
-      irgen_blocks_push(temp_fun->blocks, block);
-    }
-
-    Ir* ir = irgen_ast_node(sym->ast);
-    fun->var_count += temp_fun->var_count;
-    irgen_block_leave();
-    sym->var->blocks = irgen_blocks_perm(temp_fun->blocks);
-    sym->var->declared_ir = ir;
-    del(irgen.fun_stack);
-    del(irgen.funs);
+    irgen_decl_var(sym->var, sym->ast);
     irgen_push_declare(sym->var);
   }
 }
@@ -640,8 +673,9 @@ void irgen_scope_leave(void) {
   del(irgen.scope_stack);
 }
 
-Fun* irgen_fun_enter(Hash_Map* scope) {
+Fun* irgen_fun_enter(void) {
   Fun* fun = &new(irgen.funs);
+  fun->name = 0;
   add(irgen.fun_stack, fun);
   {
     Block* block = &new(irgen.blocks);
@@ -652,7 +686,6 @@ Fun* irgen_fun_enter(Hash_Map* scope) {
   }
   fun->return_ir = &top(irgen.irs);
   fun->var_count = irgen.builtins->len;
-  irgen_scope_enter(scope);
   return fun;
 }
 
@@ -661,11 +694,12 @@ void irgen_link_jump_to_block(Jump* jump, Block* block) {
   block->preds.length++;
 }
 
-void irgen_fun_leave() {
-  Fun* fun = top(irgen.fun_stack);
+Fun* irgen_fun_leave(void) {
   irgen_block_leave();
+  Fun* fun = pop(irgen.fun_stack);
   fun->blocks = irgen_blocks_perm(fun->blocks);
   irgen_scope_leave();
+  return fun;
 }
 
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
@@ -830,7 +864,41 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* while_exit           = irgen_block_new(); // equal zero
     irgen_link_jump_to_block(&branch_from_header->branch.eqz, while_exit);
   } break;
-  case Ast_Kind_fun:
+  case Ast_Kind_fun: {
+    irgen_fun_enter();
+    Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    irgen_decl_var(arg_var, node->binary.lhs);
+    Hash_Map scope;
+    {
+      Ast_Node* lhs = node->binary.lhs;
+      if (lhs->kind == Ast_Kind_record) {
+        scope = hash_map_init(irgen.perm_arena, lhs->list->length);
+        for (I32 i = 0; i < lhs->list->length; i++) {
+          Ast_Node* param = lhs->list->base[i];
+          if (param->kind == Ast_Kind_declare_field) {
+            Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+            sym->ast = param->declare.rhs;
+            hash_map_put(&scope, param->declare.str, sym);
+          }
+          else if (node->kind == Ast_Kind_assign_field) {
+            assert(0);
+          }
+          else {
+            assert(0);
+          }
+        }
+        irgen_scope_enter(&scope);
+      }
+      else {
+        assert(0);
+      }
+    }
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    Fun* fun = irgen_fun_leave();
+    fun->return_ir = rhs;
+    fun->arg = arg_var;
+    result = irgen_push_fun(fun);
+  } break;
   case Ast_Kind_return: case Ast_Kind_break:
   case Ast_Kind_return_value: case Ast_Kind_break_value:
   case Ast_Kind_block_value:
@@ -902,7 +970,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     del(irgen.funs);
   }
 
-  irgen_fun_enter(ast.scope);
+  irgen_fun_enter();
+  irgen_scope_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
     irgen_ast_node(ast.list->base[i]);
   }
@@ -934,7 +1003,8 @@ void irgen_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
-  test("a := 2; a", "");
+  // BUG: temp_fun creates a bug
+  test("foo:(a:I32) -> a", "");
 }
 
 #undef test
