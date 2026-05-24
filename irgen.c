@@ -212,6 +212,7 @@ struct Fun {
   Blocks* blocks;
   Var*    arg;
   Ir*     return_ir;
+  Type*   type;
   I32     var_count;
 };
 
@@ -979,7 +980,16 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     del(irgen.fun_stack);
   }
 
-  irgen_fun_enter();
+  {
+    Fun* fun = irgen_fun_enter();
+    Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    Ast_Node* node = arena_push(irgen.perm_arena, sizeof(Ast_Node));
+    node->kind = Ast_Kind_record;
+    node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
+    irgen_decl_var(arg_var, node);
+    fun->arg = arg_var;
+  }
+
   irgen_scope_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
     irgen_ast_node(ast.list->base[i]);

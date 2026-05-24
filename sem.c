@@ -22,11 +22,15 @@ struct Pointer {
 typedef struct Pointer_Pair Pointer_Pair;
 struct Pointer_Pair { Pointer* one; Pointer* two; };
 
+typedef struct Function Function;
+struct Function { Type* arg; Type* ret; };
+
 typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_int,
   Type_Kind_ptr,
   Type_Kind_record,
+  Type_Kind_fun,
 } Type_Kind;
 
 struct Type {
@@ -38,7 +42,7 @@ struct Type {
     Ranges*  ranges;
     Pointer* pointer;
     Record*  record;
-    Type*    bits_of;
+    Function* fun;
   };
 };
 
@@ -102,6 +106,11 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "<none>");
   break;
+  case Type_Kind_fun: {
+    string_builder_push_type(sb, block, type->fun->arg);
+    string_builder_push_cstr(sb, " -> ");
+    string_builder_push_type(sb, block, type->fun->ret);
+  } break;
   case Type_Kind_int: {
     if (type->ranges->length > 1) {
       string_builder_push_cstr(sb, "(");
@@ -191,13 +200,12 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
 Cstr cstr_from_sem(Funs funs, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
-    Fun fun = irgen.funs.base[f];
-    string_builder_push_cstr(&sb, "@");
-    string_builder_push_i64(&sb,   f);
+    Fun* fun = &irgen.funs.base[f];
+    string_builder_push_fun(&sb, fun);
     string_builder_push_cstr(&sb, " {");
 
-    for (I32 b = 0; b < fun.blocks->length; b++) {
-      Block* block = fun.blocks->base[b];
+    for (I32 b = 0; b < fun->blocks->length; b++) {
+      Block* block = fun->blocks->base[b];
       string_builder_push_cstr(&sb, "\n  ");
       string_builder_push_blockid(&sb, block);
       string_builder_push_cstr(&sb, ":");
@@ -230,6 +238,8 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       string_builder_push_cstr(&sb, "}");
       for (I32 i = 0; i < block->irs->length; i++) {
         Ir* ir = block->irs->base[i];
+        string_builder_push_cstr(&sb, "\n");
+        string_builder_push_indent(&sb, 1);
         string_builder_push_ir(&sb, ir);
         string_builder_push_cstr(&sb, " : ");
         Type* type = hash_map_get(&sem.type_of_irs, ir);
@@ -254,8 +264,8 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
     }
 
     string_builder_push_cstr(&sb, "\n  ret ");
-    string_builder_push_irid(&sb, fun.return_ir);
-    string_builder_push_cstr(&sb, "\n}");
+    string_builder_push_irid(&sb, fun->return_ir);
+    string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
   return result;
@@ -366,6 +376,9 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     Type* two_declared = type_pointer_declared(two->pointer);
     if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) return false;
     return true;
+  } break;
+  case Type_Kind_fun: {
+    return false;
   } break;
   }
   return false;
@@ -567,6 +580,9 @@ Type* type_meet(Type* one, Type* two) {
   } break;
   case Type_Kind_record: {
     assert(0);
+  } break;
+  case Type_Kind_fun: {
+    result = sem.type_none;
   } break;
   }
   return result;
@@ -1177,6 +1193,10 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
   }
 }
 
+Type* type_of_fun(Fun* fun) {
+  return fun->type;
+}
+
 void sem_block(Block* block);
 void sem_init_block_preds(Block* block);
 
@@ -1225,6 +1245,7 @@ void sem_ensure_declared(Var* var) {
   var->state = Var_State_resolved;
 }
 
+Type* sem_fun(Fun* fun);
 void sem_ir(Block* block, Ir* ir) {
   Type* result = type_of_ir(ir);
   switch (ir->kind) {
@@ -1410,6 +1431,17 @@ void sem_ir(Block* block, Ir* ir) {
     Type* type = type_of_ir(ir->unary);
     result = type_ptr_to(type);
   } break;
+  case Ir_Kind_fun: {
+    I32 save_count = sem.current_fun_var_count;
+    sem.current_fun_var_count = ir->fun->var_count;
+    sem_fun(ir->fun);
+    sem.current_fun_var_count = save_count;
+    Type* type = type_of_ir(ir->unary);
+    result = type_ptr_to(type);
+  } break;
+  case Ir_Kind_call: {
+  } break;
+
   case Ir_Kind_range: {
     if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
@@ -1987,7 +2019,11 @@ void sem_loop_seed(Loop* loop, Hash_Map* innermost) {
 }
 
 Type* sem_fun(Fun* fun) {
-  fun->blocks->base[0]->state = Block_State_reachable;
+  Type* fun_type = type_of_fun(fun);
+  if (fun_type) return fun_type;
+
+  Block* entry_block = fun->blocks->base[0];
+  entry_block->state = Block_State_reachable;
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
@@ -2010,7 +2046,13 @@ Type* sem_fun(Fun* fun) {
     sem_block(block);
   }
 
-  return type_of_ir(fun->return_ir);
+  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  new_type->kind = Type_Kind_fun;
+  new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
+  new_type->fun->arg = type_of_var(entry_block, fun->arg);
+  new_type->fun->ret = type_of_ir(fun->return_ir);
+  fun->type = new_type;
+  return new_type;
 }
 
 void sem_funs(Arena* arena, Funs funs) {
@@ -2089,6 +2131,7 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
+  test("foo:(a:I32; b:I32) -> a+b; foo", "");
 }
 
 #undef test
