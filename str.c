@@ -133,6 +133,13 @@ void string_builder_push_cstr(String_Builder* sb, Cstr str) {
   }
 }
 
+void string_builder_push_indent(String_Builder* sb, I32 indent) {
+  for (I32 i = 0; i < indent; i++) {
+    sb->base[sb->size++] = ' ';
+    sb->base[sb->size++] = ' ';
+  }
+}
+
 void string_builder_push_i64(String_Builder* sb, I64 val) {
   C8 line_str[20];
   sprintf(line_str, "%li", val);

@@ -229,14 +229,17 @@ struct Irgen {
   Arena*  temp_block_arena;
   Arena*  temp_ir_arena;
 
-  Funs    funs;
-  Block_Pool blocks;
+  Funs        funs;
+  Block_Pool  blocks;
   Record_Pool records;
   Ir_Pool     irs;
-  Ir*     irid_nil;
-  Fun_Stack      fun_stack;
-  Hash_Map* builtins;
-  Scope_Stack    scope_stack;
+
+  Ir*         irid_nil;
+
+  Fun_Stack   fun_stack;
+  Blocks*     block_stack;
+  Hash_Map*   builtins;
+  Scope_Stack scope_stack;
 };
 
 Irgen irgen = {};
@@ -290,9 +293,8 @@ void string_builder_push_blockid(String_Builder* sb, Block* block) {
   string_builder_push_i64(sb, blockid);
 }
 
-void string_builder_push_block(String_Builder* sb, Block* block);
+void string_builder_push_block(String_Builder* sb, Block* block, I32 indent);
 void string_builder_push_ir(String_Builder* sb, Ir* ir) {
-  string_builder_push_cstr(sb, "\n    ");
   string_builder_push_irid(sb, ir);
   string_builder_push_cstr(sb, " = ");
   switch (ir->kind) {
@@ -310,8 +312,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, ": ");
     string_builder_push_irid(sb, var->declared_ir);
     for (I32 i = 0; i < var->blocks->length; i++) {
-      string_builder_push_cstr(sb, "\n      ");
-      string_builder_push_block(sb, var->blocks->base[i]);
+      string_builder_push_block(sb, var->blocks->base[i], 3);
     }
   } break;
   case Ir_Kind_var:
@@ -387,22 +388,30 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   }
 }
 
-void string_builder_push_block(String_Builder* sb, Block* block) {
+void string_builder_push_block(String_Builder* sb, Block* block, I32 indent) {
+  string_builder_push_cstr(sb, "\n");
+  string_builder_push_indent(sb, indent);
   string_builder_push_blockid(sb, block);
   string_builder_push_cstr(sb, ":");
   for (I32 irid = 0; irid < block->irs->length; irid++) {
     Ir* ir = block->irs->base[irid];
+    string_builder_push_cstr(sb, "\n");
+    string_builder_push_indent(sb, indent+1);
     string_builder_push_ir(sb, ir);
   }
   switch (block->kind) {
   case Block_Kind_none:
   break;
   case Block_Kind_jump:
-    string_builder_push_cstr(sb, "\n    jump ");
+    string_builder_push_cstr(sb, "\n");
+    string_builder_push_indent(sb, indent+1);
+    string_builder_push_cstr(sb, "jump ");
     string_builder_push_blockid(sb, block->jump.to_block);
   break;
   case Block_Kind_branch:
-    string_builder_push_cstr(sb, "\n    if ");
+    string_builder_push_cstr(sb, "\n");
+    string_builder_push_indent(sb, indent+1);
+    string_builder_push_cstr(sb, "if ");
     string_builder_push_irid(sb, block->branch.cond);
     string_builder_push_cstr(sb, " then ");
     string_builder_push_blockid(sb, block->branch.nez.to_block);
@@ -421,8 +430,7 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
 
     for (I32 b = 0; b < fun->blocks->length; b++) {
       Block* block = fun->blocks->base[b];
-      string_builder_push_cstr(&sb, "\n  ");
-      string_builder_push_block(&sb, block);
+      string_builder_push_block(&sb, block, 1);
     }
 
     string_builder_push_cstr(&sb, "\n  ret ");
@@ -623,24 +631,24 @@ Symbol* irgen_get_sym(Str* str) {
 
 void irgen_decl_var(Var* var, Ast_Node* node) {
   Fun* fun = top(irgen.fun_stack);
-  Fun* temp_fun = &new(irgen.funs);
-  temp_fun->var_count = 0;
-  add(irgen.fun_stack, temp_fun);
+  Fun temp_fun = {};
+  temp_fun.name = 0;
+  temp_fun.var_count = 0;
+  add(irgen.fun_stack, &temp_fun);
   {
     Block* block = &new(irgen.blocks);
     memset(block, 0, sizeof(Block));
     block->irs = irgen_irs_temp();
-    temp_fun->blocks = irgen_blocks_temp();
-    irgen_blocks_push(temp_fun->blocks, block);
+    temp_fun.blocks = irgen_blocks_temp();
+    irgen_blocks_push(temp_fun.blocks, block);
   }
 
   Ir* ir = irgen_ast_node(node);
-  fun->var_count += temp_fun->var_count;
+  fun->var_count += temp_fun.var_count;
   irgen_block_leave();
-  var->blocks = irgen_blocks_perm(temp_fun->blocks);
+  var->blocks = irgen_blocks_perm(temp_fun.blocks);
   var->declared_ir = ir;
   del(irgen.fun_stack);
-  del(irgen.funs);
 }
 
 void irgen_link_jump_to_block(Jump* jump, Block* block);
@@ -928,6 +936,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.records.length = 0;
   irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
+  irgen.block_stack           = arena_push(irgen.temp_block_arena, sizeof(Block) + total_nodes * sizeof(Block*));
+  irgen.block_stack->length   = 0;
   irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
   irgen.irid_nil = 0;
@@ -943,15 +953,15 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     i32_sym->var = i32_var;
     i32_var->name = i32_str;
 
-    Fun* temp_fun = &new(irgen.funs);
-    temp_fun->var_count = 0;
-    add(irgen.fun_stack, temp_fun);
+    Fun temp_fun = {};
+    temp_fun.var_count = 0;
+    add(irgen.fun_stack, &temp_fun);
     {
       Block* block = &new(irgen.blocks);
       memset(block, 0, sizeof(Block));
       block->irs = irgen_irs_temp();
-      temp_fun->blocks = irgen_blocks_temp();
-      irgen_blocks_push(temp_fun->blocks, block);
+      temp_fun.blocks = irgen_blocks_temp();
+      irgen_blocks_push(temp_fun.blocks, block);
     }
 
     Ir* i32_min = irgen_push_int(I32_MIN);
@@ -964,10 +974,9 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 
     irgen_block_leave();
 
-    i32_var->blocks = irgen_blocks_perm(temp_fun->blocks);
+    i32_var->blocks = irgen_blocks_perm(temp_fun.blocks);
 
     del(irgen.fun_stack);
-    del(irgen.funs);
   }
 
   irgen_fun_enter();
@@ -1003,8 +1012,7 @@ void irgen_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
-  // BUG: temp_fun creates a bug
-  test("foo:(a:I32) -> a", "");
+  test("foo:(a:I32; b:I32) -> a+b; foo(1)", "");
 }
 
 #undef test
