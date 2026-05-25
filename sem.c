@@ -87,6 +87,7 @@ Sem sem = {};
 typedef struct Type_Pair Type_Pair;
 struct Type_Pair { Type* one; Type* two; };
 
+Field type_record_get_by_name(Block* block, Record* record, Str* name);
 Field type_record_get_by_position(Block* block, Record* record, I32 pos);
 Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
@@ -363,10 +364,15 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   } break;
   case Type_Kind_record: {
     if (one->record->length != two->record->length) return false;
-
     for (I32 i = 0; i < one->record->length; i++) {
       Field field_one = type_record_get_by_position(block, one->record, i);
-      Field field_two = type_record_get_by_position(block, two->record, i);
+      Field field_two;
+      if (field_one.name) {
+        field_two = type_record_get_by_name(block, two->record, field_one.name);
+      }
+      else {
+        field_two = type_record_get_by_position(block, two->record, i);
+      }
       if (!type_is_subtype_rec(block, field_one.assigned_type, field_two.declared_type, visited)) return false;
     }
     return true;
@@ -1444,7 +1450,18 @@ void sem_ir(Block* block, Ir* ir) {
     Type* call = types.one;
     Type* arg  = types.two;
     if (call->kind == Type_Kind_fun) {
-      if (type_is_subtype(block, arg, call->fun->arg)) {
+      Function* fun = call->fun;
+      if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
+        Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
+        if (type_is_subtype(block, arg, field_two.declared_type)) {
+          result = call->fun->ret;
+        }
+        else {
+          printf("call not subtype\n");
+          assert(0);
+        }
+      }
+      else if (type_is_subtype(block, arg, call->fun->arg)) {
         result = call->fun->ret;
       }
       else {
@@ -2148,7 +2165,8 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  test("foo:(a:I32; b:I32) -> a+b; foo(1, 2)", "");
+  test("foo:(a:I32) -> a+1; foo(2)", "");
+  // test("a:(x:1\\2); a = (x=1)", "");
 }
 
 #undef test
