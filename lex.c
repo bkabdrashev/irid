@@ -323,6 +323,8 @@ Tokens lex_source(Arena* arena, Cstr source) {
     lexer.wasnewline = false;
     tokens_push(&slice_token, token);
   }
+  Token* top = tokens_top(&slice_token);
+  top->flag |= Token_Flag_willnewline;
   Token token = { .kind = Token_Kind_source_leave };
   tokens_push(&slice_token, token);
   return slice_token;

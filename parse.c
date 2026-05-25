@@ -67,7 +67,10 @@ typedef struct Var Var;
 typedef struct Symbol Symbol;
 struct Symbol {
   Ast_Node* ast;
-  Var* var;
+  union {
+    Ir* var_ir;
+    Var* var;
+  };
 };
 
 typedef struct Ast_Block Ast_Block;
@@ -142,6 +145,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_else:         result = "else"; break;
   case Ast_Kind_else_value:   result = "else_value"; break;
   case Ast_Kind_return:       result = "return"; break;
+  case Ast_Kind_return_value: result = "ret_value"; break;
   case Ast_Kind_break:        result = "break"; break;
   case Ast_Kind_while:        result = "while"; break;
   case Ast_Kind_record:       result = "record"; break;
@@ -236,7 +240,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, "return");
   break;
   case Ast_Kind_return_value:
-    string_builder_push_cstr(sb, "return ");
+    string_builder_push_cstr(sb, "return val ");
     string_builder_push_ast_node(sb, node->unary);
   break;
   case Ast_Kind_break:
@@ -808,7 +812,12 @@ Ast_Node* parse_statement(Parser* parser) {
     }
     else {
       Ast_Node* unary = parse_new_expression(parser, 0);
-      node = parse_new_unary(parser, Ast_Kind_return_value, unary);
+      if (unary) {
+        node = parse_new_unary(parser, Ast_Kind_return_value, unary);
+      }
+      else {
+        node = parse_new_node(parser, Ast_Kind_return);
+      }
     }
   } break;
   case Token_Kind_break: {

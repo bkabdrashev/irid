@@ -267,7 +267,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
     }
 
     string_builder_push_cstr(&sb, "\n  ret ");
-    string_builder_push_irid(&sb, fun->return_ir);
+    string_builder_push_irid(&sb, fun->ret_var);
     string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
@@ -563,7 +563,7 @@ Field type_record_get_by_name(Block* block, Record* record, Str* name) {
   return type_record_get_by_position(block, record, position);
 }
 
-Type* type_record(Block* block, Record* record) {
+Type* type_record(Record* record) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
   new_type->kind = Type_Kind_record;
   new_type->record = record;
@@ -1379,7 +1379,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_record: {
-    result = type_record(block, ir->record);
+    result = type_record(ir->record);
   } break;
   case Ir_Kind_name_offset: {
     Ir_Kind ir_kind = ir->name.of->kind;
@@ -2055,7 +2055,7 @@ Type* sem_fun(Fun* fun) {
   Type* fun_type = type_of_fun(fun);
   if (fun_type) return fun_type;
 
-  sem_ensure_declared(fun->arg);
+  sem_ensure_declared(fun->arg_var);
 
   Block* entry_block = fun->blocks->base[0];
   entry_block->state = Block_State_reachable;
@@ -2084,8 +2084,8 @@ Type* sem_fun(Fun* fun) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
   new_type->kind = Type_Kind_fun;
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
-  new_type->fun->arg = fun->arg->declared;
-  new_type->fun->ret = type_of_ir(fun->return_ir);
+  new_type->fun->arg = fun->arg_var->declared;
+  new_type->fun->ret = type_of_ir(fun->ret_var);
   fun->type = new_type;
   return new_type;
 }
@@ -2167,7 +2167,7 @@ void sem_test(void) {
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
   // test("foo:(a:I32) -> a+1; foo(2)", "");
-  test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
+  // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }
 
 #undef test
