@@ -1019,8 +1019,6 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       hash_map_put(irgen.builtins, i32_str, i32_sym);
       add(irgen.scope_stack, irgen.builtins);
 
-      irgen_block_leave();
-
       i32_var->blocks = 0;
     }
 

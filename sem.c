@@ -275,9 +275,6 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 
       }
     }
-
-    string_builder_push_cstr(&sb, "\n  ret ");
-    string_builder_push_irid(&sb, fun->ret_var);
     string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
@@ -2095,7 +2092,7 @@ Type* sem_fun(Fun* fun) {
   new_type->kind = Type_Kind_fun;
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
   new_type->fun->arg = fun->arg_var->declared;
-  new_type->fun->ret = type_of_ir(fun->ret_var);
+  new_type->fun->ret = type_of_var(entry_block, fun->ret_var->var);
   fun->type = new_type;
   return new_type;
 }
