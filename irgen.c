@@ -157,6 +157,7 @@ typedef enum Block_Kind {
   Block_Kind_none,
   Block_Kind_jump,
   Block_Kind_branch,
+  Block_Kind_return,
 } Block_Kind;
 
 typedef enum Block_State {
@@ -198,6 +199,7 @@ struct Block {
   union {
     Jump   jump;
     Branch branch;
+    Ir*    ret;
   };
 };
 
@@ -212,7 +214,6 @@ struct Fun {
   Blocks* blocks;
   Var*    arg_var;
   Ir*     ret_var;
-  Blocks* unresolved_returns;
   Type*   type;
   I32     var_count;
 };
@@ -241,6 +242,7 @@ struct Irgen {
 
   Fun_Stack   fun_stack;
   Hash_Map*   builtins;
+  Blocks*     unresolved_breaks;
   Scope_Stack scope_stack;
 };
 
@@ -420,6 +422,11 @@ void string_builder_push_block(String_Builder* sb, Block* block, I32 indent) {
     string_builder_push_cstr(sb, " else ");
     string_builder_push_blockid(sb, block->branch.eqz.to_block);
   break;
+  case Block_Kind_return:
+    string_builder_push_cstr(sb, "\n");
+    string_builder_push_indent(sb, indent+1);
+    string_builder_push_cstr(sb, "ret");
+  break;
   }
 }
 
@@ -434,9 +441,6 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
       Block* block = fun->blocks->base[b];
       string_builder_push_block(&sb, block, 1);
     }
-
-    string_builder_push_cstr(&sb, "\n  ret ");
-    string_builder_push_irid(&sb, fun->ret_var);
     string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
@@ -606,7 +610,7 @@ Block* irgen_put_branch(Ir* cond) {
   return block;
 }
 
-Block* irgen_put_jump(void) {
+Block* irgen_block_jump(void) {
   Block* block = irgen_block_top();
   block->kind = Block_Kind_jump;
   return block;
@@ -625,6 +629,13 @@ Block* irgen_block_new(void) {
   irgen_blocks_push(fun->blocks, block);
   memset(block, 0, sizeof(Block));
   block->irs = irgen_irs_temp();
+  return block;
+}
+
+Block* irgen_block_return(void) {
+  Block* block = irgen_block_top();
+  block->kind = Block_Kind_return;
+  irgen_block_new();
   return block;
 }
 
@@ -697,8 +708,6 @@ Fun* irgen_fun_enter(void) {
   Fun* fun = &new(irgen.funs);
   fun->name = 0;
   fun->type = 0;
-  fun->unresolved_returns = arena_push(irgen.temp_block_arena, sizeof(Blocks) + KB(4)*sizeof(Block*));
-  fun->unresolved_returns->length = 0;
   add(irgen.fun_stack, fun);
   {
     Block* block = &new(irgen.blocks);
@@ -722,15 +731,9 @@ void irgen_link_jump_to_block(Jump* jump, Block* block) {
 
 Fun* irgen_fun_leave(void) {
   Fun* fun = top(irgen.fun_stack);
-  Block* last_block = irgen_put_jump();
-  Block* return_block = irgen_block_new();
-  last_block->kind = Block_Kind_jump;
-  last_block->jump.to_block = return_block;
-  for (I32 i = 0; i < fun->unresolved_returns->length; i++) {
-    Block* unresolved = fa_get(fun->unresolved_returns, i);
-    unresolved->jump.to_block = return_block;
-  }
-  return_block->irs = irgen_irs_perm(return_block->irs);
+  Block* block = irgen_block_top();
+  block->kind = Block_Kind_return;
+  irgen_block_leave();
   fun->blocks = irgen_blocks_perm(fun->blocks);
   del(irgen.fun_stack);
   irgen_scope_leave();
@@ -754,14 +757,6 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
     }
   } break;
   }
-}
-
-void irgen_unresolved_return() {
-  Fun* fun = irgen_fun_top();
-  Block* block = irgen_block_top();
-  block->kind = Block_Kind_jump;
-  fa_add(fun->unresolved_returns, block);
-  irgen_block_new();
 }
 
 Ir* irgen_ast_node(Ast_Node* node) {
@@ -821,11 +816,20 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_block_value: {
     irgen_scope_enter(node->block.scope);
+
+    Var* block_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    block_var->name = str_from_cstr("#block");
+    Ir* block_ir = irgen_push_var(block_var);
+
     for (I32 i = 0; i < node->block.list->length; i++) {
       Ast_Node* exp = node->block.list->base[i];
       irgen_ast_node(exp);
     }
+
+    result = irgen_push_unary(Ir_Kind_load, block_ir);
+
     irgen_scope_leave();
+    arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
   } break;
   case Ast_Kind_block: {
     irgen_scope_enter(node->block.scope);
@@ -875,7 +879,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* nez_block = irgen_block_new();
     irgen_link_jump_to_block(&branch_from_block->branch.nez, nez_block);
     irgen_ast_node(then);
-    Block* jump_from_block = irgen_put_jump();
+    Block* jump_from_block = irgen_block_jump();
     Block* eqz_block = irgen_block_new();
     irgen_link_jump_to_block(&jump_from_block->jump, eqz_block);
     irgen_link_jump_to_block(&branch_from_block->branch.eqz, eqz_block);
@@ -889,11 +893,11 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* nez_block = irgen_block_new();
     irgen_link_jump_to_block(&branch_from_block->branch.nez, nez_block);
     irgen_ast_node(then_node);
-    Block* jump_from_nez = irgen_put_jump();
+    Block* jump_from_nez = irgen_block_jump();
     Block* eqz_block = irgen_block_new();
     irgen_link_jump_to_block(&branch_from_block->branch.eqz, eqz_block);
     irgen_ast_node(else_node);
-    Block* jump_from_eqz = irgen_put_jump();
+    Block* jump_from_eqz = irgen_block_jump();
     Block* merge_block = irgen_block_new();
     irgen_link_jump_to_block(&jump_from_eqz->jump, merge_block);
     irgen_link_jump_to_block(&jump_from_nez->jump, merge_block);
@@ -901,7 +905,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_while: {
     Ast_Node* cond = node->binary.lhs;
     Ast_Node* then = node->binary.rhs;
-    Block* while_entry    = irgen_put_jump();
+    Block* while_entry    = irgen_block_jump();
     Block* while_header   = irgen_block_new();
     irgen_link_jump_to_block(&while_entry->jump, while_header);
     Ir* cond_ir = irgen_ast_node(cond);
@@ -909,7 +913,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* body_entry         = irgen_block_new(); // not equal zero
     irgen_link_jump_to_block(&branch_from_header->branch.nez, body_entry);
                                 irgen_ast_node(then);
-    Block* jump_from_body_to_header = irgen_put_jump();
+    Block* jump_from_body_to_header = irgen_block_jump();
     irgen_link_jump_to_block(&jump_from_body_to_header->jump, while_header);
     Block* while_exit           = irgen_block_new(); // equal zero
     irgen_link_jump_to_block(&branch_from_header->branch.eqz, while_exit);
@@ -953,13 +957,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Fun* fun = irgen_fun_top();
     Ir* none = irgen_push_none();
     result = irgen_push_binary(Ir_Kind_store, fun->ret_var, none);
-    irgen_unresolved_return();
+    irgen_block_return();
   } break;
   case Ast_Kind_return_value: {
     Fun* fun = irgen_fun_top();
-    Ir* none = irgen_push_none();
-    result = irgen_push_binary(Ir_Kind_store, fun->ret_var, none);
-    irgen_unresolved_return();
+    Ir* ret = irgen_ast_node(node->unary);
+    result = irgen_push_binary(Ir_Kind_store, fun->ret_var, ret);
   } break;
   case Ast_Kind_break: case Ast_Kind_break_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:

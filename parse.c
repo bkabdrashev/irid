@@ -240,7 +240,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, "return");
   break;
   case Ast_Kind_return_value:
-    string_builder_push_cstr(sb, "return val ");
+    string_builder_push_cstr(sb, "return ");
     string_builder_push_ast_node(sb, node->unary);
   break;
   case Ast_Kind_break:
