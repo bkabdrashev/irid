@@ -315,8 +315,10 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_var(sb, var);
     string_builder_push_cstr(sb, ": ");
     string_builder_push_irid(sb, var->declared_ir);
-    for (I32 i = 0; i < var->blocks->length; i++) {
-      string_builder_push_block(sb, var->blocks->base[i], 3);
+    if (var->blocks) {
+      for (I32 i = 0; i < var->blocks->length; i++) {
+        string_builder_push_block(sb, var->blocks->base[i], 3);
+      }
     }
   } break;
   case Ir_Kind_var:
@@ -696,7 +698,7 @@ void irgen_scope_enter(Hash_Map* scope) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
     irgen_decl_var(sym->var_ir->var, sym->ast);
-    // irgen_push_declare(sym->var);
+    irgen_push_declare(sym->var_ir->var);
   }
 }
 
@@ -720,7 +722,7 @@ Fun* irgen_fun_enter(void) {
   fun->ret_var = irgen_push_var(ret_var);
   fun->ret_var->var->name = str_from_cstr("#ret");
 
-  fun->var_count = irgen.builtins->len;
+  fun->var_count = irgen.builtins->cap;
   return fun;
 }
 
@@ -1000,40 +1002,28 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   {
     irgen.builtins = arena_push(irgen.perm_arena, sizeof(Hash_Map));
     *irgen.builtins = hash_map_init(irgen.perm_arena, 1);
-    Str* i32_str = str_from_cstr("I32");
-    Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-    Var* i32_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    i32_sym->var = i32_var;
-    i32_var->name = i32_str;
-
-    Fun temp_fun = {};
-    temp_fun.var_count = 0;
-    add(irgen.fun_stack, &temp_fun);
+    Fun* fun = irgen_fun_enter();
     {
-      Block* block = &new(irgen.blocks);
-      memset(block, 0, sizeof(Block));
-      block->irs = irgen_irs_temp();
-      temp_fun.blocks = irgen_blocks_temp();
-      irgen_blocks_push(temp_fun.blocks, block);
+      Str* i32_str = str_from_cstr("I32");
+      Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
+      Var* i32_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+      i32_var->name = i32_str;
+      Ir* i32_min = irgen_push_int(I32_MIN);
+      Ir* i32_max = irgen_push_int(I32_MAX);
+      Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
+      Ir* i32_bits = irgen_push_int(32);
+      i32_var->declared_ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
+      i32_sym->var_ir = irgen_push_var(i32_var);
+      irgen_push_declare(i32_var);
+
+      hash_map_put(irgen.builtins, i32_str, i32_sym);
+      add(irgen.scope_stack, irgen.builtins);
+
+      irgen_block_leave();
+
+      i32_var->blocks = 0;
     }
 
-    Ir* i32_min = irgen_push_int(I32_MIN);
-    Ir* i32_max = irgen_push_int(I32_MAX);
-    Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
-    Ir* i32_bits = irgen_push_int(32);
-    i32_var->declared_ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
-    hash_map_put(irgen.builtins, i32_str, i32_sym);
-    add(irgen.scope_stack, irgen.builtins);
-
-    irgen_block_leave();
-
-    i32_var->blocks = irgen_blocks_perm(temp_fun.blocks);
-
-    del(irgen.fun_stack);
-  }
-
-  {
-    Fun* fun = irgen_fun_enter();
     fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     fun->arg_var->name = str_from_cstr("#arg");
 
@@ -1048,6 +1038,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen_ast_node(ast.list->base[i]);
   }
   irgen_fun_leave();
+  del(irgen.scope_stack);
+
   arena_free(irgen.temp_block_arena);
   arena_free(irgen.temp_ir_arena);
   return irgen.funs;

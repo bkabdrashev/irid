@@ -67,10 +67,7 @@ typedef struct Var Var;
 typedef struct Symbol Symbol;
 struct Symbol {
   Ast_Node* ast;
-  union {
-    Ir* var_ir;
-    Var* var;
-  };
+  Ir* var_ir;
 };
 
 typedef struct Ast_Block Ast_Block;

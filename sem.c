@@ -252,17 +252,27 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       case Block_Kind_none:
       break;
       case Block_Kind_jump:
-        string_builder_push_cstr(&sb, "\n    jump ");
+        string_builder_push_cstr(&sb, "\n");
+        string_builder_push_indent(&sb, 1);
+        string_builder_push_cstr(&sb, "jump ");
         string_builder_push_blockid(&sb, block->jump.to_block);
       break;
       case Block_Kind_branch:
-        string_builder_push_cstr(&sb, "\n    if ");
+        string_builder_push_cstr(&sb, "\n");
+        string_builder_push_indent(&sb, 1);
+        string_builder_push_cstr(&sb, "if ");
         string_builder_push_irid(&sb, block->branch.cond);
         string_builder_push_cstr(&sb, " then ");
         string_builder_push_blockid(&sb, block->branch.nez.to_block);
         string_builder_push_cstr(&sb, " else ");
         string_builder_push_blockid(&sb, block->branch.eqz.to_block);
       break;
+      case Block_Kind_return:
+        string_builder_push_cstr(&sb, "\n");
+        string_builder_push_indent(&sb, 1);
+        string_builder_push_cstr(&sb, "ret");
+      break;
+
       }
     }
 
@@ -2104,11 +2114,11 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.type_none->kind = Type_Kind_none;
 
   sem.current_fun_var_count = irgen.builtins->len;
-  for (I32 i = 0; i < irgen.builtins->len; i++) {
-    Str* str = irgen.builtins->list[i];
-    Symbol* sym = hash_map_get(irgen.builtins, str);
-    sem_ensure_declared(sym->var);
-  }
+  // for (I32 i = 0; i < irgen.builtins->len; i++) {
+  //   Str* str = irgen.builtins->list[i];
+  //   Symbol* sym = hash_map_get(irgen.builtins, str);
+  //   sem_ensure_declared(sym->var_ir->var);
+  // }
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
@@ -2167,7 +2177,7 @@ void sem_test(void) {
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
   // test("foo:(a:I32) -> a+1; foo(2)", "");
-  // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
+  test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }
 
 #undef test
