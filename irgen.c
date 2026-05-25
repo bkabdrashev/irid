@@ -199,7 +199,7 @@ struct Block {
   union {
     Jump   jump;
     Branch branch;
-    Ir*    ret;
+    Ir*    ret_ir;
   };
 };
 
@@ -213,7 +213,7 @@ struct Fun {
   Str*    name;
   Blocks* blocks;
   Var*    arg_var;
-  Ir*     ret_var;
+  Ir*     ret_ir;
   Type*   type;
   I32     var_count;
 };
@@ -635,8 +635,10 @@ Block* irgen_block_new(void) {
 }
 
 Block* irgen_block_return(void) {
+  Fun* fun = irgen_fun_top();
   Block* block = irgen_block_top();
   block->kind = Block_Kind_return;
+  block->ret_ir = fun->ret_ir;
   irgen_block_new();
   return block;
 }
@@ -719,8 +721,8 @@ Fun* irgen_fun_enter(void) {
     irgen_blocks_push(fun->blocks, block);
   }
   Var* ret_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-  fun->ret_var = irgen_push_var(ret_var);
-  fun->ret_var->var->name = str_from_cstr("#ret");
+  fun->ret_ir = irgen_push_var(ret_var);
+  fun->ret_ir->var->name = str_from_cstr("#ret");
 
   fun->var_count = irgen.builtins->cap;
   return fun;
@@ -951,20 +953,21 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
     }
     Ir* rhs = irgen_ast_node(node->binary.rhs);
-    irgen_push_binary(Ir_Kind_store, fun->ret_var, rhs);
+    irgen_push_binary(Ir_Kind_store, fun->ret_ir, rhs);
     irgen_fun_leave();
     result = irgen_push_fun(fun);
   } break;
   case Ast_Kind_return: {
     Fun* fun = irgen_fun_top();
     Ir* none = irgen_push_none();
-    result = irgen_push_binary(Ir_Kind_store, fun->ret_var, none);
+    result = irgen_push_binary(Ir_Kind_store, fun->ret_ir, none);
     irgen_block_return();
   } break;
   case Ast_Kind_return_value: {
     Fun* fun = irgen_fun_top();
     Ir* ret = irgen_ast_node(node->unary);
-    result = irgen_push_binary(Ir_Kind_store, fun->ret_var, ret);
+    result = irgen_push_binary(Ir_Kind_store, fun->ret_ir, ret);
+    irgen_block_return();
   } break;
   case Ast_Kind_break: case Ast_Kind_break_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:
@@ -1066,7 +1069,8 @@ void irgen_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
   // test("foo:(a:I32; b:I32) -> a+b; foo(1)", "");
-  test("foo:(a:I32) -> { re; 1+2 }; foo(1)", "");
+  // test("foo:(a:I32) -> { re; 1+2 }; foo(1)", "");
+  test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
 }
 
 #undef test

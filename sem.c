@@ -1559,7 +1559,10 @@ void sem_block(Block* block) {
       }
     }
     else if (block->kind == Block_Kind_jump) {
-        block->jump.to_block->state = Block_State_reachable;
+      block->jump.to_block->state = Block_State_reachable;
+    }
+    else if (block->kind == Block_Kind_return) {
+      // type_of_var(block, block->ret_ir->var);
     }
   }
 }
@@ -2096,7 +2099,7 @@ Type* sem_fun(Fun* fun) {
   new_type->kind = Type_Kind_fun;
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
   new_type->fun->arg = fun->arg_var->declared;
-  new_type->fun->ret = type_of_var(entry_block, fun->ret_var->var);
+  new_type->fun->ret = type_of_var(entry_block, fun->ret_ir->var);
   fun->type = new_type;
   return new_type;
 }
@@ -2177,7 +2180,8 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  test("foo:(a:I32) -> a+1; foo(2)", "");
+  // test("foo:(a:I32) -> a+1; foo(2)", "");
+  test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }
 
