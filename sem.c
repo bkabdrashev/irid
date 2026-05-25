@@ -1187,25 +1187,29 @@ Type* type_of_var(Block* block, Var* var) {
 }
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
-  Type* var_type = var->declared;
-  if (type_is_subtype(block, type, var_type)) {
-    if (type->kind == Type_Kind_record) {
-      for (I32 i = 0; i < type->record->length; i++) {
-        Field field = type_record_get_by_position(block, type->record, i);
-        Field var_field = type_record_get_by_name(block, var_type->record, field.name);
-        type_of_var_put(block, var_field.var, field.assigned_type);
+  if (!var->declared) {
+    hash_map_put(&block->out_var_types, var, type);
+  }
+  else {
+    if (type_is_subtype(block, type, var->declared)) {
+      if (type->kind == Type_Kind_record) {
+        for (I32 i = 0; i < type->record->length; i++) {
+          Field field = type_record_get_by_position(block, type->record, i);
+          Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
+          type_of_var_put(block, var_field.var, field.assigned_type);
+        }
+      }
+      else {
+        type->size_defined = var->declared->size_defined;
+        type->bits_size = var->declared->bits_size;
+        type->bits_align = var->declared->bits_align;
+        hash_map_put(&block->out_var_types, var, type);
       }
     }
     else {
-      type->size_defined = var_type->size_defined;
-      type->bits_size = var_type->bits_size;
-      type->bits_align = var_type->bits_align;
-      hash_map_put(&block->out_var_types, var, type);
+      printf("not subtype\n");
+      assert(0);
     }
-  }
-  else {
-    printf("not subtype\n");
-    assert(0);
   }
 }
 
@@ -2173,8 +2177,8 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  // test("foo:(a:I32) -> a+1; foo(2)", "");
-  test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
+  test("foo:(a:I32) -> a+1; foo(2)", "");
+  // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }
 
 #undef test
