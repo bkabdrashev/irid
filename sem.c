@@ -1182,18 +1182,19 @@ Type* type_of_var(Block* block, Var* var) {
 void type_of_var_put(Block* block, Var* var, Type* type) {
   Type* var_type = var->declared;
   if (type_is_subtype(block, type, var_type)) {
-    if (var_type->kind == Type_Kind_record) {
-      for (I32 i = 0; i < var_type->record->length; i++) {
-        Type* field_type = type_of_ir(type->record->assigned[i]);
-        type->record->declared = var_type->record->declared;
-        type->record->vars = var_type->record->vars;
-        type_of_var_put(block, var_type->record->vars[i], field_type);
+    if (type->kind == Type_Kind_record) {
+      for (I32 i = 0; i < type->record->length; i++) {
+        Field field = type_record_get_by_position(block, type->record, i);
+        Field var_field = type_record_get_by_name(block, var_type->record, field.name);
+        type_of_var_put(block, var_field.var, field.assigned_type);
       }
     }
-    type->size_defined = var_type->size_defined;
-    type->bits_size = var_type->bits_size;
-    type->bits_align = var_type->bits_align;
-    hash_map_put(&block->out_var_types, var, type);
+    else {
+      type->size_defined = var_type->size_defined;
+      type->bits_size = var_type->bits_size;
+      type->bits_align = var_type->bits_align;
+      hash_map_put(&block->out_var_types, var, type);
+    }
   }
   else {
     printf("not subtype\n");
@@ -1210,9 +1211,9 @@ void sem_init_block_preds(Block* block);
 
 void sem_record_declare_fields(Var* var, Type* type) {
   if (type->kind != Type_Kind_record) return;
-  type->record->vars = arena_push(irgen.perm_arena, type->record->length*sizeof(Var*));
+  type->record->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
   for (I32 i = 0; i < type->record->length; i++) {
-    Var* field_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    Var* field_var = arena_push_zero(sem.perm_arena, sizeof(Var));
     type->record->vars[i] = field_var;
     field_var->name = type->record->names[i];
     field_var->parent = var;
@@ -2165,8 +2166,8 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  test("foo:(a:I32) -> a+1; foo(2)", "");
-  // test("a:(x:1\\2); a = (x=1)", "");
+  // test("foo:(a:I32) -> a+1; foo(2)", "");
+  test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }
 
 #undef test
