@@ -452,38 +452,12 @@ void irgen_print(void) {
   assert(0);
 }
 
-void irgen_irs_end(Irs* list) {
-  arena_release_mark(irgen.temp_ir_arena, list);
-}
-
-void irgen_irs_push(Irs* list, Ir* ir) {
-  arena_push(irgen.temp_ir_arena, sizeof(Ir*));
-  list->base[list->length++] = ir;
-}
-
-Irs* irgen_irs_temp(void) {
-  return arena_push_zero(irgen.temp_ir_arena, sizeof(Irs));
-}
-
 Irs* irgen_irs_perm(Irs* temp_list) {
   I32 size = sizeof(Irs) + temp_list->length * sizeof(Ir*);
   Irs* perm_list = arena_push(irgen.perm_arena, size);
   memcpy(perm_list, temp_list, size);
   arena_release_mark(irgen.temp_ir_arena, temp_list);
   return perm_list;
-}
-
-void irgen_blocks_end(Blocks* list) {
-  arena_release_mark(irgen.temp_block_arena, list);
-}
-
-void irgen_blocks_push(Blocks* list, Block* block) {
-  arena_push(irgen.temp_block_arena, sizeof(Block*));
-  list->base[list->length++] = block;
-}
-
-Blocks* irgen_blocks_temp(void) {
-  return arena_push_zero(irgen.temp_block_arena, sizeof(Blocks));
 }
 
 Blocks* irgen_blocks_perm(Blocks* temp_list) {
@@ -509,7 +483,7 @@ Ir* irgen_push(Ir ir) {
   Block* block = irgen_block_top();
   Ir* new_ir = &new(irgen.irs);
   *new_ir = ir;
-  irgen_irs_push(block->irs, new_ir);
+  fa_extend(irgen.temp_ir_arena, block->irs, new_ir);
   return new_ir;
 }
 
@@ -632,9 +606,9 @@ Block* irgen_block_new(void) {
   irgen_block_leave();
   Fun* fun = irgen_fun_top();
   Block* block = &new(irgen.blocks);
-  irgen_blocks_push(fun->blocks, block);
+  fa_extend(irgen.temp_block_arena, fun->blocks, block);
   memset(block, 0, sizeof(Block));
-  block->irs = irgen_irs_temp();
+  fa_temp(irgen.temp_ir_arena, block->irs);
   return block;
 }
 
@@ -669,9 +643,9 @@ void irgen_decl_var(Var* var, Ast_Node* node) {
   {
     Block* block = &new(irgen.blocks);
     memset(block, 0, sizeof(Block));
-    block->irs = irgen_irs_temp();
-    temp_fun.blocks = irgen_blocks_temp();
-    irgen_blocks_push(temp_fun.blocks, block);
+    fa_temp(irgen.temp_ir_arena, block->irs);
+    fa_temp(irgen.temp_block_arena, temp_fun.blocks);
+    fa_extend(irgen.temp_block_arena, temp_fun.blocks, block);
   }
 
   Ir* ir = irgen_ast_node(node);
@@ -717,14 +691,14 @@ Fun* irgen_fun_enter(void) {
   fun->type = 0;
   fun->ret_block = &new(irgen.blocks);
   memset(fun->ret_block, 0, sizeof(Block));
-  fun->ret_block->irs = irgen_irs_temp();
+  fa_temp(irgen.temp_ir_arena, fun->ret_block->irs);
   add(irgen.fun_stack, fun);
   {
     Block* block = &new(irgen.blocks);
     memset(block, 0, sizeof(Block));
-    block->irs = irgen_irs_temp();
-    fun->blocks = irgen_blocks_temp();
-    irgen_blocks_push(fun->blocks, block);
+    fa_temp(irgen.temp_ir_arena, block->irs);
+    fa_temp(irgen.temp_block_arena, fun->blocks);
+    fa_extend(irgen.temp_block_arena, fun->blocks, block);
   }
   Var* ret_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
   fun->ret_ir = irgen_push_var(ret_var);
@@ -740,7 +714,7 @@ Fun* irgen_fun_leave(void) {
   block->kind = Block_Kind_jump;
   irgen_block_link_jump_to_block(&block->jump, fun->ret_block);
   irgen_block_leave();
-  irgen_blocks_push(fun->blocks, fun->ret_block);
+  fa_extend(irgen.temp_block_arena, fun->blocks, fun->ret_block);
   fun->ret_block->irs = irgen_irs_perm(fun->ret_block->irs);
   fun->blocks = irgen_blocks_perm(fun->blocks);
   del(irgen.fun_stack);
@@ -1051,7 +1025,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 }
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Umi source_length    = strlen(source) + 2;
+  Umi source_length    = strlen(source) + 32;
   Arena arena          = arena_init(KB(2) * source_length + KB(64));
                          str_init(&arena, 2*source_length);
   Tokens tokens        = lex_source(&arena, source);
@@ -1074,8 +1048,9 @@ void irgen_test(void) {
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
   // test("foo:(a:I32; b:I32) -> a+b; foo(1)", "");
   // test("foo:(a:I32) -> { re; 1+2 }; foo(1)", "");
-  test("if 1\\2 do 3 el 4;", "");
+  // test("if 1\\2 do 3 el 4;", "");
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
+  // test("a:1", "");
 }
 
 #undef test

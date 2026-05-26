@@ -113,27 +113,51 @@ Umi align_up(Umi val, Umi alignment) {
   return masked;
 }
 
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  #include <sanitizer/asan_interface.h>
+  #define ASAN_POISON(addr, size)   __asan_poison_memory_region(addr, size)
+  #define ASAN_UNPOISON(addr, size) __asan_unpoison_memory_region(addr, size)
+#else
+  #define ASAN_POISON(addr, size)   ((void)0)
+  #define ASAN_UNPOISON(addr, size) ((void)0)
+#endif
+
+#define ARENA_REDZONE_SIZE (256)
+
 typedef struct {
   C8* base;
   C8* top;
   Umi   capacity;
+  Umi   total;
   I8    alignment;
 } Arena;
 
 Arena arena_init(Umi capacity) {
-  Arena arena = {};
-  arena.base = xmalloc(capacity);
-  arena.top = arena.base;
+  Umi total      = capacity * ARENA_REDZONE_SIZE;
+  Arena arena    = {};
+  arena.base     = xmalloc(total);
+  arena.top      = arena.base;
   arena.capacity = capacity;
+  arena.total    = total;
   arena.alignment = 8;
+
+  ASAN_POISON(arena.base, total);
   return arena;
 }
 
 void* arena_push(Arena* arena, Umi size) {
-  assert(arena->top + size <= arena->base + arena->capacity);
-  void* result = arena->top;
-  Umi aligned_up = (Umi)arena->top + align_up(size, arena->alignment);
-  arena->top  = (void*)(aligned_up);
+  Umi aligned_size = align_up(size, arena->alignment);
+  Umi total        = aligned_size + ARENA_REDZONE_SIZE;
+
+  assert(arena->top + total <= arena->base + arena->total);
+
+  void* result   = arena->top;
+  void* redzone  = arena->top + aligned_size;
+
+  ASAN_UNPOISON(result,  aligned_size);
+  ASAN_POISON  (redzone, ARENA_REDZONE_SIZE);
+
+  arena->top = (C8*)arena->top + total;
   return result;
 }
 
@@ -144,11 +168,29 @@ void* arena_push_zero(Arena* arena, Umi size) {
 }
 
 void arena_release_all(Arena* arena) {
+  ASAN_POISON(arena->base, arena->capacity);
   arena->top = arena->base;
 }
 
 void arena_release_mark(Arena* arena, void* mark) {
+  Umi released_size = (C8*)arena->top - (C8*)mark;
+  ASAN_POISON(mark, released_size);
   arena->top = mark;
+}
+
+void arena_extend(Arena* arena, void* ptr, Umi size) {
+  C8* base_ptr = ptr;
+  // assert(arena->top - ARENA_REDZONE_SIZE < base_ptr + size);
+  Umi aligned_size = align_up(size, arena->alignment);
+  Umi total        = aligned_size + ARENA_REDZONE_SIZE;
+  assert(base_ptr + total <= arena->base + arena->total);
+
+  void* redzone  = base_ptr + aligned_size;
+
+  ASAN_UNPOISON(ptr,  aligned_size);
+  ASAN_POISON  (redzone, ARENA_REDZONE_SIZE);
+
+  arena->top = (C8*)base_ptr + total;
 }
 
 C8* arena_mark(Arena* arena) {
@@ -156,6 +198,7 @@ C8* arena_mark(Arena* arena) {
 }
 
 void arena_free(Arena* arena) {
+  ASAN_UNPOISON(arena->base, arena->capacity);
   free(arena->base);
   arena->top = NULL;
   arena->base = NULL;
@@ -195,7 +238,7 @@ U64 hash_u64(U64 x) {
 // array
 #define empty(slice) ((slice).length == 0)
 #define push(slice, item) ((slice).base[(slice).length++] = (item), ((slice).length)-1)
-#define add(slice, item) do {(slice).base[(slice).length++] = (item);} while(0);
+#define add(slice, item) do {(slice).base[(slice).length++] = (item);} while (0)
 #define new(slice) ((slice).base[(slice).length++])
 #define pop(slice) ((slice).base[--(slice).length])
 #define del(slice) (--(slice).length)
@@ -209,13 +252,16 @@ U64 hash_u64(U64 x) {
 // flexible array
 #define fa_empty(fa) ((fa)->length == 0)
 #define fa_push(fa, item) ((fa)->base[(fa)->length++] = (item), ((fa)->length)-1)
-#define fa_add(fa, item) do {(fa)->base[(fa)->length++] = (item);} while(0);
+#define fa_add(fa, item) do {(fa)->base[(fa)->length++] = (item);} while(0)
 #define fa_new(fa) ((fa)->base[(fa)->length++])
 #define fa_pop(fa) ((fa)->base[--(fa)->length])
 #define fa_del(fa) (--(fa)->length)
 #define fa_top(fa) ((fa)->base[(fa)->length-1])
 #define fa_get(fa, index) ((fa)->base[(index)])
 #define fa_put(fa, index, value) ((fa)->base[(index)] = (value))
+#define fa_temp(arena, fa) fa = arena_push_zero((arena), sizeof(*fa))
+#define fa_extend(arena, fa, item) do { arena_extend((arena), (fa), sizeof(*(fa)) + ((fa)->length+1)*sizeof(*(fa)->base)); fa_add((fa), (item)); } while (0)
+#define fa_perm(arena, fa)
 
 typedef struct Hash_Set Hash_Set;
 struct Hash_Set {

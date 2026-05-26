@@ -2118,7 +2118,7 @@ void sem_funs(Arena* arena, Funs funs) {
 }
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  I32 source_length    = strlen(source) + 2;
+  I32 source_length    = strlen(source) + 32;
   Arena arena          = arena_init(KB(4) * source_length);
   str_init(&arena, 2*source_length);
   Tokens tokens        = lex_source(&arena, source);
@@ -2166,7 +2166,8 @@ void sem_test(void) {
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
   // test("foo:(a:I32) -> a+1; foo(2)", "");
-  test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
+  // test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
+  test("a:@I32; a@", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }

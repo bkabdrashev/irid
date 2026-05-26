@@ -345,7 +345,7 @@ Cstr cstr_from_ast(C8* buffer, Ast_Block ast) {
 typedef struct {
   Arena* perm_arena;
   Arena* list_arena;
-  Arena* map_arena;
+  Arena* decls_arena;
 
   Tokens tokens;
   I32  tok;
@@ -445,12 +445,8 @@ void parse_list_end(Parser* parser, Ast_List* list) {
 }
 
 void parse_list_push(Parser* parser, Ast_List* list, Ast_Node* node) {
-  arena_push(parser->list_arena, sizeof(Ast_Node*));
-  list->base[list->length++] = node;
-}
-
-Ast_List* parse_list_temp(Parser* parser) {
-  return arena_push_zero(parser->list_arena, sizeof(Ast_List));
+  arena_extend(parser->list_arena, list, sizeof(Ast_List) + (list->length+1)*sizeof(Ast_Node*));
+  fa_add(list, node);
 }
 
 Ast_List* parse_list_perm(Parser* parser, Ast_List* temp_list) {
@@ -461,17 +457,12 @@ Ast_List* parse_list_perm(Parser* parser, Ast_List* temp_list) {
   return perm_list;
 }
 
-Ast_Decls* parse_map_temp(Parser* parser) {
-  return arena_push_zero(parser->map_arena, sizeof(Ast_Decls));
-}
-
-void parse_map_push(Parser* parser, Ast_Decls* temp_map, Str* name, Ast_Node* rhs) {
-  arena_push(parser->map_arena, sizeof(Ast_Decl));
+void parse_decls_push(Parser* parser, Ast_Decls* decls, Str* name, Ast_Node* rhs) {
   Ast_Decl decl = { name, rhs };
-  fa_add(temp_map, decl);
+  fa_extend(parser->decls_arena, decls, decl);
 }
 
-Hash_Map* parse_map_perm(Parser* parser, Ast_Decls* temp_list) {
+Hash_Map* parse_decls_perm(Parser* parser, Ast_Decls* temp_list) {
   Hash_Map* map = arena_push(parser->perm_arena, sizeof(Hash_Map));
   *map = hash_map_init(parser->perm_arena, temp_list->length+1);
   for (I32 i = 0; i < temp_list->length; i++) {
@@ -484,7 +475,7 @@ Hash_Map* parse_map_perm(Parser* parser, Ast_Decls* temp_list) {
     sym->ast = decl.rhs;
     hash_map_put(map, decl.name, sym);
   }
-  arena_release_mark(parser->map_arena, temp_list);
+  arena_release_mark(parser->decls_arena, temp_list);
   return map;
 }
 
@@ -515,10 +506,10 @@ Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
 
 Ast_Node* parse_tuple_or_exp(Parser* parser) {
   Ast_Node* node;
-  Ast_List* temp = parse_list_temp(parser);
+  Ast_List* temp; fa_temp(parser->list_arena, temp);
   do {
     Ast_Node* exp = parse_new_expression(parser, 0);
-    parse_list_push(parser, temp, exp);
+    fa_extend(parser->list_arena, temp, exp);
   } while (parse_match_token(parser, Token_Kind_comma));
   if (temp->length == 1) {
     node = temp->base[0];
@@ -640,7 +631,7 @@ Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
       return node;
     }
   }
-  Ast_List* temp = parse_list_temp(parser);
+  Ast_List* fa_temp(parser->list_arena, temp);
   while (true) {
     Ast_Node* node = parse_statement(parser);
     parse_list_push(parser, temp, node);
@@ -702,7 +693,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node->binary.rhs = while_block;
   } break;
   case Token_Kind_paren_open: {
-    Ast_List* temp = parse_list_temp(parser);
+    Ast_List* fa_temp(parser->list_arena, temp);
     B8 is_record = false;
     while (!parse_match_token(parser, Token_Kind_paren_close)) {
       Ast_Node* exp = parse_fun_tuple_or_exp(parser);
@@ -848,8 +839,8 @@ Ast_Node* parse_statement(Parser* parser) {
 
 Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind) {
   Ast_Block block = {};
-  Ast_List* temp_ast = parse_list_temp(parser);
-  Ast_Decls* temp_map = parse_map_temp(parser);
+  Ast_List* fa_temp(parser->list_arena, temp);
+  Ast_Decls* fa_temp(parser->decls_arena, temp_map);
   while (!parse_match_token(parser, end_token_kind)) {
     Ast_Node* node = parse_statement(parser);
     if (parse_match_token(parser, Token_Kind_colon)) {
@@ -858,16 +849,16 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind) {
           // name : = exp
           Ast_Node* lhs = node;
           Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
-          parse_map_push(parser, temp_map, lhs->str, rhs);
+          parse_decls_push(parser, temp_map, lhs->str, rhs);
           node = parse_new_node(parser, Ast_Kind_assign);
           node->binary.lhs = lhs;
           node->binary.rhs = rhs;
-          parse_list_push(parser, temp_ast, node);
+          parse_list_push(parser, temp, node);
         }
         else {
           // name : exp
           Ast_Node* decl_rhs = parse_fun_tuple_or_exp(parser);
-          parse_map_push(parser, temp_map, node->str, decl_rhs);
+          parse_decls_push(parser, temp_map, node->str, decl_rhs);
           if (parse_match_token(parser, Token_Kind_equal)) {
             // name : exp = exp
             Ast_Node* lhs = node;
@@ -875,7 +866,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind) {
             node = parse_new_node(parser, Ast_Kind_assign);
             node->binary.lhs = lhs;
             node->binary.rhs = rhs;
-            parse_list_push(parser, temp_ast, node);
+            parse_list_push(parser, temp, node);
           }
           else {
             node = 0;
@@ -887,22 +878,22 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind) {
       }
     }
     else {
-      parse_list_push(parser, temp_ast, node);
+      parse_list_push(parser, temp, node);
     }
     parse_match_token(parser, Token_Kind_semicolon);
   }
-  block.list = parse_list_perm(parser, temp_ast);
-  block.scope = parse_map_perm(parser, temp_map);
+  block.list = parse_list_perm(parser, temp);
+  block.scope = parse_decls_perm(parser, temp_map);
   return block;
 }
 
 Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
-  Arena temp_ast_arena  = arena_init(KB(1) * perm_arena->capacity);
-  Arena temp_map_arena = arena_init(KB(1) * perm_arena->capacity);
+  Arena temp_ast_arena  = arena_init(perm_arena->capacity);
+  Arena temp_map_arena = arena_init(perm_arena->capacity);
   Parser parser = {0};
   parser.perm_arena = perm_arena;
   parser.list_arena = &temp_ast_arena;
-  parser.map_arena = &temp_map_arena;
+  parser.decls_arena = &temp_map_arena;
   parser.tokens = tokens;
   parser.tok    = 1;
   Ast_Block block = parse_scope(&parser, Token_Kind_source_leave);
@@ -926,8 +917,27 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("[2]\\ 2+3",     "[2](2 + 3)");
+  test("a:1",            "a : 1; ");
+
+  test("1",              "1");
+  test("1*2+3",          "((1 * 2) + 3)");
+  test("1 + -2",         "(1 + -2)");
+  test("1 + 2*3",        "(1 + (2 * 3))");
+  test("1 + 2",          "(1 + 2)");
+  test("1*(2+3)",        "(1 * (2 + 3))");
+  test("(1 + 2)*3",      "((1 + 2) * 3)");
+
+  test("(1)",            "1");
+  test("(1\n)",          "1");
+  test("(1;)",           "(1;)");
+  test("(1; 2)",         "(1; 2;)");
+  test("(1; 2;)",        "(1; 2;)");
+  test("(x=1)",          "(x=1;)");
+  test("(x:1; y:2)",     "(x:1; y:2;)");
+  test("1,2",            "(1, 2)");
+
   test("a'b",     "(b a)");
+  test("[2]\\ 2+3",     "[2](2 + 3)");
   test("if 2 br 3",     "if 2 do break 3");
   test("a.b@.c",     "((a . b)@ . c)");
   test("a, b -> 1, 2",     "((a, b) -> (1, 2))");
@@ -957,23 +967,6 @@ void parse_test(void) {
   test("c+[1]b",         "(c + [1]b)");
   test("1 * [2+3]b",     "(1 * [(2 + 3)]b)");
   test("[1+2]b",         "[(1 + 2)]b");
-
-  test("(1)",            "1");
-  test("(1\n)",          "1");
-  test("(1;)",           "(1;)");
-  test("(1; 2)",         "(1; 2;)");
-  test("(1; 2;)",        "(1; 2;)");
-  test("(x=1)",          "(x=1;)");
-  test("(x:1; y:2)",     "(x:1; y:2;)");
-  test("1,2",            "(1, 2)");
-
-  test("1",              "1");
-  test("1*2+3",        "((1 * 2) + 3)");
-  test("1 + -2",         "(1 + -2)");
-  test("1 + 2*3",        "(1 + (2 * 3))");
-  test("1 + 2",          "(1 + 2)");
-  test("1*(2+3)",        "(1 * (2 + 3))");
-  test("(1 + 2)*3",      "((1 + 2) * 3)");
 
   test("foo 1\n2",       "(foo 1); 2");
   test("bar 1 2",        "((bar 1) 2)");
