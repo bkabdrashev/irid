@@ -284,6 +284,12 @@ if () do {
 free(ptrb)               // memory #1 is freed
 ```
 
+- [ ] Function return type
+```irid
+add:(a:I32; b:I32) -> I32 do
+  re a+b
+```
+
 - [ ] Static single assignment
 ```irid
 b = 10 // b is a ssa variable
