@@ -105,7 +105,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   }
   switch (type->kind) {
   case Type_Kind_none:
-    string_builder_push_cstr(sb, "<none>");
+    string_builder_push_cstr(sb, "none");
   break;
   case Type_Kind_fun: {
     string_builder_push_type(sb, block, type->fun->arg);
@@ -444,31 +444,36 @@ Ranges* sem_ranges_init(I32 max_len) {
   return result;
 }
 
-Type* type_ints(Ranges* ranges) {
+Type* type_ranges(Ranges* ranges) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
 
-  new_type->kind   = Type_Kind_int;
-  new_type->ranges = ranges;
+  if (ranges->length == 0) {
+    new_type->kind = Type_Kind_none;
+  }
+  else {
+    new_type->kind   = Type_Kind_int;
+    new_type->ranges = ranges;
 
-  I64 min = ranges_min(ranges);
-  I64 max = ranges_max(ranges);
-  I32 bit_size = bits_needed(min, max);
-  new_type->bits_align = bit_size;
-  new_type->bits_size  = bit_size;
+    I64 min = ranges_min(ranges);
+    I64 max = ranges_max(ranges);
+    I32 bit_size = bits_needed(min, max);
+    new_type->bits_align = bit_size;
+    new_type->bits_size  = bit_size;
+  }
 
   return new_type;
 }
 
-Type* type_int_range(I64 min, I64 max) {
+Type* type_range(I64 min, I64 max) {
   Ranges* ranges = sem_ranges_init(1);
   ranges->length = 1;
   ranges->pairs[0].lo = min;
   ranges->pairs[0].hi = max;
-  return type_ints(ranges);
+  return type_ranges(ranges);
 }
 
 Type* type_int(I64 i64) {
-  return type_int_range(i64, i64);
+  return type_range(i64, i64);
 }
 
 Type* type_ranges_offset(Ranges* ranges, I64 offset) {
@@ -479,7 +484,7 @@ Type* type_ranges_offset(Ranges* ranges, I64 offset) {
     new_ranges->pairs[i] = offset_pair;
   }
 
-  return type_ints(ranges);
+  return type_ranges(ranges);
 }
 
 Type* type_ranges_merge(Ranges* one, Ranges* two) {
@@ -530,7 +535,7 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
   for (; t < len_two; t++) {
     new_ints->pairs[new_ints->length++] = two->pairs[t];
   }
-  return type_ints(new_ints);
+  return type_ranges(new_ints);
 }
 
 Field type_record_get_by_position(Block* block, Record* record, I32 position) {
@@ -560,8 +565,13 @@ Field type_record_get_by_name(Block* block, Record* record, Str* name) {
 
 Type* type_record(Record* record) {
   Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
-  new_type->kind = Type_Kind_record;
-  new_type->record = record;
+  if (record->length == 0) {
+    new_type->kind = Type_Kind_none;
+  }
+  else {
+    new_type->kind = Type_Kind_record;
+    new_type->record = record;
+  }
   return new_type;
 }
 
@@ -725,7 +735,7 @@ Type* type_ranges_intersection(Ranges* one, Ranges* two) {
       t++;
     }
   }
-  return type_ints(new_ranges);
+  return type_ranges(new_ranges);
 }
 
 Type* type_ranges_no_intersection(Ranges* one, Ranges* two) {
@@ -819,7 +829,7 @@ Type* type_ranges_no_intersection(Ranges* one, Ranges* two) {
     new_ranges->pairs[new_ranges->length++] = range2;
     range2 = two->pairs[t++];
   }
-  return type_ints(new_ranges);
+  return type_ranges(new_ranges);
 }
 
 Type* type_ranges_exclude(Ranges* ranges, I64 val) {
@@ -852,7 +862,7 @@ Type* type_ranges_exclude(Ranges* ranges, I64 val) {
       new_ints->pairs[new_ints->length++] = ranges->pairs[i];
     }
   }
-  return type_ints(new_ints);
+  return type_ranges(new_ints);
 }
 
 void sem_tasks_push_var(Sem_Tasks* tasks, Var* var, Type* old) {
@@ -1282,7 +1292,7 @@ void sem_ir(Block* block, Ir* ir) {
       I64 min_one = ranges_min(pair.one);
       I64 min_two = ranges_min(pair.two);
       I64 min = min_one + min_two;
-      result = type_int_range(min, max);
+      result = type_range(min, max);
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
         if (result->bits_size > bits_max_size) {
@@ -1328,7 +1338,7 @@ void sem_ir(Block* block, Ir* ir) {
       I64 min_one = ranges_min(pair.one);
       I64 min_two = ranges_min(pair.two);
       I64 min = min_one - min_two;
-      result = type_int_range(min, max);
+      result = type_range(min, max);
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
         result->bits_size  = bits_max_size;
@@ -1373,7 +1383,7 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_int(val);
       }
       else {
-        result = type_int_range(0, 1);
+        result = type_range(0, 1);
       }
     }
   } break;
@@ -1451,18 +1461,19 @@ void sem_ir(Block* block, Ir* ir) {
     Type* arg  = types.two;
     if (call->kind == Type_Kind_fun) {
       Function* fun = call->fun;
-      if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
-        Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
-        if (type_is_subtype(block, arg, field_two.declared_type)) {
-          result = call->fun->ret;
-        }
-        else {
-          printf("call not subtype\n");
-          assert(0);
-        }
-      }
-      else if (type_is_subtype(block, arg, call->fun->arg)) {
-        result = call->fun->ret;
+      // if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
+      //   Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
+      //   if (type_is_subtype(block, arg, field_two.declared_type)) {
+      //     result = call->fun->ret;
+      //   }
+      //   else {
+      //     printf("call not subtype\n");
+      //     assert(0);
+      //   }
+      // }
+      // else
+      if (type_is_subtype(block, arg, fun->arg)) {
+        result = fun->ret;
       }
       else {
         printf("call not subtype\n");
@@ -1482,7 +1493,7 @@ void sem_ir(Block* block, Ir* ir) {
         I64 val_one = ranges_min(pair.one);
         I64 val_two = ranges_min(pair.two);
         if (val_one < val_two) {
-          result = type_int_range(val_one, val_two);
+          result = type_range(val_one, val_two);
         }
         else {
           assert(0);
@@ -2035,7 +2046,7 @@ void sem_loop_seed(Loop* loop, Hash_Map* innermost) {
       if (v0_type && v0_type->kind == Type_Kind_int && ranges_is_single(v0_type->ranges)) {
         I64 v0    = ranges_min(v0_type->ranges);
         I64 final = v0 + count.n * lv->step;
-        seeded = type_int_range(min(v0, final), max(v0, final));
+        seeded = type_range(min(v0, final), max(v0, final));
         if (var->declared) {
           seeded->size_defined = var->declared->size_defined;
           seeded->bits_size    = var->declared->bits_size;
@@ -2165,9 +2176,9 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  // test("foo:(a:I32) -> a+1; foo(2)", "");
+  test("foo:(a:I32) -> a+1; foo(2)", "");
   // test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
-  test("a:@I32; a@", "");
+  // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }

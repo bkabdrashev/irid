@@ -784,7 +784,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
         record_push_assign_name(record, field_node->declare.str, i);
         record_push_assign_position(record, i, ir);
       }
-      else if (field_node->kind == Ast_Kind_declare_field) {
+      else if (field_node->kind == Ast_Kind_declare) {
         Ir* ir = irgen_ast_node(field_node->declare.rhs);
         record_push_assign_name(record, field_node->declare.str, i);
         record_push_declare_position(record, i, ir);
@@ -904,15 +904,15 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Fun* fun = irgen_fun_enter();
     fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     fun->arg_var->name = str_from_cstr("#arg");
-    irgen_decl_var(fun->arg_var, node->binary.lhs);
     Hash_Map scope;
     {
       Ast_Node* lhs = node->binary.lhs;
       if (lhs->kind == Ast_Kind_record) {
+        irgen_decl_var(fun->arg_var, lhs);
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
         for (I32 i = 0; i < lhs->list->length; i++) {
           Ast_Node* param = lhs->list->base[i];
-          if (param->kind == Ast_Kind_declare_field) {
+          if (param->kind == Ast_Kind_declare) {
             Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
             sym->ast = param->declare.rhs;
             hash_map_put(&scope, param->declare.str, sym);
@@ -924,6 +924,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
             assert(0);
           }
         }
+        irgen_scope_enter(&scope);
+      }
+      else if (lhs->kind == Ast_Kind_declare) {
+        irgen_decl_var(fun->arg_var, lhs->declare.rhs);
+        scope = hash_map_init(irgen.perm_arena, 1);
+        Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+        sym->ast = lhs->declare.rhs;
+        hash_map_put(&scope, lhs->declare.str, sym);
         irgen_scope_enter(&scope);
       }
       else {
@@ -952,7 +960,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_none: { assert(0); }
   case Ast_Kind_declare: { assert(0); }
   case Ast_Kind_assign_field: { assert(0); }
-  case Ast_Kind_declare_field: { assert(0); }
   }
   return result;
 }
@@ -1051,6 +1058,7 @@ void irgen_test(void) {
   // test("if 1\\2 do 3 el 4;", "");
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a:1", "");
+  // test("foo:() -> bar(); bar:()->foo()", "");
 }
 
 #undef test
