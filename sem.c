@@ -242,7 +242,7 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       for (I32 i = 0; i < block->irs->length; i++) {
         Ir* ir = block->irs->base[i];
         string_builder_push_cstr(&sb, "\n");
-        string_builder_push_indent(&sb, 1);
+        string_builder_push_indent(&sb, 2);
         string_builder_push_ir(&sb, ir);
         string_builder_push_cstr(&sb, " : ");
         Type* type = hash_map_get(&sem.type_of_irs, ir);
@@ -253,13 +253,13 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       break;
       case Block_Kind_jump:
         string_builder_push_cstr(&sb, "\n");
-        string_builder_push_indent(&sb, 1);
+        string_builder_push_indent(&sb, 2);
         string_builder_push_cstr(&sb, "jump ");
         string_builder_push_blockid(&sb, block->jump.to_block);
       break;
       case Block_Kind_branch:
         string_builder_push_cstr(&sb, "\n");
-        string_builder_push_indent(&sb, 1);
+        string_builder_push_indent(&sb, 2);
         string_builder_push_cstr(&sb, "if ");
         string_builder_push_irid(&sb, block->branch.cond);
         string_builder_push_cstr(&sb, " then ");
@@ -267,12 +267,6 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
         string_builder_push_cstr(&sb, " else ");
         string_builder_push_blockid(&sb, block->branch.eqz.to_block);
       break;
-      case Block_Kind_return:
-        string_builder_push_cstr(&sb, "\n");
-        string_builder_push_indent(&sb, 1);
-        string_builder_push_cstr(&sb, "ret");
-      break;
-
       }
     }
     string_builder_push_cstr(&sb, "\n}\n");
@@ -288,7 +282,7 @@ I64 ranges_max(Ranges* ranges) {
 B8 ranges_have(Ranges* ranges, I64 i64) {
   for (I32 i = 0; i < ranges->length; i++) {
     Range pair = ranges->pairs[i];
-    if (pair.lo >= i64 && i64 <= pair.hi) {
+    if (pair.lo <= i64 && i64 <= pair.hi) {
       return true;
     }
   }
@@ -420,13 +414,7 @@ B8 type_is_true(Type* type) {
   B8 result = false;
   switch (type->kind) {
   case Type_Kind_int: {
-    if (ranges_is_single(type->ranges)) {
-      I64 val = ranges_min(type->ranges);
-      result = val != 0;
-    }
-    else {
-      result = false;
-    }
+    result = !ranges_have(type->ranges, 0);
   } break;
   default: assert(0);
   }
@@ -1561,9 +1549,6 @@ void sem_block(Block* block) {
     else if (block->kind == Block_Kind_jump) {
       block->jump.to_block->state = Block_State_reachable;
     }
-    else if (block->kind == Block_Kind_return) {
-      // type_of_var(block, block->ret_ir->var);
-    }
   }
 }
 
@@ -2099,7 +2084,7 @@ Type* sem_fun(Fun* fun) {
   new_type->kind = Type_Kind_fun;
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
   new_type->fun->arg = fun->arg_var->declared;
-  new_type->fun->ret = type_of_var(entry_block, fun->ret_ir->var);
+  new_type->fun->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
   fun->type = new_type;
   return new_type;
 }
@@ -2181,7 +2166,8 @@ void sem_test(void) {
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
   // test("foo:(a:I32) -> a+1; foo(2)", "");
-  test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
+  test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
+  // test("if 1\\2 do 3 el 4;", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
 }
 
