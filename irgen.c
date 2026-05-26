@@ -796,6 +796,15 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
     result = irgen_push_record(record);
   } break;
+
+  case Ast_Kind_declare: {
+    Record* record = record_new(1);
+    Ir* ir = irgen_ast_node(node->declare.rhs);
+    record_push_assign_name(record, node->declare.str, 0);
+    record_push_declare_position(record, 0, ir);
+    result = irgen_push_record(record);
+  } break;
+
   case Ast_Kind_block_value: {
     irgen_scope_enter(node->block.scope);
 
@@ -958,7 +967,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_break: case Ast_Kind_break_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:
   case Ast_Kind_none: { assert(0); }
-  case Ast_Kind_declare: { assert(0); }
   case Ast_Kind_assign_field: { assert(0); }
   }
   return result;
@@ -1057,7 +1065,7 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { re; 1+2 }; foo(1)", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
-  // test("a:1", "");
+  test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
 }
 

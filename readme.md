@@ -290,6 +290,15 @@ add:(a:I32; b:I32) -> I32 do
   re a+b
 ```
 
+- [ ] Auto-unboxed single element record
+```irid
+a:(x:1)
+b:(x:1;)
+a.x + a // a.x + a.x
+b = a;    // work
+b.x = a;  // work
+```
+
 - [ ] Static single assignment
 ```irid
 b = 10 // b is a ssa variable
