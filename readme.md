@@ -295,8 +295,9 @@ add:(a:I32; b:I32) -> I32 do
 a:(x:1)
 b:(x:1;)
 a.x + a // a.x + a.x
-b = a;    // work
-b.x = a;  // work
+b = a;    // works
+b.x = a;  // works
+b.x + b   // error
 ```
 
 - [ ] Static single assignment
