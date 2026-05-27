@@ -2176,7 +2176,7 @@ void sem_test(void) {
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  // test("foo:(a:I32) -> a+1; foo(a:2)", ""); // BUG: foo(a=2) should work
+  // test("foo:(a:I32) -> a+1; foo(2)", "");
   // test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");

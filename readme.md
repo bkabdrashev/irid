@@ -252,11 +252,17 @@ zap : () -> (x:I32; y:I32) { // error since the second returned value have to sw
 
 - [ ] Packages
 ```irid
-package Vec, Str
+package : Vec, Str
 
-str_from_vec:(v: Vec) -> Str {
+str_from_vec:(v: Vec) -> Str do
   return str_from_i32(v.x) " " str_from_i32(v.y)
-}
+```
+
+```irid
+import Vec
+import Str
+
+str:Str = str_from_vec(1, 2)
 ```
 
 - [ ] Linear types
@@ -284,26 +290,30 @@ if () do {
 free(ptrb)               // memory #1 is freed
 ```
 
+- [ ] Better typing for single argument function
+```irid
+a:(x:1) -> 1
+a(x=1)
+a(1)
+a(1;)
+a(x=1;)
+b:(x:1;) -> 1
+b(x=1)
+b(1)
+b(1;)
+b(x=1;)
+```
+
 - [ ] Function return type
 ```irid
 add:(a:I32; b:I32) -> I32 do
   re a+b
 ```
 
-- [ ] Auto-unboxed single element record
-```irid
-a:(x:1)
-b:(x:1;)
-a.x + a // a.x + a.x
-b = a;    // works
-b.x = a;  // works
-b.x + b   // error
-```
-
 - [ ] Static single assignment
 ```irid
 b = 10 // b is a ssa variable
-// b = 20 // error, b should have declared type
+// b = 20 // error: b should have a declared type
 ```
 
 - [x] Optional do

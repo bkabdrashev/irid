@@ -13,5 +13,6 @@ int main(void) {
   parse_test();
   irgen_test();
   sem_test();
+  llvm_test();
   return 0;
 }
