@@ -138,7 +138,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("1", "");
+  test("()->1; ()->2", "");
 }
 
 #undef test

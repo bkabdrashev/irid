@@ -242,6 +242,8 @@ struct Irgen {
   Ir*         irid_nil;
   Ir*         ir_none;
 
+  Str*        str_nil;
+
   Fun_Stack   fun_stack;
   Hash_Map*   builtins;
   Blocks*     unresolved_breaks;
@@ -284,7 +286,7 @@ void string_builder_push_var(String_Builder* sb, Var* var) {
 
 void string_builder_push_fun(String_Builder* sb, Fun* fun) {
   string_builder_push_cstr(sb, "@");
-  if (fun->name) {
+  if (fun->name != irgen.str_nil) {
     string_builder_push_str(sb, fun->name);
   }
   else {
@@ -920,6 +922,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Fun* fun = irgen_fun_enter();
     fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     fun->arg_var->name = str_from_cstr("#arg");
+    fun->name = irgen.str_nil;
     Hash_Map scope;
     {
       Ast_Node* lhs = node->binary.lhs;
@@ -999,6 +1002,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
   irgen.irid_nil = 0;
+  irgen.str_nil = str_from_cstr("");
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
 
@@ -1075,7 +1079,7 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
-  test("1", "");
+  test("()->1; ()->2", "");
 }
 
 #undef test
