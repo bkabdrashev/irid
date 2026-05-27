@@ -36,6 +36,10 @@ String_Kind token_kind_from_str(Str* str) {
   return str->kind;
 }
 
+Cstr cstr_from_str(Str* str) {
+  return str->base;
+}
+
 Str* str_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
   I32 len = strlen(cstr);
   I32 i = hash_bytes(cstr, len);
@@ -43,12 +47,13 @@ Str* str_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
     i &= internal.set.cap - 1;
     Str* str = internal.set.keys[i];
     if (!str) {
-      Str* new_str = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
+      Str* new_str = arena_push(internal.arena, sizeof(Str) + (len+1) * sizeof(C8));
       new_str->length = len;
       new_str->kind = kind;
       for (I32 j = 0; j < len; j++) {
         new_str->base[j] = cstr[j];
       }
+      new_str->base[len] = '\0';
       internal.set.keys[i] = new_str;
       return new_str;
     }
@@ -74,12 +79,13 @@ Str* str_from_range(Cstr begin, Cstr end) {
     i &= internal.set.cap - 1;
     Str* str = internal.set.keys[i];
     if (!str) {
-      Str* new_str = arena_push(internal.arena, sizeof(Str) + len * sizeof(C8));
+      Str* new_str = arena_push(internal.arena, sizeof(Str) + (len+1) * sizeof(C8));
       new_str->length = len;
       new_str->kind   = String_Kind_name;
       for (I32 j = 0; j < len; j++) {
         new_str->base[j] = begin[j];
       }
+      new_str->base[len] = '\0';
       internal.set.keys[i] = new_str;
       return new_str;
     }

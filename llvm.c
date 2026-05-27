@@ -3,27 +3,97 @@
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitWriter.h>
 
+LLVMTypeRef llvm_type_map(LLVMContextRef context, Type* type) {
+  LLVMTypeRef result;
+  switch (type->kind) {
+  case Type_Kind_none: {
+    result = LLVMVoidTypeInContext(context);
+  } break;
+  case Type_Kind_int: {
+    result = LLVMIntTypeInContext(context, type->bits_size);
+  } break;
+  case Type_Kind_ptr: {
+    LLVMTypeRef pointer_to = llvm_type_map(context, type->pointer->declared);
+    result = LLVMPointerType(pointer_to, 0);
+  } break;
+  case Type_Kind_record: {
+    assert(0);
+  } break;
+  case Type_Kind_fun: {
+    LLVMTypeRef* arg_types;
+    I32 arg_count = 0;
+    if (type->fun->arg->kind == Type_Kind_none) {
+      arg_types = 0;
+      arg_count = 0;
+    }
+    else if (type->fun->arg->kind == Type_Kind_record) {
+      Record* record = type->fun->arg->record;
+      arg_count = record->length;
+      assert(0);
+    }
+    else {
+      LLVMTypeRef arg_type = llvm_type_map(context, type->fun->arg);
+      arg_types = (LLVMTypeRef[1]){ arg_type };
+    }
+    LLVMTypeRef ret_type = llvm_type_map(context, type->fun->ret);
+    result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
+  } break;
+  }
+  return result;
+}
+
+LLVMTypeRef llvm_type_of_ir(LLVMContextRef context, Ir* ir) {
+  Type* ir_type = type_of_ir(ir);
+  return llvm_type_map(context, ir_type);
+}
+
 I32 llvm_funs(Funs funs) {
-  // 1. Create a context and a module
   LLVMContextRef context = LLVMContextCreate();
-  LLVMModuleRef module = LLVMModuleCreateWithNameInContext("example", context);
-
-  // 2. Define the function signature: i32 ()*
-  LLVMTypeRef return_type = LLVMInt32TypeInContext(context);
-  LLVMTypeRef param_types[1] = {}; // No parameters
-  LLVMTypeRef function_type = LLVMFunctionType(return_type, param_types, 0, 0);
-
-  // 3. Add the function to the module
-  LLVMValueRef function = LLVMAddFunction(module, "main", function_type);
-
-  // 4. Create a basic block and an IR builder
-  LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(context, function, "entry");
+  LLVMModuleRef module = LLVMModuleCreateWithNameInContext("contex_name", context);
   LLVMBuilderRef builder = LLVMCreateBuilderInContext(context);
-  LLVMPositionBuilderAtEnd(builder, entry);
 
-  // 5. Generate the IR: return 42
-  LLVMValueRef forty_two = LLVMConstInt(return_type, 42, 0);
-  LLVMBuildRet(builder, forty_two);
+  for (I32 f = 0; f < funs.length; f++) {
+    Fun* fun = &funs.base[f];
+    LLVMTypeRef llvm_fun_type = llvm_type_map(context, fun->type);
+    LLVMValueRef function = LLVMAddFunction(module, cstr_from_str(fun->name), llvm_fun_type);
+
+    for (I32 b = 0; b < fun->blocks->length; b++) {
+      Block* block = fun->blocks->base[b];
+      block->llvm_block = LLVMAppendBasicBlockInContext(context, function, "block");
+    }
+
+    for (I32 b = 0; b < fun->blocks->length; b++) {
+      Block* block = fun->blocks->base[b];
+      LLVMPositionBuilderAtEnd(builder, block->llvm_block);
+      for (I32 i = 0; i < block->irs->length; i++) {
+        // Ir* ir = fa_get(block->irs, i);
+        // Type* type = type_of_ir(ir);
+        // LLVMTypeRef llvm_type = llvm_type_map(context, type);
+      }
+      switch (block->kind) {
+      case Block_Kind_none: {
+      } break;
+      case Block_Kind_jump: {
+        LLVMBuildBr(builder, block->jump.to_block->llvm_block);
+      } break;
+      case Block_Kind_branch: {
+      } break;
+      }
+    }
+
+    Type* ret_type = fun->type->fun->ret;
+    if (ret_type->kind == Type_Kind_none) {
+      LLVMBuildRetVoid(builder);
+    }
+    else {
+      LLVMTypeRef ret_var_type = llvm_type_map(context, fun->type->fun->ret);
+      LLVMValueRef ret_var  = LLVMBuildAlloca(builder, ret_var_type, "my_new_test");
+
+      LLVMTypeRef llvm_ret_type = llvm_type_map(context, ret_type);
+      LLVMValueRef ret_loaded = LLVMBuildLoad2(builder, llvm_ret_type, ret_var, "loaded_ret_var");
+      LLVMBuildRet(builder, ret_loaded);
+    }
+  }
 
   // 6. Verify the module is correct
   char *error = NULL;

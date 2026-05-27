@@ -1,3 +1,4 @@
+#include <llvm-c/Types.h>
 typedef enum Ir_Flag {
   Ir_Flag_unary  = Ast_Flag_unary,
   Ir_Flag_binary = Ast_Flag_binary,
@@ -176,11 +177,13 @@ struct Block_List {
   Block** base;
 };
 
+typedef struct LLVMOpaqueBasicBlock *LLVMBasicBlockRef;
 struct Block {
   Block_Kind kind;
   Block_State state;
   B8 is_present_in_worklist;
 
+  LLVMBasicBlockRef llvm_block;
 
   B8 is_scc_visited;
   B8 is_on_scc_stack;
@@ -649,6 +652,9 @@ void irgen_decl_var(Var* var, Ast_Node* node) {
   }
 
   Ir* ir = irgen_ast_node(node);
+  if (ir->kind == Ir_Kind_fun) {
+    ir->fun->name = var->name;
+  }
   fun->var_count += temp_fun.var_count;
   irgen_block_leave();
   var->blocks = irgen_blocks_perm(temp_fun.blocks);
@@ -703,6 +709,7 @@ Fun* irgen_fun_enter(void) {
   Var* ret_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
   fun->ret_ir = irgen_push_var(ret_var);
   fun->ret_ir->var->name = str_from_cstr("#ret");
+  // irgen_decl_var(fun->ret_ir->var, ret_decl); // TODO: declare return var
 
   fun->var_count = irgen.builtins->cap;
   return fun;
@@ -820,7 +827,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_unary(Ir_Kind_load, block_ir);
 
     irgen_scope_leave();
-    arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
+    // arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
   } break;
   case Ast_Kind_block: {
     irgen_scope_enter(node->block.scope);
@@ -999,6 +1006,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen.builtins = arena_push(irgen.perm_arena, sizeof(Hash_Map));
     *irgen.builtins = hash_map_init(irgen.perm_arena, 1);
     Fun* fun = irgen_fun_enter();
+    fun->name = str_from_cstr("main");
     {
       Str* i32_str = str_from_cstr("I32");
       Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
@@ -1065,8 +1073,9 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { re; 1+2 }; foo(1)", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
-  test("a : (x:1)", "");
+  // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
+  test("1", "");
 }
 
 #undef test
