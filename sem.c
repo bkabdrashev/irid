@@ -2188,7 +2188,7 @@ void sem_test(void) {
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
-  test("a:I32; a=1+2", "");
+  test("a:(x:I32; y:I32); a.x", "");
 }
 
 #undef test
