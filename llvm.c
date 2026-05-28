@@ -135,12 +135,22 @@ I32 llvm_funs(Arena* arena, Funs funs) {
           LLVMTypeRef llvm_type = llvm_of_type(context, type);
           llvm_ir = LLVMConstInt(llvm_type, ir->i64, 0);
         } break;
-        case Ir_Kind_add: {
-          llvm_ir = LLVMBuildAdd(builder, one, two, "");
+        case Ir_Kind_add: llvm_ir = LLVMBuildAdd(builder, one, two, ""); break;
+        case Ir_Kind_sub: llvm_ir = LLVMBuildSub(builder, one, two, ""); break;
+        case Ir_Kind_mul: llvm_ir = LLVMBuildMul(builder, one, two, ""); break;
+        case Ir_Kind_eq:  llvm_ir = LLVMBuildICmp(builder, LLVMIntEQ, one, two, ""); break;
+        case Ir_Kind_ne:  llvm_ir = LLVMBuildICmp(builder, LLVMIntNE, one, two, ""); break;
+        case Ir_Kind_lt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSLT, one, two, ""); break;
+        case Ir_Kind_le:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSLE, one, two, ""); break;
+        case Ir_Kind_gt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGT, one, two, ""); break;
+        case Ir_Kind_ge:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGE, one, two, ""); break;
+        case Ir_Kind_neg: llvm_ir = LLVMBuildNeg(builder, unary, ""); break;
+        case Ir_Kind_load:  {
+          Type* type = type_of_ir(ir);
+          LLVMTypeRef llvm_type = llvm_of_type(context, type);
+          llvm_ir = LLVMBuildLoad2(builder, llvm_type, unary, "");
         } break;
-        case Ir_Kind_store: {
-          llvm_ir = LLVMBuildStore(builder, two, one);
-        } break;
+        case Ir_Kind_store: llvm_ir = LLVMBuildStore(builder, two, one); break;
         }
 
         llvm_of_ir_put(ir, llvm_ir);
@@ -210,7 +220,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("a:I32; a=1+2", "");
+  test("a:I32; a=1+2; a+a", "");
 }
 
 #undef test

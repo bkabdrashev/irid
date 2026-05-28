@@ -32,9 +32,7 @@ typedef enum Ir_Kind {
 
   Ir_Kind_record          = 131,
   Ir_Kind_position_offset = 132,
-  Ir_Kind_position_update = 133,
   Ir_Kind_name_offset     = 134,
-  Ir_Kind_name_update     = 135,
 
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
