@@ -707,7 +707,7 @@ Fun* irgen_fun_enter(void) {
   }
   Var* ret_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
   fun->ret_ir = irgen_push_var(ret_var);
-  fun->ret_ir->var->name = str_from_cstr("#ret");
+  fun->ret_ir->var->name = str_from_cstr("__ret");
   // irgen_decl_var(fun->ret_ir->var, ret_decl); // TODO: declare return var
 
   fun->var_count = irgen.builtins->cap;
@@ -918,7 +918,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
     fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    fun->arg_var->name = str_from_cstr("#arg");
+    fun->arg_var->name = str_from_cstr("__arg");
     fun->name = irgen.str_nil;
     Hash_Map scope;
     {
@@ -1018,8 +1018,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
       Ir* i32_bits = irgen_push_int(32);
       i32_var->declared_ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
-      i32_sym->var_ir = irgen_push_var(i32_var);
       irgen_push_declare(i32_var);
+      i32_sym->var_ir = irgen_push_var(i32_var);
 
       hash_map_put(irgen.builtins, i32_str, i32_sym);
       add(irgen.scope_stack, irgen.builtins);

@@ -636,6 +636,7 @@ Type* type_ptr_stack(Hash_Set stack) {
   Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->stack = stack;
   assert(stack.len >= 1);
+  type_pointer_declared(pointer);
   return type_ptr(pointer);
 }
 
@@ -1258,7 +1259,9 @@ void sem_ensure_declared(Var* var) {
 
   Type* type = type_of_ir(var->declared_ir);
   var->declared = type;
-  sem_record_declare_fields(var, type);
+  if (type) {
+    sem_record_declare_fields(var, type);
+  }
 
   var->state = Var_State_resolved;
 }
@@ -2096,6 +2099,10 @@ Type* sem_fun(Fun* fun) {
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
   new_type->fun->arg = fun->arg_var->declared;
   new_type->fun->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+  fun->ret_ir->var->declared = new_type->fun->ret;
+  Type* ret_type = type_of_ir(fun->ret_ir);
+  assert(ret_type->kind == Type_Kind_ptr);
+  ret_type->pointer->declared = new_type->fun->ret;
   fun->type = new_type;
   return new_type;
 }
@@ -2181,6 +2188,7 @@ void sem_test(void) {
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
+  test("a:I32; a=1+2", "");
 }
 
 #undef test

@@ -31,7 +31,7 @@ LLVMTypeRef llvm_of_type(LLVMContextRef context, Type* type) {
     result = LLVMVoidTypeInContext(context);
   } break;
   case Type_Kind_int: {
-    result = LLVMIntTypeInContext(context, type->bits_size);
+    result = LLVMIntTypeInContext(context, 32);
   } break;
   case Type_Kind_ptr: {
     LLVMTypeRef pointer_to = llvm_of_type(context, type->pointer->declared);
@@ -110,10 +110,40 @@ I32 llvm_funs(Arena* arena, Funs funs) {
       Block* block = fun->blocks->base[b];
       LLVMBasicBlockRef llvm_block = llvm_of_block(block);
       LLVMPositionBuilderAtEnd(builder, llvm_block);
+      LLVMValueRef one; LLVMValueRef two; LLVMValueRef unary;
+
       for (I32 i = 0; i < block->irs->length; i++) {
-        // Ir* ir = fa_get(block->irs, i);
-        // Type* type = type_of_ir(ir);
-        // LLVMTypeRef llvm_type = llvm_type_map(context, type);
+        Ir* ir = fa_get(block->irs, i);
+        if (ir->kind & Ir_Flag_binary) {
+          one = llvm_of_ir(ir->binary.one);
+          two = llvm_of_ir(ir->binary.two);
+        }
+        else if (ir->kind & Ir_Flag_unary) {
+          unary = llvm_of_ir(ir->unary);
+        }
+
+        LLVMValueRef llvm_ir;
+        switch (ir->kind) {
+        case Ir_Kind_var: {
+          if (ir->var->declared->kind != Type_Kind_none) {
+            LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
+            llvm_ir = LLVMBuildAlloca(builder, llvm_var_type, ir->var->name->base);
+          }
+        } break;
+        case Ir_Kind_int: {
+          Type* type = type_of_ir(ir);
+          LLVMTypeRef llvm_type = llvm_of_type(context, type);
+          llvm_ir = LLVMConstInt(llvm_type, ir->i64, 0);
+        } break;
+        case Ir_Kind_add: {
+          llvm_ir = LLVMBuildAdd(builder, one, two, "");
+        } break;
+        case Ir_Kind_store: {
+          llvm_ir = LLVMBuildStore(builder, two, one);
+        } break;
+        }
+
+        llvm_of_ir_put(ir, llvm_ir);
       }
       switch (block->kind) {
       case Block_Kind_none: {
@@ -180,7 +210,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("()->1; ()->2", "");
+  test("a:I32; a=1+2", "");
 }
 
 #undef test
