@@ -151,6 +151,13 @@ I32 llvm_funs(Arena* arena, Funs funs) {
           llvm_ir = LLVMBuildLoad2(builder, llvm_type, unary, "");
         } break;
         case Ir_Kind_store: llvm_ir = LLVMBuildStore(builder, two, one); break;
+
+        case Ir_Kind_declare: break;
+        case Ir_Kind_none:    break;
+        case Ir_Kind_range:   break;
+        case Ir_Kind_join:    break;
+        case Ir_Kind_bits:    break;
+
         }
 
         llvm_of_ir_put(ir, llvm_ir);

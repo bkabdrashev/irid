@@ -35,7 +35,6 @@ typedef enum Ir_Kind {
   Ir_Kind_name_offset     = 134,
 
   Ir_Kind_fun  = 136,
-  Ir_Kind_arg  = 137,
 
   Ir_Kind_range = 138 | Ir_Flag_binary,
   Ir_Kind_bits  = 139 | Ir_Flag_binary,
@@ -511,11 +510,6 @@ Ir* irgen_push_var(Var* var) {
 
 Ir* irgen_push_fun(Fun* fun) {
   Ir ir = { Ir_Kind_fun, .fun = fun };
-  return irgen_push(ir);
-}
-
-Ir* irgen_push_arg(void) {
-  Ir ir = { Ir_Kind_arg, {0} };
   return irgen_push(ir);
 }
 
