@@ -260,6 +260,7 @@ U64 hash_u64(U64 x) {
 #define fa_get(fa, index) ((fa)->base[(index)])
 #define fa_put(fa, index, value) ((fa)->base[(index)] = (value))
 #define fa_temp(arena, fa) fa = arena_push_zero((arena), sizeof(*fa))
+#define fa_init(arena, fa, len) ((fa) = arena_push((arena), sizeof(*(fa)) + (len) * sizeof((fa)->base[0])), (fa)->length = 0)
 #define fa_extend(arena, fa, item) do { arena_extend((arena), (fa), sizeof(*(fa)) + ((fa)->length+1)*sizeof(*(fa)->base)); fa_add((fa), (item)); } while (0)
 #define fa_perm(arena, fa)
 

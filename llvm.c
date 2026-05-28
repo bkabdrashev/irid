@@ -2,8 +2,29 @@
 #include <llvm-c/Target.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitWriter.h>
+#include <llvm-c/Types.h>
 
-LLVMTypeRef llvm_type_map(LLVMContextRef context, Type* type) {
+typedef struct LLVM_Gen_Blocks LLVM_Gen_Blocks;
+struct LLVM_Gen_Blocks {
+  I32 length;
+  LLVMBasicBlockRef base[];
+};
+
+typedef struct LLVM_Gen_Irs LLVM_Gen_Irs;
+struct LLVM_Gen_Irs {
+  I32 length;
+  LLVMValueRef base[];
+};
+
+typedef struct LLVM_Gen LLVM_Gen;
+struct LLVM_Gen {
+  LLVMValueRef*      irs;
+  LLVMBasicBlockRef* blocks;
+};
+
+LLVM_Gen llvm_gen;
+
+LLVMTypeRef llvm_of_type(LLVMContextRef context, Type* type) {
   LLVMTypeRef result;
   switch (type->kind) {
   case Type_Kind_none: {
@@ -13,7 +34,7 @@ LLVMTypeRef llvm_type_map(LLVMContextRef context, Type* type) {
     result = LLVMIntTypeInContext(context, type->bits_size);
   } break;
   case Type_Kind_ptr: {
-    LLVMTypeRef pointer_to = llvm_type_map(context, type->pointer->declared);
+    LLVMTypeRef pointer_to = llvm_of_type(context, type->pointer->declared);
     result = LLVMPointerType(pointer_to, 0);
   } break;
   case Type_Kind_record: {
@@ -32,39 +53,63 @@ LLVMTypeRef llvm_type_map(LLVMContextRef context, Type* type) {
       assert(0);
     }
     else {
-      LLVMTypeRef arg_type = llvm_type_map(context, type->fun->arg);
+      LLVMTypeRef arg_type = llvm_of_type(context, type->fun->arg);
       arg_types = (LLVMTypeRef[1]){ arg_type };
     }
-    LLVMTypeRef ret_type = llvm_type_map(context, type->fun->ret);
+    LLVMTypeRef ret_type = llvm_of_type(context, type->fun->ret);
     result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
   } break;
   }
   return result;
 }
 
-LLVMTypeRef llvm_type_of_ir(LLVMContextRef context, Ir* ir) {
-  Type* ir_type = type_of_ir(ir);
-  return llvm_type_map(context, ir_type);
+LLVMValueRef llvm_of_ir(Ir* ir) {
+  I32 irid = ir - irgen.irs.base;
+  return llvm_gen.irs[irid];
 }
 
-I32 llvm_funs(Funs funs) {
+void llvm_of_ir_put(Ir* ir, LLVMValueRef val) {
+  I32 irid = ir - irgen.irs.base;
+  llvm_gen.irs[irid] = val;
+}
+
+LLVMBasicBlockRef llvm_of_block(Block* block) {
+  I32 blockid = block - irgen.blocks.base;
+  return llvm_gen.blocks[blockid];
+}
+
+void llvm_of_block_put(Block* block, LLVMBasicBlockRef bb) {
+  I32 blockid = block - irgen.blocks.base;
+  llvm_gen.blocks[blockid] = bb;
+}
+
+LLVMTypeRef llvm_type_of_ir(LLVMContextRef context, Ir* ir) {
+  Type* ir_type = type_of_ir(ir);
+  return llvm_of_type(context, ir_type);
+}
+
+I32 llvm_funs(Arena* arena, Funs funs) {
+  llvm_gen.blocks = arena_push(arena, irgen.blocks.length * sizeof(LLVMBasicBlockRef));
+  llvm_gen.irs    = arena_push(arena, irgen.irs.length    * sizeof(LLVMValueRef));
   LLVMContextRef context = LLVMContextCreate();
-  LLVMModuleRef module = LLVMModuleCreateWithNameInContext("contex_name", context);
+  LLVMModuleRef  module  = LLVMModuleCreateWithNameInContext("contex_name", context);
   LLVMBuilderRef builder = LLVMCreateBuilderInContext(context);
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
-    LLVMTypeRef llvm_fun_type = llvm_type_map(context, fun->type);
+    LLVMTypeRef llvm_fun_type = llvm_of_type(context, fun->type);
     LLVMValueRef function = LLVMAddFunction(module, cstr_from_str(fun->name), llvm_fun_type);
 
     for (I32 b = 0; b < fun->blocks->length; b++) {
       Block* block = fun->blocks->base[b];
-      block->llvm_block = LLVMAppendBasicBlockInContext(context, function, "block");
+      LLVMBasicBlockRef llvm_block = LLVMAppendBasicBlockInContext(context, function, "block");
+      llvm_of_block_put(block, llvm_block);
     }
 
     for (I32 b = 0; b < fun->blocks->length; b++) {
       Block* block = fun->blocks->base[b];
-      LLVMPositionBuilderAtEnd(builder, block->llvm_block);
+      LLVMBasicBlockRef llvm_block = llvm_of_block(block);
+      LLVMPositionBuilderAtEnd(builder, llvm_block);
       for (I32 i = 0; i < block->irs->length; i++) {
         // Ir* ir = fa_get(block->irs, i);
         // Type* type = type_of_ir(ir);
@@ -74,9 +119,14 @@ I32 llvm_funs(Funs funs) {
       case Block_Kind_none: {
       } break;
       case Block_Kind_jump: {
-        LLVMBuildBr(builder, block->jump.to_block->llvm_block);
+        LLVMBasicBlockRef llvm_to_block = llvm_of_block(block->jump.to_block);
+        LLVMBuildBr(builder, llvm_to_block);
       } break;
       case Block_Kind_branch: {
+        LLVMValueRef cond = llvm_of_ir(block->branch.cond);
+        LLVMBasicBlockRef then_block = llvm_of_block(block->branch.nez.to_block);
+        LLVMBasicBlockRef else_block = llvm_of_block(block->branch.eqz.to_block);
+        LLVMBuildCondBr(builder, cond, then_block, else_block);
       } break;
       }
     }
@@ -86,16 +136,15 @@ I32 llvm_funs(Funs funs) {
       LLVMBuildRetVoid(builder);
     }
     else {
-      LLVMTypeRef ret_var_type = llvm_type_map(context, fun->type->fun->ret);
+      LLVMTypeRef ret_var_type = llvm_of_type(context, fun->type->fun->ret);
       LLVMValueRef ret_var  = LLVMBuildAlloca(builder, ret_var_type, "my_new_test");
 
-      LLVMTypeRef llvm_ret_type = llvm_type_map(context, ret_type);
+      LLVMTypeRef llvm_ret_type = llvm_of_type(context, ret_type);
       LLVMValueRef ret_loaded = LLVMBuildLoad2(builder, llvm_ret_type, ret_var, "loaded_ret_var");
       LLVMBuildRet(builder, ret_loaded);
     }
   }
 
-  // 6. Verify the module is correct
   char *error = NULL;
   if (LLVMVerifyModule(module, LLVMAbortProcessAction, &error)) {
     fprintf(stderr, "Error verifying module: %s\n", error);
@@ -103,16 +152,9 @@ I32 llvm_funs(Funs funs) {
     return 1;
   }
 
-  // 7. Print the generated IR to stdout
   printf("Generated LLVM IR:\n");
   LLVMDumpModule(module);
 
-  // 8. (Optional) Write the module to a bitcode file
-  if (LLVMWriteBitcodeToFile(module, "example.bc") != 0) {
-    fprintf(stderr, "Error writing bitcode to file\n");
-  }
-
-  // 9. Clean up
   if (error) {
     LLVMDisposeMessage(error);
   }
@@ -130,7 +172,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Ast_Block ast        = parse_tokens(&arena, tokens);
   Funs funs            = irgen_ast(&arena, ast, source_length);
                          sem_funs(&arena, funs);
-                         llvm_funs(funs);
+                         llvm_funs(&arena, funs);
   test_at_source("", expected, file_name, line, source);
   arena_free(&arena);
 }

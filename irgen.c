@@ -177,13 +177,10 @@ struct Block_List {
   Block** base;
 };
 
-typedef struct LLVMOpaqueBasicBlock *LLVMBasicBlockRef;
 struct Block {
   Block_Kind kind;
   Block_State state;
   B8 is_present_in_worklist;
-
-  LLVMBasicBlockRef llvm_block;
 
   B8 is_scc_visited;
   B8 is_on_scc_stack;
