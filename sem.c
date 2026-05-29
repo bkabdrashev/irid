@@ -445,7 +445,7 @@ Ranges* sem_ranges_init(I32 max_len) {
 }
 
 Type* type_ranges(Ranges* ranges) {
-  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  Type* new_type = &new(sem.types);
 
   if (ranges->length == 0) {
     new_type->kind = Type_Kind_none;
@@ -564,7 +564,7 @@ Field type_record_get_by_name(Block* block, Record* record, Str* name) {
 }
 
 Type* type_record(Record* record) {
-  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  Type* new_type = &new(sem.types);
   if (record->length == 0) {
     new_type->kind = Type_Kind_none;
   }
@@ -626,7 +626,7 @@ Type* type_join(Type* one, Type* two) {
 }
 
 Type* type_ptr(Pointer* ptr) {
-  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  Type* new_type = &new(sem.types);
   new_type->kind = Type_Kind_ptr;
   new_type->pointer = ptr;
   return new_type;
@@ -669,7 +669,7 @@ Type* type_pointer_declared(Pointer* pointer) {
 }
 
 Type* type_define_size(I32 bits_size, Type* bits_of) {
-  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  Type* new_type = &new(sem.types);
   *new_type = *bits_of;
   new_type->size_defined = true;
   new_type->bits_size = bits_size;
@@ -2094,7 +2094,7 @@ Type* sem_fun(Fun* fun) {
     sem_block(block);
   }
 
-  Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+  Type* new_type = &new(sem.types);
   new_type->kind = Type_Kind_fun;
   new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
   new_type->fun->arg = fun->arg_var->declared;
@@ -2116,8 +2116,10 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length);
+  sem.types.base = arena_push(arena, irgen.irs.length * sizeof(Type));
+  sem.types.length = 0;
 
-  sem.type_none = arena_push(arena, sizeof(Type));
+  sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;
 
   sem.current_fun_var_count = irgen.builtins->len;
@@ -2188,7 +2190,7 @@ void sem_test(void) {
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
-  test("a:(x:I32; y:I32); a.x", "");
+  test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
 }
 
 #undef test

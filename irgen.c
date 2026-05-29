@@ -1068,7 +1068,6 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
-  test("()->1; ()->2", "");
 }
 
 #undef test

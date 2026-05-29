@@ -20,12 +20,16 @@ typedef struct LLVM_Gen LLVM_Gen;
 struct LLVM_Gen {
   LLVMValueRef*      irs;
   LLVMBasicBlockRef* blocks;
+  LLVMTypeRef*       types;
 };
 
 LLVM_Gen llvm_gen;
 
 LLVMTypeRef llvm_of_type(LLVMContextRef context, Type* type) {
-  LLVMTypeRef result;
+  I32 typeid = type - sem.types.base;
+  LLVMTypeRef result = llvm_gen.types[typeid];
+  if (result) return result;
+
   switch (type->kind) {
   case Type_Kind_none: {
     result = LLVMVoidTypeInContext(context);
@@ -65,6 +69,7 @@ LLVMTypeRef llvm_of_type(LLVMContextRef context, Type* type) {
     result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
   } break;
   }
+  llvm_gen.types[typeid] = result;
   return result;
 }
 
@@ -96,6 +101,7 @@ LLVMTypeRef llvm_type_of_ir(LLVMContextRef context, Ir* ir) {
 I32 llvm_funs(Arena* arena, Funs funs) {
   llvm_gen.blocks = arena_push(arena, irgen.blocks.length * sizeof(LLVMBasicBlockRef));
   llvm_gen.irs    = arena_push(arena, irgen.irs.length    * sizeof(LLVMValueRef));
+  llvm_gen.types  = arena_push(arena, sem.types.length    * sizeof(LLVMTypeRef));
   LLVMContextRef context = LLVMContextCreate();
   LLVMModuleRef  module  = LLVMModuleCreateWithNameInContext("contex_name", context);
   LLVMBuilderRef builder = LLVMCreateBuilderInContext(context);
@@ -141,17 +147,6 @@ I32 llvm_funs(Arena* arena, Funs funs) {
           llvm_ir = LLVMConstInt(llvm_type, ir->i64, 0);
         } break;
 
-        case Ir_Kind_name_offset: {
-          Type* of_type = type_of_ir(ir->name.of);
-          Ir_Kind ir_kind = ir->name.of->kind;
-          if (ir_kind == Ir_Kind_load) {
-            LLVMValueRef ptr = llvm_of_ir(ir->name.of->unary);
-            I32 position = hash_map_get_i32(&of_type->record->position_from_name, ir->name.at);
-            LLVMTypeRef llvm_type = llvm_of_type(context, of_type);
-            llvm_ir = LLVMBuildStructGEP2(builder, llvm_type, ptr, position, ""); break;
-          }
-        } break;
-
         case Ir_Kind_add: llvm_ir = LLVMBuildAdd(builder, one, two, ""); break;
         case Ir_Kind_sub: llvm_ir = LLVMBuildSub(builder, one, two, ""); break;
         case Ir_Kind_mul: llvm_ir = LLVMBuildMul(builder, one, two, ""); break;
@@ -162,19 +157,53 @@ I32 llvm_funs(Arena* arena, Funs funs) {
         case Ir_Kind_gt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGT, one, two, ""); break;
         case Ir_Kind_ge:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGE, one, two, ""); break;
         case Ir_Kind_neg: llvm_ir = LLVMBuildNeg(builder, unary, ""); break;
+
+        case Ir_Kind_name_offset: {
+          Type* of_type = type_of_ir(ir->name.of);
+          Ir_Kind ir_kind = ir->name.of->kind;
+          if (ir_kind == Ir_Kind_load) {
+            LLVMValueRef ptr = llvm_of_ir(ir->name.of->unary);
+            I32 position = hash_map_get_i32(&of_type->record->position_from_name, ir->name.at);
+            LLVMTypeRef llvm_type = llvm_of_type(context, of_type);
+            llvm_ir = LLVMBuildStructGEP2(builder, llvm_type, ptr, position, "");
+          }
+        } break;
         case Ir_Kind_load:  {
           Type* type = type_of_ir(ir);
           LLVMTypeRef llvm_type = llvm_of_type(context, type);
           llvm_ir = LLVMBuildLoad2(builder, llvm_type, unary, "");
         } break;
-        case Ir_Kind_store: llvm_ir = LLVMBuildStore(builder, two, one); break;
-
+        case Ir_Kind_store: {
+          if (ir->binary.two->kind == Ir_Kind_record) {
+            Type* type_ptr = type_of_ir(ir->binary.one);
+            Type* record_type = type_ptr->pointer->declared;
+            Record* record_one = ir->binary.two->record;
+            Record* record_two = record_type->record;
+            for (I32 pos = 0; pos < record_one->length; pos++) {
+              Str* name = record_one->names[pos];
+              if (name) {
+                I32 position = hash_map_get_i32(&record_two->position_from_name, name);
+                LLVMValueRef llvm_assigned = llvm_of_ir(record_one->assigned[position]);
+                LLVMTypeRef llvm_type = llvm_of_type(context, record_type);
+                LLVMValueRef llvm_gep = LLVMBuildStructGEP2(builder, llvm_type, one, position, "");
+                LLVMBuildStore(builder, llvm_assigned, llvm_gep);
+              }
+              else {
+                assert(0);
+              }
+            }
+          }
+          else {
+            llvm_ir = LLVMBuildStore(builder, two, one);
+          }
+        } break;
+        case Ir_Kind_record: {
+        } break;
         case Ir_Kind_ptr: assert(0);
         case Ir_Kind_position_offset: assert(0);
 
         case Ir_Kind_fun:     assert(0);
         case Ir_Kind_call:    assert(0);
-        case Ir_Kind_record:  break;
         case Ir_Kind_declare: break;
         case Ir_Kind_none:    break;
         case Ir_Kind_range:   break;
@@ -250,7 +279,8 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("a:(x:I32; y:I32); a.x", "");
+  test("a:I32; a=5", "");
+  test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
 }
 
 #undef test
