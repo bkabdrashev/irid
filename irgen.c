@@ -1,4 +1,3 @@
-#include <llvm-c/Types.h>
 typedef enum Ir_Flag {
   Ir_Flag_unary  = Ast_Flag_unary,
   Ir_Flag_binary = Ast_Flag_binary,
@@ -28,6 +27,7 @@ typedef enum Ir_Kind {
   Ir_Kind_load      = Ast_Kind_load | Ir_Flag_unary,
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
+  Ir_Kind_assign    = Ast_Kind_assign,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
@@ -80,7 +80,14 @@ typedef enum Var_State {
   Var_State_resolved,
 } Var_State;
 
+typedef enum Var_Kind {
+  Var_Kind_none,
+  Var_Kind_assigned,
+  Var_Kind_declared,
+} Var_Kind;
+
 struct Var {
+  Var_Kind  kind;
   Var_State state;
   B8    global;
   Var*  parent;
@@ -100,6 +107,10 @@ struct Ir {
     Record* record;
     Ir_Pair binary;
     Ir*     unary;
+    struct {
+      Str* name;
+      Ir*  rhs;
+    } assign;
     Position_Offset position;
     Name_Offset     name;
     Declare         declare;
@@ -327,6 +338,12 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       }
     }
   } break;
+  case Ir_Kind_assign: {
+    string_builder_push_cstr(sb, "assign ");
+    string_builder_push_str(sb, ir->assign.name);
+    string_builder_push_cstr(sb, " = ");
+    string_builder_push_irid(sb, ir->assign.rhs);
+  } break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
     string_builder_push_var(sb, ir->var);
@@ -524,6 +541,11 @@ Ir* irgen_push_var(Var* var) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_assign(Str* name, Ir* rhs) {
+  Ir ir = { Ir_Kind_assign, .assign = { .name = name, .rhs = rhs } };
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_fun(Fun* fun) {
   Ir ir = { Ir_Kind_fun, .fun = fun };
   return irgen_push(ir);
@@ -633,12 +655,12 @@ Block* irgen_block_return(void) {
 
 Ir* irgen_ast_node(Ast_Node* node);
 
-Symbol* irgen_get_sym(Str* str) {
+Ir* irgen_get_sym(Str* str) {
   for (I32 i = 0; i < irgen.scope_stack.length; i++) {
     Hash_Map* scope = irgen.scope_stack.base[i];
     Symbol* sym = hash_map_get(scope, str);
     if (sym) {
-      return sym;
+      return sym->var_ir;
     }
   }
   return 0;
@@ -666,6 +688,7 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   irgen_block_leave();
   var->blocks = irgen_blocks_perm(temp_fun.blocks);
   var->declared_ir = ir;
+  var->kind = Var_Kind_declared;
   del(irgen.fun_stack);
 }
 
@@ -674,8 +697,8 @@ void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     {
-      Symbol* sym = irgen_get_sym(key);
-      if (sym) assert(0);
+      Ir* ir = irgen_get_sym(key);
+      if (ir) assert(0);
     }
     Symbol* sym = hash_map_get(scope, key);
     Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
@@ -717,7 +740,7 @@ Fun* irgen_fun_enter(void) {
   Var* ret_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
   fun->ret_ir = irgen_push_var(ret_var);
   fun->ret_ir->var->name = str_from_cstr("__ret");
-  // irgen_decl_var(fun->ret_ir->var, ret_decl); // TODO: declare return var
+  // irgen_var_declare(fun->ret_ir->var, ret_decl); // TODO: declare return var
 
   fun->var_count = irgen.builtins->cap;
   return fun;
@@ -739,6 +762,15 @@ Fun* irgen_fun_leave(void) {
 
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
+  case Ast_Kind_name: {
+    Ir* var_ir = irgen_get_sym(lhs->str);
+    if (var_ir) {
+      irgen_push_binary(Ir_Kind_store, var_ir, rhs);
+    }
+    else {
+      irgen_push_assign(lhs->str, rhs);
+    }
+  } break;
   case Ast_Kind_tuple: {
     for (I32 i = 0; i < lhs->list->length; i++) {
       Ir* at = irgen_push_position_offset(rhs, i);
@@ -766,9 +798,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_str(node->str);
   } break;
   case Ast_Kind_name: {
-    Symbol* sym = irgen_get_sym(node->str);
-    if (sym) {
-      result = irgen_push_unary(Ir_Kind_load, sym->var_ir);
+    Ir* var_ir = irgen_get_sym(node->str);
+    if (var_ir) {
+      result = irgen_push_unary(Ir_Kind_load, var_ir);
     }
     else {
       assert(0);
@@ -858,6 +890,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* unary = irgen_ast_node(node->unary);
     if (unary->kind == Ir_Kind_load) {
       result = unary->unary;
+      if (result->kind == Ir_Kind_var) {
+        if (result->var->kind == Var_Kind_assigned) {
+          printf("Identifier without declared type is not addressable\n");
+          assert(0);
+        }
+      }
       irgen_pop();
     }
     else {
@@ -1097,7 +1135,8 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
-  test("foo:#c aaa () -> 1", "");
+  // test("foo:#c aaa () -> 1", "");
+  test("a = 1; a+a", "");
 }
 
 #undef test

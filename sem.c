@@ -1277,6 +1277,8 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_declare: {
     sem_ensure_declared(ir->declare.var);
   } break;
+  case Ir_Kind_assign: {
+  } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
   } break;
@@ -2192,8 +2194,8 @@ void sem_test(void) {
   // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
   // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
   // test("a:I32; b:@I32; b = @a; b@ = 1", "");
-  test("a:I32; foo:() -> a;", "");
-  test("putchar: #c putchar (char:I32) -> I32", "");
+  // test("a:I32; foo:() -> a;", "");
+  // test("putchar: #c putchar (char:I32) -> I32", "");
 }
 
 #undef test

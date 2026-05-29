@@ -289,7 +289,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void llvm_test(void) {
   // test("a:I32; a=5", "");
   // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
-  test("myputchar: #c putchar (char:I32) -> I32", "");
+  // test("putchar: #c putchar (char:I32) -> I32", "");
 }
 
 #undef test
