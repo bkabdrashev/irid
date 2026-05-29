@@ -44,7 +44,8 @@ typedef enum Ast_Kind {
   Ast_Kind_break_value = Token_Kind_break | Ast_Flag_value,
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
-  Ast_Kind_call        = 50,
+  Ast_Kind_foreign_c   = Token_Kind_foreign_c,
+  Ast_Kind_call        = 100,
   Ast_Kind_assign_field,
   Ast_Kind_iblock,
 } Ast_Kind;
@@ -75,6 +76,11 @@ struct Ast_Block {
   Hash_Map* scope;
   Ast_List* list;
 };
+typedef struct Ast_Named Ast_Named;
+struct Ast_Named {
+  Str* name;
+  Ast_Node* node;
+};
 
 struct Ast_Node {
   Ast_Kind kind;
@@ -88,10 +94,8 @@ struct Ast_Node {
       Ast_Node* lhs;
       Ast_Node* rhs;
     } binary;
-    struct {
-      Str* str;
-      Ast_Node* rhs;
-    } declare;
+    Ast_Named foreign;
+    Ast_Named declare;
     Ast_Block block;
   };
 };
@@ -307,14 +311,20 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.rhs);
   } break;
   case Ast_Kind_assign_field: {
-    string_builder_push_str(sb, node->declare.str);
+    string_builder_push_str(sb, node->declare.name);
     string_builder_push_cstr(sb, "=");
-    string_builder_push_ast_node(sb, node->declare.rhs);
+    string_builder_push_ast_node(sb, node->declare.node);
   } break;
   case Ast_Kind_declare: {
-    string_builder_push_str(sb, node->declare.str);
+    string_builder_push_str(sb, node->declare.name);
     string_builder_push_cstr(sb, ":");
-    string_builder_push_ast_node(sb, node->declare.rhs);
+    string_builder_push_ast_node(sb, node->declare.node);
+  } break;
+  case Ast_Kind_foreign_c: {
+    string_builder_push_cstr(sb, "#c ");
+    string_builder_push_str(sb, node->foreign.name);
+    string_builder_push_cstr(sb, " ");
+    string_builder_push_ast_node(sb, node->foreign.node);
   } break;
   }
 }
@@ -701,8 +711,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
         if (lhs->kind == Ast_Kind_name) {
           Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
           exp = parse_new_node(parser, Ast_Kind_declare);
-          exp->declare.str = lhs->str;
-          exp->declare.rhs = rhs;
+          exp->declare.name = lhs->str;
+          exp->declare.node = rhs;
         }
         else {
           assert(0);
@@ -714,8 +724,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
         if (lhs->kind == Ast_Kind_name) {
           Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
           exp = parse_new_node(parser, Ast_Kind_assign_field);
-          exp->declare.str = lhs->str;
-          exp->declare.rhs = rhs;
+          exp->declare.name = lhs->str;
+          exp->declare.node = rhs;
         }
         else {
           assert(0);
@@ -750,6 +760,19 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = parse_new_node(parser, kind);
     node->binary.lhs = lhs;
     node->binary.rhs = rhs;
+  } break;
+  case Token_Kind_foreign_c: {
+    Ast_Kind kind = Ast_Kind_foreign_c;
+    Token token_name = parser->tokens.base[parser->tok];
+    if (parse_match_token(parser, Token_Kind_name)) {
+      node = parse_new_node(parser, kind);
+      node->foreign.name = token_name.str;
+      node->foreign.node = parse_fun_tuple_or_exp(parser);
+    }
+    else {
+      assert(0);
+    }
+
   } break;
   default:
     parser->tok--;
@@ -916,7 +939,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void parse_test(void) {
 
-  test("\"abc\"",            "a : 1; ");
+  test("#c abc () -> 1",     "#c abc (() -> 1)");
 
   test("a:1",            "a : 1; ");
 

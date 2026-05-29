@@ -82,6 +82,7 @@ typedef enum Var_State {
 
 struct Var {
   Var_State state;
+  B8    global;
   Var*  parent;
   Str*  name;
   Type* declared;
@@ -208,6 +209,7 @@ struct Record_Pool {
 
 struct Fun {
   Str*    name;
+  B8      foreign;
   Blocks* blocks;
   Block*  ret_block;
   Var*    arg_var;
@@ -440,7 +442,10 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
-    string_builder_push_fun(&sb,   fun);
+    string_builder_push_fun(&sb, fun);
+    if (fun->foreign) {
+      string_builder_push_cstr(&sb, " #c");
+    }
     string_builder_push_cstr(&sb, " {");
 
     for (I32 b = 0; b < fun->blocks->length; b++) {
@@ -639,7 +644,7 @@ Symbol* irgen_get_sym(Str* str) {
   return 0;
 }
 
-void irgen_decl_var(Var* var, Ast_Node* node) {
+void irgen_var_declare(Var* var, Ast_Node* node) {
   Fun* fun = top(irgen.fun_stack);
   Fun temp_fun = {};
   temp_fun.name = 0;
@@ -654,7 +659,7 @@ void irgen_decl_var(Var* var, Ast_Node* node) {
   }
 
   Ir* ir = irgen_ast_node(node);
-  if (ir->kind == Ir_Kind_fun) {
+  if (ir->kind == Ir_Kind_fun && !ir->fun->foreign) {
     ir->fun->name = var->name;
   }
   fun->var_count += temp_fun.var_count;
@@ -674,6 +679,7 @@ void irgen_scope_enter(Hash_Map* scope) {
     }
     Symbol* sym = hash_map_get(scope, key);
     Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    var->global = irgen.scope_stack.length == 1;
     var->name = key;
     sym->var_ir = irgen_push_var(var);
 
@@ -684,7 +690,7 @@ void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
-    irgen_decl_var(sym->var_ir->var, sym->ast);
+    irgen_var_declare(sym->var_ir->var, sym->ast);
     irgen_push_declare(sym->var_ir->var);
   }
 }
@@ -792,13 +798,13 @@ Ir* irgen_ast_node(Ast_Node* node) {
     for (I32 i = 0; i < node->list->length; i++) {
       Ast_Node* field_node = node->list->base[i];
       if (field_node->kind == Ast_Kind_assign_field) {
-        Ir* ir = irgen_ast_node(field_node->declare.rhs);
-        record_push_assign_name(record, field_node->declare.str, i);
+        Ir* ir = irgen_ast_node(field_node->declare.node);
+        record_push_assign_name(record, field_node->declare.name, i);
         record_push_assign_position(record, i, ir);
       }
       else if (field_node->kind == Ast_Kind_declare) {
-        Ir* ir = irgen_ast_node(field_node->declare.rhs);
-        record_push_assign_name(record, field_node->declare.str, i);
+        Ir* ir = irgen_ast_node(field_node->declare.node);
+        record_push_assign_name(record, field_node->declare.name, i);
         record_push_declare_position(record, i, ir);
       }
       else {
@@ -811,8 +817,8 @@ Ir* irgen_ast_node(Ast_Node* node) {
 
   case Ast_Kind_declare: {
     Record* record = record_new(1);
-    Ir* ir = irgen_ast_node(node->declare.rhs);
-    record_push_assign_name(record, node->declare.str, 0);
+    Ir* ir = irgen_ast_node(node->declare.node);
+    record_push_assign_name(record, node->declare.name, 0);
     record_push_declare_position(record, 0, ir);
     result = irgen_push_record(record);
   } break;
@@ -930,14 +936,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     {
       Ast_Node* lhs = node->binary.lhs;
       if (lhs->kind == Ast_Kind_record) {
-        irgen_decl_var(fun->arg_var, lhs);
+        irgen_var_declare(fun->arg_var, lhs);
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
         for (I32 i = 0; i < lhs->list->length; i++) {
           Ast_Node* param = lhs->list->base[i];
           if (param->kind == Ast_Kind_declare) {
             Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
-            sym->ast = param->declare.rhs;
-            hash_map_put(&scope, param->declare.str, sym);
+            sym->ast = param->declare.node;
+            hash_map_put(&scope, param->declare.name, sym);
           }
           else if (node->kind == Ast_Kind_assign_field) {
             assert(0);
@@ -949,11 +955,11 @@ Ir* irgen_ast_node(Ast_Node* node) {
         irgen_scope_enter(&scope);
       }
       else if (lhs->kind == Ast_Kind_declare) {
-        irgen_decl_var(fun->arg_var, lhs->declare.rhs);
+        irgen_var_declare(fun->arg_var, lhs->declare.node);
         scope = hash_map_init(irgen.perm_arena, 1);
         Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
-        sym->ast = lhs->declare.rhs;
-        hash_map_put(&scope, lhs->declare.str, sym);
+        sym->ast = lhs->declare.node;
+        hash_map_put(&scope, lhs->declare.name, sym);
         irgen_scope_enter(&scope);
       }
       else {
@@ -976,6 +982,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* ret = irgen_ast_node(node->unary);
     result = irgen_push_binary(Ir_Kind_store, fun->ret_ir, ret);
     irgen_block_return();
+  } break;
+  case Ast_Kind_foreign_c: {
+    Ir* ir = irgen_ast_node(node->foreign.node);
+    if (ir->kind == Ir_Kind_fun) {
+      ir->fun->foreign = true;
+      ir->fun->name = node->foreign.name;
+      result = ir;
+    }
   } break;
   case Ast_Kind_break: case Ast_Kind_break_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:
@@ -1018,6 +1032,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       Str* i32_str = str_from_cstr("I32");
       Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
       Var* i32_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+      i32_var->global = true;
       i32_var->name = i32_str;
       Ir* i32_min = irgen_push_int(I32_MIN);
       Ir* i32_max = irgen_push_int(I32_MAX);
@@ -1039,7 +1054,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     Ast_Node* node = arena_push(irgen.perm_arena, sizeof(Ast_Node));
     node->kind = Ast_Kind_record;
     node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
-    irgen_decl_var(fun->arg_var, node);
+    irgen_var_declare(fun->arg_var, node);
   }
 
   irgen_scope_enter(ast.scope);
@@ -1082,6 +1097,7 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
+  test("foo:#c aaa () -> 1", "");
 }
 
 #undef test
