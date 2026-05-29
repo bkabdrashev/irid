@@ -10,6 +10,7 @@ typedef enum Ast_Kind {
   Ast_Kind_none      = 0,
   Ast_Kind_name      = Token_Kind_name & 0xff,
   Ast_Kind_int       = Token_Kind_int & 0xff,
+  Ast_Kind_str       = Token_Kind_str & 0xff,
   Ast_Kind_add       = Token_Kind_plus,
   Ast_Kind_sub       = Token_Kind_minus,
   Ast_Kind_mul       = Token_Kind_star,
@@ -161,6 +162,11 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   break;
   case Ast_Kind_int:
     string_builder_push_i64(sb, node->i64);
+  break;
+  case Ast_Kind_str:
+    string_builder_push_cstr(sb, "\"");
+    string_builder_push_str(sb, node->str);
+    string_builder_push_cstr(sb, "\"");
   break;
   case Ast_Kind_tuple:
     string_builder_push_cstr(sb, "(");
@@ -653,12 +659,11 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node->kind = kind;
     node->unary = unary;
   } break;
-  case Token_Kind_int: case Token_Kind_name: {
+  case Token_Kind_str: case Token_Kind_int: case Token_Kind_name: {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
     node = arena_push(parser->perm_arena, sizeof(Ast_Node));
     node->kind = kind;
     node->bits = token.bits;
-    // parse_final_push(parser, node);
   } break;
   case Token_Kind_backslash: {
     node = parse_new_expression(parser, 0);
@@ -910,6 +915,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+
+  test("\"abc\"",            "a : 1; ");
 
   test("a:1",            "a : 1; ");
 

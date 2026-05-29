@@ -8,6 +8,7 @@ typedef enum Ir_Kind {
   Ir_Kind_none = 0,
 
   Ir_Kind_int = Ast_Kind_int,
+  Ir_Kind_str = Ast_Kind_str,
 
   Ir_Kind_add = Ast_Kind_add | Ir_Flag_binary,
   Ir_Kind_sub = Ast_Kind_sub | Ir_Flag_binary,
@@ -91,7 +92,8 @@ struct Var {
 struct Ir {
   Ir_Kind kind;
   union {
-    I64 i64;
+    I64     i64;
+    Str*    str;
     Var*    var;
     Fun*    fun;
     Record* record;
@@ -307,6 +309,10 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "int ");
     string_builder_push_i64(sb, ir->i64);
   break;
+  case Ir_Kind_str:
+    string_builder_push_cstr(sb, "str ");
+    string_builder_push_str(sb, ir->str);
+  break;
   case Ir_Kind_declare: {
     Var* var = ir->declare.var;
     string_builder_push_cstr(sb, "declare ");
@@ -500,6 +506,11 @@ Ir* irgen_push_none(void) {
 
 Ir* irgen_push_int(I64 i64) {
   Ir ir = { Ir_Kind_int, .i64 = i64 };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_str(Str* str) {
+  Ir ir = { Ir_Kind_str, .str = str };
   return irgen_push(ir);
 }
 
@@ -744,6 +755,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
   switch (node->kind) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
+  } break;
+  case Ast_Kind_str: {
+    result = irgen_push_str(node->str);
   } break;
   case Ast_Kind_name: {
     Symbol* sym = irgen_get_sym(node->str);
