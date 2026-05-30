@@ -648,12 +648,12 @@ Block* irgen_block_return(void) {
 
 Ir* irgen_ast_node(Ast_Node* node);
 
-Ir* irgen_get_sym(Str* str) {
+Symbol* irgen_sym_get(Str* str) {
   for (I32 i = 0; i < irgen.scope_stack.length; i++) {
     Hash_Map* scope = irgen.scope_stack.base[i];
     Symbol* sym = hash_map_get(scope, str);
     if (sym) {
-      return sym->var_ir;
+      return sym;
     }
   }
   return 0;
@@ -690,14 +690,16 @@ void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     {
-      Ir* ir = irgen_get_sym(key);
-      if (ir) assert(0);
+      Symbol* sym = irgen_sym_get(key);
+      if (sym) assert(0);
     }
     Symbol* sym = hash_map_get(scope, key);
     Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    var->kind = Var_Kind_declared;
     var->global = irgen.scope_stack.length == 1;
     var->name = key;
-    sym->var_ir = irgen_push_var(var);
+    sym->kind = Symbol_Kind_variable;
+    sym->ir = irgen_push_var(var);
 
     fun->var_count++;
   }
@@ -706,8 +708,8 @@ void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
-    irgen_var_declare(sym->var_ir->var, sym->ast);
-    irgen_push_declare(sym->var_ir->var);
+    irgen_var_declare(sym->ir->var, sym->ast);
+    irgen_push_declare(sym->ir->var);
   }
 }
 
@@ -755,6 +757,22 @@ Fun* irgen_fun_leave(void) {
 
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
+  case Ast_Kind_name: {
+    Symbol* sym = irgen_sym_get(lhs->str);
+    if (sym) {
+      if (sym->kind == Symbol_Kind_variable) {
+        irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
+      }
+      else {
+        printf("cannot assign '%s'\n", lhs->str->base);
+        assert(0);
+      }
+    }
+    else {
+      printf("not found\n");
+      assert(0);
+    }
+  } break;
   case Ast_Kind_tuple: {
     for (I32 i = 0; i < lhs->list->length; i++) {
       Ir* at = irgen_push_position_offset(rhs, i);
@@ -782,9 +800,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_str(node->str);
   } break;
   case Ast_Kind_name: {
-    Ir* var_ir = irgen_get_sym(node->str);
-    if (var_ir) {
-      result = irgen_push_unary(Ir_Kind_load, var_ir);
+    Symbol* sym = irgen_sym_get(node->str);
+    if (sym) {
+      if (sym->kind == Symbol_Kind_variable) {
+        result = irgen_push_unary(Ir_Kind_load, sym->ir);
+      }
+      else {
+        result = sym->ir;
+      }
     }
     else {
       printf("not found\n");
@@ -1054,22 +1077,15 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     {
       Str* i32_str = str_from_cstr("I32");
       Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-      Var* i32_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-      i32_var->kind = Var_Kind_constant;
-      i32_var->global = true;
-      i32_var->name = i32_str;
+      i32_sym->kind = Symbol_Kind_constant;
       Ir* i32_min = irgen_push_int(I32_MIN);
       Ir* i32_max = irgen_push_int(I32_MAX);
       Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
       Ir* i32_bits = irgen_push_int(32);
-      i32_var->declared_ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
-      irgen_push_declare(i32_var);
-      i32_sym->var_ir = irgen_push_var(i32_var);
+      i32_sym->ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
 
       hash_map_put(irgen.builtins, i32_str, i32_sym);
       add(irgen.scope_stack, irgen.builtins);
-
-      i32_var->blocks = 0;
     }
 
     fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));

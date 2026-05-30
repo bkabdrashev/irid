@@ -144,7 +144,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
                 LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
                 llvm_ir = LLVMAddGlobal(module, llvm_var_type, ir->var->name->base);
                 // LLVMSetInitializer(llvm_ir, LLVMConstInt(llvm_var_type, 0, 0));
-                LLVMSetGlobalConstant(llvm_ir, 0);
+                LLVMSetGlobalConstant(llvm_ir, false);
               }
               else {
                 LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
@@ -157,6 +157,10 @@ I32 llvm_funs(Arena* arena, Funs funs) {
           Type* type = type_of_ir(ir);
           LLVMTypeRef llvm_type = llvm_of_type(context, type);
           llvm_ir = LLVMConstInt(llvm_type, ir->i64, 0);
+        } break;
+        case Ir_Kind_str: {
+          Type* type = type_of_ir(ir);
+          llvm_ir = LLVMConstStringInContext2(context, ir->str->base, ir->str->length, false);
         } break;
 
         case Ir_Kind_add: llvm_ir = LLVMBuildAdd(builder, one, two, ""); break;
@@ -292,8 +296,8 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   // test("a:I32; a=5", "");
-  test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
-  // test("putchar: #c putchar (char:I32) -> I32", "");
+  // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
+  test("putchar: #c putchar (char:I32) -> I32", "");
 }
 
 #undef test

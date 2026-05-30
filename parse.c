@@ -64,11 +64,18 @@ struct Ast_List {
   Ast_Node* base[];
 };
 
+typedef enum {
+  Symbol_Kind_none     = 0,
+  Symbol_Kind_constant = 1,
+  Symbol_Kind_variable = 2,
+} Symbol_Kind;
+
 typedef struct Var Var;
 typedef struct Symbol Symbol;
 struct Symbol {
+  Symbol_Kind kind;
   Ast_Node* ast;
-  Ir* var_ir;
+  Ir* ir;
 };
 
 typedef struct Ast_Block Ast_Block;

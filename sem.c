@@ -1316,6 +1316,9 @@ void sem_ir(Block* block, Ir* ir) {
     I64 i64 = ir->i64;
     result  = type_int(i64);
   } break;
+  case Ir_Kind_str: {
+    assert(0);
+  } break;
   case Ir_Kind_declare: {
     sem_ensure_declared(ir->declare.var);
   } break;
@@ -2237,7 +2240,8 @@ void sem_test(void) {
   // test("a:I32; b:@I32; b = @a; b@ = 1", "");
   // test("a:I32; foo:() -> a;", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
-  test("a : 1; a = 1", "");
+  // test("a : 1; a = 1", "");
+  test("a:I32; a= 1", "");
 }
 
 #undef test
