@@ -159,7 +159,6 @@ I32 llvm_funs(Arena* arena, Funs funs) {
           llvm_ir = LLVMConstInt(llvm_type, ir->i64, 0);
         } break;
         case Ir_Kind_str: {
-          Type* type = type_of_ir(ir);
           llvm_ir = LLVMConstStringInContext2(context, ir->str->base, ir->str->length, false);
         } break;
 
