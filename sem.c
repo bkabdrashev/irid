@@ -15,8 +15,8 @@ struct Ranges_Pair { Ranges* one; Ranges* two; };
 
 typedef struct Pointer Pointer;
 struct Pointer {
-  Hash_Set stack;
   Type* declared;
+  Hash_Set stack;
 };
 
 typedef struct Pointer_Pair Pointer_Pair;
@@ -419,6 +419,38 @@ B8 type_is_true(Type* type) {
   default: assert(0);
   }
   return result;
+}
+
+B8 type_is_const(Type* type) {
+  switch (type->kind) {
+  case Type_Kind_none: {
+    return true;
+  } break;
+  case Type_Kind_int: {
+    return ranges_is_single(type->ranges);
+  } break;
+  case Type_Kind_record: {
+    for (I32 i = 0; i < type->record->length; i++) {
+      Type* field_declared = type_of_ir(type->record->declared[i]);
+      if (field_declared) {
+        if (!type_is_const(field_declared)) {
+          return false;
+        }
+      }
+      else {
+        return false;
+      }
+    }
+    return false;
+  } break;
+  case Type_Kind_ptr: {
+    return type->pointer->stack.len == 1;
+  } break;
+  case Type_Kind_fun: {
+    return false;
+  } break;
+  }
+  return false;
 }
 
 B8 type_is_subtype(Block* block, Type* one, Type* two) {
@@ -1186,6 +1218,10 @@ Type* type_of_var(Block* block, Var* var) {
 }
 
 void type_of_var_put(Block* block, Var* var, Type* type) {
+  if (var->kind == Var_Kind_constant) {
+    printf("cannot assign a constant '%s'\n", var->name->base);
+    assert(0);
+  }
   if (!var->declared) {
     hash_map_put(&block->out_var_types, var, type);
   }
@@ -1260,69 +1296,16 @@ void sem_ensure_declared(Var* var) {
   Type* type = type_of_ir(var->declared_ir);
   var->declared = type;
   if (type) {
+    if (type_is_const(type)) {
+      var->kind = Var_Kind_constant;
+    }
+    else {
+      var->kind = Var_Kind_declared;
+    }
     sem_record_declare_fields(var, type);
   }
 
   var->state = Var_State_resolved;
-}
-
-void sem_var_write(Block* block, Str* str, Type* type) {
-  hash_map_put(&block->assigned, str, type);
-}
-
-Type* sem_var_read(Block* block, Str* str);
-Type* sem_var_read_global(Block* block, Str* str) {
-  Type* type = sem.type_none;
-  for (I32 i = 0; i < block->preds.length; i++) {
-    Block* pred = block->preds.base[i];
-    if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
-      if (pred->kind == Block_Kind_branch) {
-        Sem_Tasks tasks = {};
-        tasks.out_vars = &pred->assigned;
-        tasks.length = 0;
-        tasks.vars = arena_push(sem.temp_arena, sizeof(Var*) * tasks.out_vars->len);
-        tasks.types = arena_push(sem.temp_arena, sizeof(Type*) * tasks.out_vars->len);
-        // TODO: this does narrowing again and again for each variable load
-        //       either do it once for all variables, or, narrow only a requested variable
-        { // condition is not equal to zero branch
-          Jump jump = pred->branch.nez;
-          if (jump.to_block == block) {
-            sem_narrow_nez(&tasks, pred);
-            Type* pred_type = sem_var_read(pred, str);
-            type = type_join(type, pred_type);
-            sem_unnarrow(tasks);
-            tasks.length = 0;
-          }
-        }
-        { // condition is equal to zero branch
-          Jump jump = pred->branch.eqz;
-          if (jump.to_block == block) {
-            sem_narrow_eqz(&tasks, pred);
-            Type* pred_type = sem_var_read(pred, str);
-            type = type_join(type, pred_type);
-            sem_unnarrow(tasks);
-            tasks.length = 0;
-          }
-        }
-
-        arena_release_mark(sem.temp_arena, tasks.vars);
-      }
-      else if (pred->kind == Block_Kind_jump) {
-        Type* pred_type = sem_var_read(pred, str);
-        type = type_join(type, pred_type);
-      }
-    }
-  }
-  hash_map_put(&block->assigned, str, type);
-  return type;
-}
-
-Type* sem_var_read(Block* block, Str* str) {
-  Type* type = hash_map_get(&block->assigned, str);
-  if (type) {
-    return type;
-  }
-  return sem_var_read_global(block, str);
 }
 
 Type* sem_fun(Fun* fun);
@@ -1335,13 +1318,6 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_declare: {
     sem_ensure_declared(ir->declare.var);
-  } break;
-  case Ir_Kind_write: {
-    Type* type = type_of_ir(ir->write.rhs);
-    sem_var_write(block, ir->write.name, type);
-  } break;
-  case Ir_Kind_read: {
-    result = sem_var_read(block, ir->read.name);
   } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
@@ -2261,7 +2237,7 @@ void sem_test(void) {
   // test("a:I32; b:@I32; b = @a; b@ = 1", "");
   // test("a:I32; foo:() -> a;", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
-  test("a = 1; if 1 do {a = 2}; a+a", "");
+  test("a : 1; a = 1", "");
 }
 
 #undef test

@@ -39,9 +39,6 @@ typedef enum Ir_Kind {
   Ir_Kind_range = 138 | Ir_Flag_binary,
   Ir_Kind_bits  = 139 | Ir_Flag_binary,
 
-  Ir_Kind_write = 140,
-  Ir_Kind_read  = 141,
-
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -345,16 +342,6 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       }
     }
   } break;
-  case Ir_Kind_write: {
-    string_builder_push_cstr(sb, "write ");
-    string_builder_push_var(sb, ir->write.var);
-    string_builder_push_cstr(sb, " = ");
-    string_builder_push_irid(sb, ir->write.rhs);
-  } break;
-  case Ir_Kind_read: {
-    string_builder_push_cstr(sb, "read ");
-    string_builder_push_var(sb, ir->read.var);
-  } break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
     string_builder_push_var(sb, ir->var);
@@ -549,16 +536,6 @@ Ir* irgen_push_str(Str* str) {
 
 Ir* irgen_push_var(Var* var) {
   Ir ir = { Ir_Kind_var, .var = var };
-  return irgen_push(ir);
-}
-
-Ir* irgen_push_write(Var* var, Ir* rhs) {
-  Ir ir = { Ir_Kind_write, .write = { .var = var, .rhs = rhs } };
-  return irgen_push(ir);
-}
-
-Ir* irgen_push_read(Var* var) {
-  Ir ir = { Ir_Kind_read, .read = { .var = var } };
   return irgen_push(ir);
 }
 
@@ -778,20 +755,6 @@ Fun* irgen_fun_leave(void) {
 
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
-  case Ast_Kind_name: {
-    Ir* var_ir = irgen_get_sym(lhs->str);
-    if (var_ir) {
-      irgen_push_binary(Ir_Kind_store, var_ir, rhs);
-    }
-    else {
-      Var* new_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-      new_var->kind = Var_Kind_assigned;
-      new_var->name = lhs->str;
-      Symbol* new_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-      new_sym->var_ir = irgen_push_var(new_var);
-      irgen_push_binary(Ir_Kind_store, new_sym->var_ir, rhs);
-    }
-  } break;
   case Ast_Kind_tuple: {
     for (I32 i = 0; i < lhs->list->length; i++) {
       Ir* at = irgen_push_position_offset(rhs, i);
@@ -1159,7 +1122,7 @@ void irgen_test(void) {
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
   // test("foo:#c aaa () -> 1", "");
-  test("a = 1; if 1 do a+a", "");
+  // test("a = 1; if 1 do a+a", "");
 }
 
 #undef test
