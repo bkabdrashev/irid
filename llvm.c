@@ -137,15 +137,19 @@ I32 llvm_funs(Arena* arena, Funs funs) {
         switch (ir->kind) {
         case Ir_Kind_var: {
           if (ir->var->declared->kind != Type_Kind_none) {
-            if (ir->var->global) {
-              LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
-              llvm_ir = LLVMAddGlobal(module, llvm_var_type, ir->var->name->base);
-              // LLVMSetInitializer(llvm_ir, LLVMConstInt(llvm_var_type, 0, 0));
-              LLVMSetGlobalConstant(llvm_ir, 0);
+            if (ir->var->kind == Var_Kind_constant) {
             }
             else {
-              LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
-              llvm_ir = LLVMBuildAlloca(builder, llvm_var_type, ir->var->name->base);
+              if (ir->var->global) {
+                LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
+                llvm_ir = LLVMAddGlobal(module, llvm_var_type, ir->var->name->base);
+                // LLVMSetInitializer(llvm_ir, LLVMConstInt(llvm_var_type, 0, 0));
+                LLVMSetGlobalConstant(llvm_ir, 0);
+              }
+              else {
+                LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
+                llvm_ir = LLVMBuildAlloca(builder, llvm_var_type, ir->var->name->base);
+              }
             }
           }
         } break;
@@ -191,7 +195,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
               Str* name = record_one->names[pos];
               if (name) {
                 I32 position = hash_map_get_i32(&record_two->position_from_name, name);
-                LLVMValueRef llvm_assigned = llvm_of_ir(record_one->assigned[position]);
+                LLVMValueRef llvm_assigned = llvm_of_ir(record_one->assigned[pos]);
                 LLVMTypeRef llvm_type = llvm_of_type(context, record_type);
                 LLVMValueRef llvm_gep = LLVMBuildStructGEP2(builder, llvm_type, one, position, "");
                 LLVMBuildStore(builder, llvm_assigned, llvm_gep);
@@ -288,7 +292,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   // test("a:I32; a=5", "");
-  // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
+  test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
 }
 

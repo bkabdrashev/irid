@@ -27,7 +27,6 @@ typedef enum Ir_Kind {
   Ir_Kind_load      = Ast_Kind_load | Ir_Flag_unary,
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
-  Ir_Kind_assign    = Ast_Kind_assign,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
@@ -39,6 +38,9 @@ typedef enum Ir_Kind {
 
   Ir_Kind_range = 138 | Ir_Flag_binary,
   Ir_Kind_bits  = 139 | Ir_Flag_binary,
+
+  Ir_Kind_write = 140,
+  Ir_Kind_read  = 141,
 
 } Ir_Kind;
 
@@ -82,6 +84,7 @@ typedef enum Var_State {
 
 typedef enum Var_Kind {
   Var_Kind_none,
+  Var_Kind_constant,
   Var_Kind_assigned,
   Var_Kind_declared,
 } Var_Kind;
@@ -108,9 +111,12 @@ struct Ir {
     Ir_Pair binary;
     Ir*     unary;
     struct {
-      Str* name;
+      Var* var;
       Ir*  rhs;
-    } assign;
+    } write;
+    struct {
+      Var* var;
+    } read;
     Position_Offset position;
     Name_Offset     name;
     Declare         declare;
@@ -206,6 +212,7 @@ struct Block {
 
   Irs* irs;
   Hash_Map out_var_types;
+  Hash_Map assigned;
   union {
     Jump   jump;
     Branch branch;
@@ -338,11 +345,15 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       }
     }
   } break;
-  case Ir_Kind_assign: {
-    string_builder_push_cstr(sb, "assign ");
-    string_builder_push_str(sb, ir->assign.name);
+  case Ir_Kind_write: {
+    string_builder_push_cstr(sb, "write ");
+    string_builder_push_var(sb, ir->write.var);
     string_builder_push_cstr(sb, " = ");
-    string_builder_push_irid(sb, ir->assign.rhs);
+    string_builder_push_irid(sb, ir->write.rhs);
+  } break;
+  case Ir_Kind_read: {
+    string_builder_push_cstr(sb, "read ");
+    string_builder_push_var(sb, ir->read.var);
   } break;
   case Ir_Kind_var:
     string_builder_push_cstr(sb, "var ");
@@ -541,8 +552,13 @@ Ir* irgen_push_var(Var* var) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_assign(Str* name, Ir* rhs) {
-  Ir ir = { Ir_Kind_assign, .assign = { .name = name, .rhs = rhs } };
+Ir* irgen_push_write(Var* var, Ir* rhs) {
+  Ir ir = { Ir_Kind_write, .write = { .var = var, .rhs = rhs } };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_read(Var* var) {
+  Ir ir = { Ir_Kind_read, .read = { .var = var } };
   return irgen_push(ir);
 }
 
@@ -768,7 +784,12 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       irgen_push_binary(Ir_Kind_store, var_ir, rhs);
     }
     else {
-      irgen_push_assign(lhs->str, rhs);
+      Var* new_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+      new_var->kind = Var_Kind_assigned;
+      new_var->name = lhs->str;
+      Symbol* new_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
+      new_sym->var_ir = irgen_push_var(new_var);
+      irgen_push_binary(Ir_Kind_store, new_sym->var_ir, rhs);
     }
   } break;
   case Ast_Kind_tuple: {
@@ -803,6 +824,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       result = irgen_push_unary(Ir_Kind_load, var_ir);
     }
     else {
+      printf("not found\n");
       assert(0);
     }
   } break;
@@ -1070,6 +1092,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       Str* i32_str = str_from_cstr("I32");
       Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
       Var* i32_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+      i32_var->kind = Var_Kind_constant;
       i32_var->global = true;
       i32_var->name = i32_str;
       Ir* i32_min = irgen_push_int(I32_MIN);
@@ -1136,7 +1159,7 @@ void irgen_test(void) {
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
   // test("foo:#c aaa () -> 1", "");
-  test("a = 1; a+a", "");
+  test("a = 1; if 1 do a+a", "");
 }
 
 #undef test
