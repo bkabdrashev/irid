@@ -1336,6 +1336,13 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_declare: {
     sem_ensure_declared(ir->declare.var);
   } break;
+  case Ir_Kind_write: {
+    Type* type = type_of_ir(ir->write.rhs);
+    sem_var_write(block, ir->write.name, type);
+  } break;
+  case Ir_Kind_read: {
+    result = sem_var_read(block, ir->read.name);
+  } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
   } break;
