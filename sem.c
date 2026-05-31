@@ -23,7 +23,7 @@ typedef struct Pointer_Pair Pointer_Pair;
 struct Pointer_Pair { Pointer* one; Pointer* two; };
 
 typedef struct Function Function;
-struct Function { Type* arg; Type* ret; };
+struct Function { Fun* fun; Type* arg; Type* ret; };
 
 typedef enum Type_Kind {
   Type_Kind_none,
@@ -39,10 +39,10 @@ struct Type {
   I16 bits_align;
   I16 bits_size;
   union {
-    Ranges*  ranges;
-    Pointer* pointer;
-    Record*  record;
-    Function* fun;
+    Ranges*   ranges;
+    Pointer*  pointer;
+    Record*   record;
+    Function* function;
   };
 };
 
@@ -94,7 +94,7 @@ Type* type_of_ir(Ir* ir);
 Type* type_join(Type* one, Type* two);
 Type* type_meet(Type* one, Type* two);
 Type* type_pointer_declared(Pointer* pointer);
-void  sem_ensure_declared(Var* var);
+Type* sem_ensure_declared(Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
@@ -108,9 +108,9 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "none");
   break;
   case Type_Kind_fun: {
-    string_builder_push_type(sb, block, type->fun->arg);
+    string_builder_push_type(sb, block, type->function->arg);
     string_builder_push_cstr(sb, " -> ");
-    string_builder_push_type(sb, block, type->fun->ret);
+    string_builder_push_type(sb, block, type->function->ret);
   } break;
   case Type_Kind_int: {
     if (type->ranges->length > 1) {
@@ -1294,8 +1294,8 @@ void sem_record_declare_fields(Var* var, Type* type) {
   type->bits_size = align_up(type->bits_size, type->bits_align);
 }
 
-void sem_ensure_declared(Var* var) {
-  if (var->state == Var_State_resolved) return;
+Type* sem_ensure_declared(Var* var) {
+  if (var->state == Var_State_resolved) return var->declared;
   if (var->state == Var_State_resolving) {
     assert(0);
   }
@@ -1324,6 +1324,7 @@ void sem_ensure_declared(Var* var) {
   }
 
   var->state = Var_State_resolved;
+  return type;
 }
 
 Type* sem_fun(Fun* fun);
@@ -1338,7 +1339,7 @@ void sem_ir(Block* block, Ir* ir) {
     assert(0);
   } break;
   case Ir_Kind_declare: {
-    sem_ensure_declared(ir->declare.var);
+    result = sem_ensure_declared(ir->declare.var);
   } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
@@ -1526,7 +1527,7 @@ void sem_ir(Block* block, Ir* ir) {
     Type* call = types.one;
     Type* arg  = types.two;
     if (call->kind == Type_Kind_fun) {
-      Function* fun = call->fun;
+      Function* fun = call->function;
       // if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
       //   Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
       //   if (type_is_subtype(block, arg, field_two.declared_type)) {
@@ -2160,13 +2161,14 @@ Type* sem_fun(Fun* fun) {
 
   Type* new_type = &new(sem.types);
   new_type->kind = Type_Kind_fun;
-  new_type->fun = arena_push(sem.perm_arena, sizeof(Function));
-  new_type->fun->arg = fun->arg_var->declared;
-  new_type->fun->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
-  fun->ret_ir->var->declared = new_type->fun->ret;
+  new_type->function = arena_push(sem.perm_arena, sizeof(Function));
+  new_type->function->fun = fun;
+  new_type->function->arg = fun->arg_var->declared;
+  new_type->function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+  fun->ret_ir->var->declared = new_type->function->ret;
   Type* ret_type = type_of_ir(fun->ret_ir);
   assert(ret_type->kind == Type_Kind_ptr);
-  ret_type->pointer->declared = new_type->fun->ret;
+  ret_type->pointer->declared = new_type->function->ret;
   fun->type = new_type;
   return new_type;
 }
@@ -2260,7 +2262,8 @@ void sem_test(void) {
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("a : 1; a = 1", "");
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
-  test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
+  // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
+  test("f:#c foo ()->1", "");
 }
 
 #undef test
