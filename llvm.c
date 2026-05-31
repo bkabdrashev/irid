@@ -64,6 +64,7 @@ LLVMTypeRef llvm_of_type(LLVMContextRef context, Type* type) {
     else {
       LLVMTypeRef arg_type = llvm_of_type(context, type->fun->arg);
       arg_types = (LLVMTypeRef[1]){ arg_type };
+      arg_count = 1;
     }
     LLVMTypeRef ret_type = llvm_of_type(context, type->fun->ret);
     result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
@@ -110,7 +111,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     Fun* fun = &funs.base[f];
     LLVMTypeRef llvm_fun_type = llvm_of_type(context, fun->type);
     LLVMValueRef function = LLVMAddFunction(module, cstr_from_str(fun->name), llvm_fun_type);
-
+    if (fun->foreign) continue;
     for (I32 b = 0; b < fun->blocks->length; b++) {
       Block* block = fun->blocks->base[b];
       LLVMBasicBlockRef llvm_block = LLVMAppendBasicBlockInContext(context, function, "block");
@@ -121,16 +122,16 @@ I32 llvm_funs(Arena* arena, Funs funs) {
       Block* block = fun->blocks->base[b];
       LLVMBasicBlockRef llvm_block = llvm_of_block(block);
       LLVMPositionBuilderAtEnd(builder, llvm_block);
-      LLVMValueRef one; LLVMValueRef two; LLVMValueRef unary;
+      LLVMValueRef llvm_one; LLVMValueRef llvm_two; LLVMValueRef llvm_unary;
 
       for (I32 i = 0; i < block->irs->length; i++) {
         Ir* ir = fa_get(block->irs, i);
         if (ir->kind & Ir_Flag_binary) {
-          one = llvm_of_ir(ir->binary.one);
-          two = llvm_of_ir(ir->binary.two);
+          llvm_one = llvm_of_ir(ir->binary.one);
+          llvm_two = llvm_of_ir(ir->binary.two);
         }
         else if (ir->kind & Ir_Flag_unary) {
-          unary = llvm_of_ir(ir->unary);
+          llvm_unary = llvm_of_ir(ir->unary);
         }
 
         LLVMValueRef llvm_ir;
@@ -138,6 +139,16 @@ I32 llvm_funs(Arena* arena, Funs funs) {
         case Ir_Kind_var: {
           if (ir->var->declared->kind != Type_Kind_none) {
             if (ir->var->kind == Var_Kind_constant) {
+              if (ir->var->global) {
+                LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
+                llvm_ir = LLVMAddGlobal(module, llvm_var_type, ir->var->name->base);
+                // LLVMSetInitializer(llvm_ir, LLVMConstInt(llvm_var_type, 0, 0));
+                LLVMSetGlobalConstant(llvm_ir, false);
+              }
+              else {
+                LLVMTypeRef llvm_var_type = llvm_of_type(context, ir->var->declared);
+                llvm_ir = LLVMBuildAlloca(builder, llvm_var_type, ir->var->name->base);
+              }
             }
             else {
               if (ir->var->global) {
@@ -162,16 +173,39 @@ I32 llvm_funs(Arena* arena, Funs funs) {
           llvm_ir = LLVMConstStringInContext2(context, ir->str->base, ir->str->length, false);
         } break;
 
-        case Ir_Kind_add: llvm_ir = LLVMBuildAdd(builder, one, two, ""); break;
-        case Ir_Kind_sub: llvm_ir = LLVMBuildSub(builder, one, two, ""); break;
-        case Ir_Kind_mul: llvm_ir = LLVMBuildMul(builder, one, two, ""); break;
-        case Ir_Kind_eq:  llvm_ir = LLVMBuildICmp(builder, LLVMIntEQ, one, two, ""); break;
-        case Ir_Kind_ne:  llvm_ir = LLVMBuildICmp(builder, LLVMIntNE, one, two, ""); break;
-        case Ir_Kind_lt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSLT, one, two, ""); break;
-        case Ir_Kind_le:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSLE, one, two, ""); break;
-        case Ir_Kind_gt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGT, one, two, ""); break;
-        case Ir_Kind_ge:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGE, one, two, ""); break;
-        case Ir_Kind_neg: llvm_ir = LLVMBuildNeg(builder, unary, ""); break;
+        case Ir_Kind_add: llvm_ir = LLVMBuildAdd(builder, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_sub: llvm_ir = LLVMBuildSub(builder, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_mul: llvm_ir = LLVMBuildMul(builder, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_eq:  llvm_ir = LLVMBuildICmp(builder, LLVMIntEQ, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_ne:  llvm_ir = LLVMBuildICmp(builder, LLVMIntNE, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_lt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSLT, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_le:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSLE, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_gt:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGT, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_ge:  llvm_ir = LLVMBuildICmp(builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
+        case Ir_Kind_neg: llvm_ir = LLVMBuildNeg(builder, llvm_unary, ""); break;
+        case Ir_Kind_call: {
+          Type* ret_type = type_of_ir(ir->binary.one);
+          LLVMTypeRef llvm_ret_type = llvm_of_type(context, ret_type->fun->ret);
+          Ir*   arg_ir   = ir->binary.two;
+          Type* arg_type = type_of_ir(arg_ir);
+          LLVMValueRef* llvm_args;
+          I32 llvm_arg_count = 0;
+          if (arg_type->kind == Type_Kind_none) {
+            llvm_args = 0;
+            llvm_arg_count = 0;
+          }
+          else if (arg_type->kind == Type_Kind_record) {
+            Record* record = arg_type->record;
+            llvm_arg_count = record->length;
+            assert(0);
+          }
+          else {
+            LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
+            llvm_args = (LLVMValueRef[1]){ llvm_arg };
+            llvm_arg_count = 1;
+          }
+          llvm_ir = LLVMBuildCall2(builder, llvm_ret_type, llvm_one, llvm_args, llvm_arg_count, ""); break;
+        } break;
 
         case Ir_Kind_name_offset: {
           Type* of_type = type_of_ir(ir->name.of);
@@ -186,7 +220,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
         case Ir_Kind_load:  {
           Type* type = type_of_ir(ir);
           LLVMTypeRef llvm_type = llvm_of_type(context, type);
-          llvm_ir = LLVMBuildLoad2(builder, llvm_type, unary, "");
+          llvm_ir = LLVMBuildLoad2(builder, llvm_type, llvm_unary, "");
         } break;
         case Ir_Kind_store: {
           if (ir->binary.two->kind == Ir_Kind_record) {
@@ -200,7 +234,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
                 I32 position = hash_map_get_i32(&record_two->position_from_name, name);
                 LLVMValueRef llvm_assigned = llvm_of_ir(record_one->assigned[pos]);
                 LLVMTypeRef llvm_type = llvm_of_type(context, record_type);
-                LLVMValueRef llvm_gep = LLVMBuildStructGEP2(builder, llvm_type, one, position, "");
+                LLVMValueRef llvm_gep = LLVMBuildStructGEP2(builder, llvm_type, llvm_one, position, "");
                 LLVMBuildStore(builder, llvm_assigned, llvm_gep);
               }
               else {
@@ -209,7 +243,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
             }
           }
           else {
-            llvm_ir = LLVMBuildStore(builder, two, one);
+            llvm_ir = LLVMBuildStore(builder, llvm_two, llvm_one);
           }
         } break;
         case Ir_Kind_record: {
@@ -218,7 +252,6 @@ I32 llvm_funs(Arena* arena, Funs funs) {
         case Ir_Kind_position_offset: assert(0);
 
         case Ir_Kind_fun:     assert(0);
-        case Ir_Kind_call:    assert(0);
         case Ir_Kind_declare: break;
         case Ir_Kind_none:    break;
         case Ir_Kind_range:   break;
@@ -296,7 +329,8 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void llvm_test(void) {
   // test("a:I32; a=5", "");
   // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
-  test("putchar: #c putchar (char:I32) -> I32", "");
+  // TODO: need to figure out how to handle declared
+  test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
 }
 
 #undef test

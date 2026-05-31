@@ -16,7 +16,6 @@ struct Ranges_Pair { Ranges* one; Ranges* two; };
 typedef struct Pointer Pointer;
 struct Pointer {
   Type* declared;
-  Hash_Set global;
   Hash_Set stack;
 };
 
@@ -328,7 +327,7 @@ B8 ranges_is_subrange(Ranges* one, Ranges* two) {
 }
 
 B8 pointer_is_single(Pointer* ptr) {
-  return (ptr->stack.len + ptr->global.len) == 1;
+  return ptr->stack.len == 1;
 }
 
 typedef struct Subtype_Visited Subtype_Visited;
@@ -397,8 +396,10 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     }
     Type* one_declared = type_pointer_declared(one->pointer);
     Type* two_declared = type_pointer_declared(two->pointer);
-    if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) {
-      return false;
+    if (one_declared && two_declared) {
+      if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) {
+        return false;
+      }
     }
     return true;
   } break;
@@ -463,7 +464,7 @@ B8 type_is_const(Type* type) {
     return type->pointer->stack.len == 1;
   } break;
   case Type_Kind_fun: {
-    return false;
+    return true;
   } break;
   }
   return false;
@@ -624,7 +625,7 @@ Type* type_record(Record* record) {
 }
 
 Type* type_ranges_intersection(Ranges* one, Ranges* two);
-Type* type_ptr(Type* declared, Hash_Set global, Hash_Set stack);
+Type* type_ptr(Type* declared, Hash_Set stack);
 
 Type* type_meet(Type* one, Type* two) {
   Type* result = sem.type_none;
@@ -637,9 +638,8 @@ Type* type_meet(Type* one, Type* two) {
   } break;
   case Type_Kind_ptr: {
     Hash_Set stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
-    Hash_Set global = hash_set_meet(sem.perm_arena, &one->pointer->global, &two->pointer->global);
     Type* declared  = type_meet(one->pointer->declared, two->pointer->declared);
-    result = type_ptr(declared, global, stack);
+    result = type_ptr(declared, stack);
   } break;
   case Type_Kind_record: {
     assert(0);
@@ -668,8 +668,7 @@ Type* type_join(Type* one, Type* two) {
   else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
     Type*    declared = type_join(one->pointer->declared, two->pointer->declared);
     Hash_Set stack    = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
-    Hash_Set global   = hash_set_join(sem.perm_arena, &one->pointer->global, &two->pointer->global);
-    result = type_ptr(declared, global, stack);
+    result = type_ptr(declared, stack);
   }
   else {
     assert(0);
@@ -677,10 +676,9 @@ Type* type_join(Type* one, Type* two) {
   return result;
 }
 
-Type* type_ptr(Type* declared, Hash_Set global, Hash_Set stack) {
+Type* type_ptr(Type* declared, Hash_Set stack) {
   Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->stack = stack;
-  pointer->global = global;
   type_pointer_declared(pointer);
 
   Type* new_type = &new(sem.types);
@@ -692,21 +690,14 @@ Type* type_ptr(Type* declared, Hash_Set global, Hash_Set stack) {
 Type* type_ptr_to(Type* type) {
   Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->declared = type;
-  Hash_Set global   = hash_set_init(sem.perm_arena, 1);
   Hash_Set stack    = hash_set_init(sem.perm_arena, 1);
-  return type_ptr(type, global, stack);
+  return type_ptr(type, stack);
 }
 
 Type* type_ptr_var(Var* var) {
   Hash_Set stack  = hash_set_init(sem.perm_arena, 1);
-  Hash_Set global = hash_set_init(sem.perm_arena, 1);
-  if (var->global) {
-    hash_set_put(&stack, var);
-  }
-  else {
-    hash_set_put(&global, var);
-  }
-  return type_ptr(0, global, stack);
+  hash_set_put(&stack, var);
+  return type_ptr(0, stack);
 }
 
 Type* type_pointer_declared(Pointer* pointer) {
@@ -961,8 +952,7 @@ void sem_type_narrow_ptr_eq(Sem_Tasks* tasks, Ir* ir) {
   Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
   Type*    declared = type_meet(pair.one->declared, pair.two->declared);
   Hash_Set stack    = hash_set_meet(sem.perm_arena, &pair.one->stack, &pair.two->stack);
-  Hash_Set global   = hash_set_meet(sem.perm_arena, &pair.one->global, &pair.two->global);
-  Type* new_type = type_ptr(declared, global, stack);
+  Type* new_type = type_ptr(declared, stack);
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
 
@@ -983,14 +973,14 @@ void sem_type_narrow_int_ne(Sem_Tasks* tasks, Ir* ir) {
 void sem_type_narrow_ptr_ne(Sem_Tasks* tasks, Ir* ir) {
   Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
   // TODO: pointer relations
-  if (pointer_is_single(pair.one)) {
+  if (pair.one->stack.len == 1) {
     Hash_Set new_set_two = hash_set_exclude(sem.perm_arena, &pair.two->stack, pair.one->stack.list[0]);
-    Type* new_type_two = type_ptr(new_set_two);
+    Type* new_type_two = type_ptr(pair.two->declared, new_set_two);
     sem_type_of_ir_narrow(tasks, ir->binary.two, new_type_two);
   }
   if (pointer_is_single(pair.two)) {
     Hash_Set new_set_one = hash_set_exclude(sem.perm_arena, &pair.one->stack, pair.two->stack.list[0]);
-    Type* new_type_one = type_ptr_stack(new_set_one);
+    Type* new_type_one = type_ptr(pair.one->declared, new_set_one);
     sem_type_of_ir_narrow(tasks, ir->binary.one, new_type_one);
   }
 }
@@ -2269,7 +2259,8 @@ void sem_test(void) {
   // test("a:I32; foo:() -> a;", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("a : 1; a = 1", "");
-  test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
+  // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
+  test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
 }
 
 #undef test
