@@ -3,6 +3,8 @@
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Types.h>
+#include <llvm-c/LLJIT.h>
+#include <unistd.h>
 
 typedef struct LLVM_Gen_Blocks LLVM_Gen_Blocks;
 struct LLVM_Gen_Blocks {
@@ -203,8 +205,8 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_ge:  result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
   case Ir_Kind_neg: result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, ""); break;
   case Ir_Kind_call: {
-    Type* ret_type = type_of_ir(ir->binary.one);
-    LLVMTypeRef llvm_ret_type = llvm_of_type(ret_type->function->ret);
+    Type* fun_type = type_of_ir(ir->binary.one);
+    LLVMTypeRef llvm_fun_type = llvm_of_type(fun_type);
     Ir*   arg_ir   = ir->binary.two;
     Type* arg_type = type_of_ir(arg_ir);
     LLVMValueRef* llvm_args;
@@ -223,7 +225,7 @@ void llvm_ir(Ir* ir) {
       llvm_args = (LLVMValueRef[1]){ llvm_arg };
       llvm_arg_count = 1;
     }
-    result = LLVMBuildCall2(llvm_gen.builder, llvm_ret_type, llvm_one, llvm_args, llvm_arg_count, ""); break;
+    result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
   } break;
 
   case Ir_Kind_name_offset: {
@@ -238,8 +240,14 @@ void llvm_ir(Ir* ir) {
   } break;
   case Ir_Kind_load:  {
     Type* type = type_of_ir(ir);
-    LLVMTypeRef llvm_type = llvm_of_type(type);
-    result = LLVMBuildLoad2(llvm_gen.builder, llvm_type, llvm_unary, "");
+    if (type->kind == Type_Kind_fun) {
+      LLVMTypeRef llvm_type = llvm_of_type(type);
+      result = llvm_of_fun(type->function->fun);
+    }
+    else {
+      LLVMTypeRef llvm_type = llvm_of_type(type);
+      result = LLVMBuildLoad2(llvm_gen.builder, llvm_type, llvm_unary, "");
+    }
   } break;
   case Ir_Kind_store: {
     if (ir->binary.two->kind == Ir_Kind_record) {
@@ -319,8 +327,9 @@ LLVMValueRef llvm_fun(Fun* fun) {
   }
   LLVMTypeRef llvm_fun_type = llvm_of_type(fun->type);
   llvm_gen.function = LLVMAddFunction(llvm_gen.module, cstr_from_str(fun->name), llvm_fun_type);
+  llvm_of_fun_put(fun, llvm_gen.function);
   if (fun->foreign) {
-    return llvm_gen.function;
+      return llvm_gen.function;
   }
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
@@ -345,7 +354,6 @@ LLVMValueRef llvm_fun(Fun* fun) {
     LLVMValueRef ret_loaded = LLVMBuildLoad2(llvm_gen.builder, llvm_ret_type, ret_var, "loaded_ret_var");
     LLVMBuildRet(llvm_gen.builder, ret_loaded);
   }
-  llvm_of_fun_put(fun, llvm_gen.function);
   return llvm_gen.function;
 }
 
@@ -379,11 +387,59 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   printf("Generated LLVM IR:\n");
   LLVMDumpModule(llvm_gen.module);
 
+  // int pipefd[2];
+  // pipe(pipefd);
+  // dup2(pipefd[1], STDOUT_FILENO);
+
+  LLVMInitializeNativeTarget();
+  LLVMInitializeNativeAsmPrinter();
+  LLVMInitializeNativeAsmParser();
+  LLVMInitializeNativeDisassembler();
+
+  const char *triple = LLVMGetDefaultTargetTriple();
+  LLVMSetTarget(llvm_gen.module, triple);
+
+  LLVMOrcLLJITRef jit;
+  LLVMErrorRef err = LLVMOrcCreateLLJIT(&jit, NULL);
+  if (err) {
+    char *errMsg = LLVMGetErrorMessage(err);
+    fprintf(stderr, "JIT creation error: %s\n", errMsg);
+    LLVMDisposeErrorMessage(errMsg);
+    return 1;
+  }
+
+  LLVMOrcThreadSafeContextRef ts_context = LLVMOrcCreateNewThreadSafeContextFromLLVMContext(llvm_gen.context);
+  LLVMOrcThreadSafeModuleRef tsm = LLVMOrcCreateNewThreadSafeModule(llvm_gen.module, ts_context);
+  if (LLVMOrcLLJITAddLLVMIRModule(jit, LLVMOrcLLJITGetMainJITDylib(jit), tsm)) {
+    fprintf(stderr, "Failed to add module\n");
+    LLVMOrcDisposeLLJIT(jit);
+    LLVMContextDispose(llvm_gen.context);
+    return 1;
+  }
+
+  LLVMOrcJITTargetAddress addr;
+  if (LLVMOrcLLJITLookup(jit, &addr, "main")) {
+    fprintf(stderr, "Function 'main' not found\n");
+    LLVMOrcDisposeLLJIT(jit);
+    LLVMContextDispose(llvm_gen.context);
+    return 1;
+  }
+
+  void (*jit_main)() = (void (*)())addr;
+  jit_main();
+
+  // char buf[1024];
+  // read(pipefd[0], buf, sizeof(buf));
+  // close(pipefd[0]); close(pipefd[1]);
+
+  // printf("Result: %d\n", result); // Output: Result: 8
+
   if (error) {
     LLVMDisposeMessage(error);
   }
-  LLVMDisposeBuilder(llvm_gen.builder);
-  LLVMDisposeModule(llvm_gen.module);
+
+  LLVMOrcDisposeLLJIT(jit);
+
   LLVMContextDispose(llvm_gen.context);
   return 0;
 }
@@ -407,7 +463,8 @@ void llvm_test(void) {
   // test("a:I32; a=5", "");
   // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
-  test("f:()->1", "");
+  test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
+  // test("f:()->1", "");
   // test("a:1; a+a", "");
 }
 

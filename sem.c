@@ -2262,8 +2262,8 @@ void sem_test(void) {
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("a : 1; a = 1", "");
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
-  // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
-  test("f:#c foo ()->1", "");
+  test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
+  // test("f:#c foo ()->1", "");
 }
 
 #undef test
