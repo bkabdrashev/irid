@@ -20,6 +20,7 @@ struct LLVM_Gen_Irs {
 
 typedef struct LLVM_Gen LLVM_Gen;
 struct LLVM_Gen {
+  Arena*             perm_arena;
   LLVMValueRef*      irs;
   LLVMBasicBlockRef* blocks;
   LLVMTypeRef*       types;
@@ -50,12 +51,12 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMPointerType(pointer_to, 0);
   } break;
   case Type_Kind_record: {
-    result = LLVMStructCreateNamed(llvm_gen.context, "");
-    LLVMTypeRef field_types[2] = {
-      LLVMIntTypeInContext(llvm_gen.context, 32),
-      LLVMIntTypeInContext(llvm_gen.context, 32),
-    };
-    LLVMStructSetBody(result, field_types, 2, 0);
+    LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
+    for (I32 i = 0; i < type->record->length; i++) {
+      Type* field_type = type_of_ir(type->record->declared[i]);
+      field_types[i] = llvm_of_type(field_type);
+    }
+    result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
   } break;
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;
@@ -116,9 +117,52 @@ void llvm_of_fun_put(Fun* fun, LLVMValueRef val) {
   I32 funid = fun - irgen.funs.base;
   llvm_gen.funs[funid] = val;
 }
-
 LLVMValueRef llvm_fun(Fun* fun);
 void llvm_block(Block* block);
+
+LLVMValueRef llvm_default_of_type(Type* type) {
+  LLVMValueRef result = 0;
+  switch (type->kind) {
+  case Type_Kind_none: {
+  } break;
+  case Type_Kind_ptr: {
+    // TODO: create a default global object of `pointer->declared type`
+    assert(0);
+    result = llvm_default_of_type(type->pointer->declared);
+  } break;
+  case Type_Kind_int: {
+    LLVMTypeRef llvm_type = llvm_of_type(type);
+    I64 i64 = ranges_max(type->ranges);
+    for (I32 i = 0; i < type->ranges->length; i++) {
+      if (type->ranges->pairs[i].lo <= 0 && 0 <= type->ranges->pairs[i].hi) {
+        i64 = 0;
+        break;
+      }
+      else if (type->ranges->pairs[i].lo >= 0) {
+        i64 = type->ranges->pairs[i].lo;
+      }
+    }
+    result = LLVMConstInt(llvm_type, i64, false);
+  } break;
+  case Type_Kind_fun: {
+    LLVMValueRef save_function = llvm_gen.function;
+    LLVMBasicBlockRef save_block = LLVMGetInsertBlock(llvm_gen.builder);
+    result = llvm_fun(type->function->fun);
+    llvm_gen.function = save_function;
+    LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
+  } break;
+  case Type_Kind_record: {
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMValueRef));
+    for (I32 i = 0; i < type->record->length; i++) {
+      Type* field_type = type_of_ir(type->record->declared[i]);
+      values[i] = llvm_default_of_type(field_type);
+    }
+    result = LLVMConstStructInContext(llvm_gen.context, values, type->record->length, false);
+  } break;
+  }
+  return result;
+}
+
 void llvm_ir(Ir* ir) {
   LLVMValueRef result = 0;
   LLVMValueRef llvm_one = 0;
@@ -136,61 +180,24 @@ void llvm_ir(Ir* ir) {
   switch (ir->kind) {
   case Ir_Kind_var: {
     if (ir->var->declared->kind != Type_Kind_none) {
-      if (ir->var->kind == Var_Kind_constant) {
-        Type* type = type_of_ir(ir->var->declared_ir);
-        LLVMTypeRef llvm_type = llvm_of_type(type);
-        LLVMValueRef llvm_var_init = 0;
-        switch (type->kind) {
-        case Type_Kind_none: {
-        } break;
-        case Type_Kind_ptr: {
-          Var* var = type->pointer->stack.list[0];
-          llvm_var_init = llvm_of_ir(var->declared_ir);
-        } break;
-        case Type_Kind_int: {
-          I64 i64 = ranges_min(type->ranges);
-          llvm_var_init = LLVMConstInt(llvm_type, i64, 0);
-        } break;
-        case Type_Kind_fun: {
-          LLVMValueRef save_function = llvm_gen.function;
-          LLVMBasicBlockRef save_block = LLVMGetInsertBlock(llvm_gen.builder);
-          llvm_var_init = llvm_fun(type->function->fun);
-          llvm_gen.function = save_function;
-          LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
-        } break;
-        case Type_Kind_record: {
-          assert(0);
-        } break;
-        }
+      Type* type = type_of_ir(ir->var->declared_ir);
+      LLVMValueRef llvm_var_init = llvm_default_of_type(type);
 
-        if (ir->var->global) {
-          if (ir->var->declared->kind == Type_Kind_fun) {
-            result = llvm_of_fun(ir->var->declared->function->fun);
-          }
-          else {
-            LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
-            result = LLVMAddGlobal(llvm_gen.module, llvm_var_type, ir->var->name->base);
-            LLVMSetInitializer(result, llvm_var_init);
-            LLVMSetGlobalConstant(result, false);
-          }
+      if (ir->var->global) {
+        if (ir->var->declared->kind == Type_Kind_fun) {
+          result = llvm_of_fun(ir->var->declared->function->fun);
         }
         else {
           LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
-          result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
-          LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
+          result = LLVMAddGlobal(llvm_gen.module, llvm_var_type, ir->var->name->base);
+          LLVMSetInitializer(result, llvm_var_init);
+          LLVMSetGlobalConstant(result, false);
         }
       }
       else {
-        if (ir->var->global) {
-          LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
-          result = LLVMAddGlobal(llvm_gen.module, llvm_var_type, ir->var->name->base);
-          // LLVMSetInitializer(llvm_ir, LLVMConstInt(llvm_var_type, 0, 0));
-          LLVMSetGlobalConstant(result, false);
-        }
-        else {
-          LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
-          result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
-        }
+        LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
+        result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
+        LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
       }
       // NOTE: declared_ir is used to store llvm value reference, so that pointer can refer to it
       llvm_of_ir_put(ir->var->declared_ir, result);
@@ -241,13 +248,11 @@ void llvm_ir(Ir* ir) {
 
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name.of);
-    Ir_Kind ir_kind = ir->name.of->kind;
-    if (ir_kind == Ir_Kind_load) {
-      LLVMValueRef ptr = llvm_of_ir(ir->name.of->unary);
-      I32 position = hash_map_get_i32(&of_type->record->position_from_name, ir->name.at);
-      LLVMTypeRef llvm_type = llvm_of_type(of_type);
-      result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
-    }
+    Type* rec_type = of_type->pointer->declared;
+    LLVMValueRef ptr = llvm_of_ir(ir->name.of);
+    I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name.at);
+    LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+    result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
   } break;
   case Ir_Kind_load:  {
     Type* type = type_of_ir(ir);
@@ -368,6 +373,7 @@ LLVMValueRef llvm_fun(Fun* fun) {
 }
 
 I32 llvm_funs(Arena* arena, Funs funs) {
+  llvm_gen.perm_arena = arena;
   llvm_gen.blocks = arena_push(arena, irgen.blocks.length * sizeof(LLVMBasicBlockRef));
   llvm_gen.irs    = arena_push(arena, irgen.irs.length    * sizeof(LLVMValueRef));
   llvm_gen.types  = arena_push_zero(arena, sem.types.length    * sizeof(LLVMTypeRef));
@@ -382,15 +388,18 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     llvm_fun(fun);
   }
 
-  char *error = NULL;
-  if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &error)) {
-    fprintf(stderr, "Error verifying module: %s\n", error);
-    LLVMDisposeMessage(error);
-    return 1;
-  }
-
   printf("Generated LLVM IR:\n");
   LLVMDumpModule(llvm_gen.module);
+
+  char *verify_error = NULL;
+  if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &verify_error)) {
+    fprintf(stderr, "Error verifying module: %s\n", verify_error);
+    LLVMDisposeMessage(verify_error);
+    return 1;
+  }
+  if (verify_error) {
+    LLVMDisposeMessage(verify_error);
+  }
 
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
@@ -401,10 +410,14 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   LLVMSetTarget(llvm_gen.module, triple);
 
   LLVMOrcLLJITRef jit;
-  LLVMErrorRef err = LLVMOrcCreateLLJIT(&jit, NULL);
-  if (err) {
-    char *errMsg = LLVMGetErrorMessage(err);
+  LLVMErrorRef jit_error = LLVMOrcCreateLLJIT(&jit, NULL);
+  if (jit_error) {
+    char *errMsg = LLVMGetErrorMessage(jit_error);
     fprintf(stderr, "JIT creation error: %s\n", errMsg);
+    LLVMDisposeMessage(triple);
+    LLVMOrcDisposeLLJIT(jit);
+    LLVMContextDispose(llvm_gen.context);
+    LLVMDisposeModule(llvm_gen.module);
     LLVMDisposeErrorMessage(errMsg);
     return 1;
   }
@@ -430,10 +443,6 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   void (*jit_main)() = (void (*)())addr;
   jit_main();
 
-  if (error) {
-    LLVMDisposeMessage(error);
-  }
-
   LLVMDisposeMessage(triple);
   LLVMOrcDisposeLLJIT(jit);
   LLVMOrcDisposeThreadSafeContext(ts_context);
@@ -457,9 +466,9 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   // test("a:I32; a=5", "");
-  // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
+  test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
-  test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
+  // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
   // test("f:()->1", "");
   // test("a:1; a+a", "");
 }
