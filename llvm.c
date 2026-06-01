@@ -372,11 +372,6 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     llvm_fun(fun);
   }
 
-  for (I32 f = 0; f < funs.length; f++) {
-    Fun* fun = &funs.base[f];
-    llvm_fun(fun);
-  }
-
   char *error = NULL;
   if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &error)) {
     fprintf(stderr, "Error verifying module: %s\n", error);
@@ -387,16 +382,12 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   printf("Generated LLVM IR:\n");
   LLVMDumpModule(llvm_gen.module);
 
-  // int pipefd[2];
-  // pipe(pipefd);
-  // dup2(pipefd[1], STDOUT_FILENO);
-
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   LLVMInitializeNativeAsmParser();
   LLVMInitializeNativeDisassembler();
 
-  const char *triple = LLVMGetDefaultTargetTriple();
+  char *triple = LLVMGetDefaultTargetTriple();
   LLVMSetTarget(llvm_gen.module, triple);
 
   LLVMOrcLLJITRef jit;
@@ -409,8 +400,8 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   }
 
   LLVMOrcThreadSafeContextRef ts_context = LLVMOrcCreateNewThreadSafeContextFromLLVMContext(llvm_gen.context);
-  LLVMOrcThreadSafeModuleRef tsm = LLVMOrcCreateNewThreadSafeModule(llvm_gen.module, ts_context);
-  if (LLVMOrcLLJITAddLLVMIRModule(jit, LLVMOrcLLJITGetMainJITDylib(jit), tsm)) {
+  LLVMOrcThreadSafeModuleRef ts_module = LLVMOrcCreateNewThreadSafeModule(llvm_gen.module, ts_context);
+  if (LLVMOrcLLJITAddLLVMIRModule(jit, LLVMOrcLLJITGetMainJITDylib(jit), ts_module)) {
     fprintf(stderr, "Failed to add module\n");
     LLVMOrcDisposeLLJIT(jit);
     LLVMContextDispose(llvm_gen.context);
@@ -420,27 +411,22 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   LLVMOrcJITTargetAddress addr;
   if (LLVMOrcLLJITLookup(jit, &addr, "main")) {
     fprintf(stderr, "Function 'main' not found\n");
+    LLVMDisposeMessage(triple);
     LLVMOrcDisposeLLJIT(jit);
-    LLVMContextDispose(llvm_gen.context);
+    LLVMOrcDisposeThreadSafeContext(ts_context);
     return 1;
   }
 
   void (*jit_main)() = (void (*)())addr;
   jit_main();
 
-  // char buf[1024];
-  // read(pipefd[0], buf, sizeof(buf));
-  // close(pipefd[0]); close(pipefd[1]);
-
-  // printf("Result: %d\n", result); // Output: Result: 8
-
   if (error) {
     LLVMDisposeMessage(error);
   }
 
+  LLVMDisposeMessage(triple);
   LLVMOrcDisposeLLJIT(jit);
-
-  LLVMContextDispose(llvm_gen.context);
+  LLVMOrcDisposeThreadSafeContext(ts_context);
   return 0;
 }
 
