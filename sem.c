@@ -611,6 +611,14 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
   return record->vars[position];
 }
 
+I32 sem_get_offset_by_name(Var* var, Str* name) {
+  assert(var->declared);
+  assert(var->declared->kind == Type_Kind_record);
+  Record* record = var->declared->record;
+  I32 position = hash_map_get_i32(&record->position_from_name, name);
+  return record->offsets[position];
+}
+
 Type* type_record(Record* record) {
   Type* new_type = &new(sem.types);
   if (record->length == 0) {
@@ -1462,11 +1470,17 @@ void sem_ir(Block* block, Ir* ir) {
       assert(of_type->pointer->stack.len > 0);
       Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
       Var* first_var = of_type->pointer->stack.list[0];
+      I32  first_offset = sem_get_offset_by_name(first_var, ir->name.at);
       Var* first_var_field = sem_get_var_by_name(first_var, ir->name.at);
       Type* declared = first_var_field->declared;
       hash_set_put(&stack, first_var_field);
       for (I32 i = 1; i < of_type->pointer->stack.len; i++) {
         Var* var = of_type->pointer->stack.list[i];
+        I32  offset = sem_get_offset_by_name(var, ir->name.at);
+        if (offset != first_offset) {
+          printf("field offsets don't match\n");
+          assert(0);
+        }
         Var* field_var = sem_get_var_by_name(var, ir->name.at);
         declared = type_meet(declared, field_var->declared);
         hash_set_put(&stack, field_var);
@@ -2227,7 +2241,8 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void sem_test(void) {
   // test("a:(x:I32; y:I32); a.x = 1; a.x", "");
   // test("a: (x:I32; y:I32); b:(x:I32; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
-  test("a: (x:I32; y:I32); b:(y:I32; x:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
+  test("a: (x:1\\2; y:I32); b:(x:2\\3; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x = 2", "");
+  // test("a: (x:I32; y:I32); b:(y:I32; x:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
   // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x:1; y:2); b=@a.x; if b@ do { a = (x:0; y:5); b@=3; a.y = 4; }", "");
   // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; a", "");
