@@ -725,19 +725,6 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
           assert(0);
         }
       }
-      else if (parse_match_token(parser, Token_Kind_equal)) {
-        is_record = true;
-        Ast_Node* lhs = exp;
-        if (lhs->kind == Ast_Kind_name) {
-          Ast_Node* rhs = parse_fun_tuple_or_exp(parser);
-          exp = parse_new_node(parser, Ast_Kind_assign_field);
-          exp->declare.name = lhs->str;
-          exp->declare.node = rhs;
-        }
-        else {
-          assert(0);
-        }
-      }
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         is_record = true;
       }
@@ -965,7 +952,7 @@ void parse_test(void) {
   test("(1;)",           "(1;)");
   test("(1; 2)",         "(1; 2;)");
   test("(1; 2;)",        "(1; 2;)");
-  test("(x=1)",          "(x=1;)");
+  test("(x:1;)",         "(x:1;)");
   test("(x:1)",          "x:1");
   test("(x:1; y:2)",     "(x:1; y:2;)");
   test("1,2",            "(1, 2)");

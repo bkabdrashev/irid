@@ -167,7 +167,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
       }
       else {
         field.declared_type = type_of_ir(record->declared[pos]);
-        field.assigned_type = type_of_ir(record->assigned[pos]);
+        field.assigned_type = 0;
       }
 
       if (field.name) {
@@ -590,7 +590,6 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
 Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
-  field.assigned = record->assigned[position];
   field.declared = record->declared[position];
   if (record->vars) {
     field.var      = record->vars[position];
@@ -600,7 +599,7 @@ Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   else {
     field.var = 0;
     field.declared_type = type_of_ir(field.declared);
-    field.assigned_type = type_of_ir(field.assigned);
+    field.assigned_type = 0;
   }
   field.offset   = record->offsets[position];
   field.position = position;
