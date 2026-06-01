@@ -162,26 +162,18 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
       field.name     = record->names[pos];
       if (record->vars) {
         Var* var = record->vars[pos];
-        field.declared_type = var->declared;
-        field.assigned_type = hash_map_get(&block->out_var_types, var);
+        field.assigned_type = type_of_var(block, var);
       }
       else {
-        field.declared_type = type_of_ir(record->declared[pos]);
-        field.assigned_type = 0;
+        field.assigned_type = type_of_ir(record->declared[pos]);
       }
 
       if (field.name) {
         string_builder_push_str(sb, field.name);
         // string_builder_push_cstr(sb, "'");
         // string_builder_push_i64(sb, field.offset);
-        if (field.declared_type) {
-          string_builder_push_cstr(sb, ":");
-          string_builder_push_type(sb, block, field.declared_type);
-        }
-        if (field.assigned_type) {
-          string_builder_push_cstr(sb, "=");
-          string_builder_push_type(sb, block, field.assigned_type);
-        }
+        string_builder_push_cstr(sb, ":");
+        string_builder_push_type(sb, block, field.assigned_type);
       }
       else {
         string_builder_push_type(sb, block, field.declared_type);
@@ -599,7 +591,7 @@ Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   else {
     field.var = 0;
     field.declared_type = type_of_ir(field.declared);
-    field.assigned_type = 0;
+    field.assigned_type = type_of_ir(field.declared);
   }
   field.offset   = record->offsets[position];
   field.position = position;
@@ -609,6 +601,14 @@ Field type_record_get_by_position(Block* block, Record* record, I32 position) {
 Field type_record_get_by_name(Block* block, Record* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
   return type_record_get_by_position(block, record, position);
+}
+
+Var* sem_get_var_by_name(Var* var, Str* name) {
+  assert(var->declared);
+  assert(var->declared->kind == Type_Kind_record);
+  Record* record = var->declared->record;
+  I32 position = hash_map_get_i32(&record->position_from_name, name);
+  return record->vars[position];
 }
 
 Type* type_record(Record* record) {
@@ -641,7 +641,7 @@ Type* type_meet(Type* one, Type* two) {
     result = type_ptr(declared, stack);
   } break;
   case Type_Kind_record: {
-    assert(0);
+    result = sem.type_none;
   } break;
   case Type_Kind_fun: {
     result = sem.type_none;
@@ -1457,15 +1457,21 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_record(ir->record);
   } break;
   case Ir_Kind_name_offset: {
-    Ir_Kind ir_kind = ir->name.of->kind;
     Type* of_type = type_of_ir(ir->name.of);
-    if (ir_kind == Ir_Kind_load) {
-      if (of_type->kind == Type_Kind_record) {
-        Record* record = of_type->record;
-        I32 position = hash_map_get_i32(&record->position_from_name, ir->name.at);
-        Var* var = record->vars[position];
-        result = type_ptr_var(var);
+    if (of_type->kind == Type_Kind_ptr) {
+      assert(of_type->pointer->stack.len > 0);
+      Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
+      Var* first_var = of_type->pointer->stack.list[0];
+      Var* first_var_field = sem_get_var_by_name(first_var, ir->name.at);
+      Type* declared = first_var_field->declared;
+      hash_set_put(&stack, first_var_field);
+      for (I32 i = 1; i < of_type->pointer->stack.len; i++) {
+        Var* var = of_type->pointer->stack.list[i];
+        Var* field_var = sem_get_var_by_name(var, ir->name.at);
+        declared = type_meet(declared, field_var->declared);
+        hash_set_put(&stack, field_var);
       }
+      result = type_ptr(declared, stack);
     }
   } break;
   case Ir_Kind_load: {
@@ -2219,12 +2225,14 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a: (x:1; y:2); b:@1; a = (x=1; y=2); b = @a.x; b@ + a.x", "");
-  // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x=1; y=2); b=@a.x; if b@ do { a = (x=0; y=5); b@=3; a.y = 4; }", "");
+  // test("a:(x:I32; y:I32); a.x = 1; a.x", "");
+  // test("a: (x:I32; y:I32); b:(x:I32; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
+  test("a: (x:I32; y:I32); b:(y:I32; x:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
+  // test("a: (x:0\\1\\3; y:2\\4\\5); b: @(0\\1\\3); a=(x:1; y:2); b=@a.x; if b@ do { a = (x:0; y:5); b@=3; a.y = 4; }", "");
   // test("a: (x:0\\1); a.x=1; if 2 do { a.x = 0 }; if a.x == 0 do a.x", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; a", "");
   // test("a: 0\\1; a=1; if 2 do { a = 0 }; if a do {a+a}; a+a", "");
-  // test("a: (x:0\\1; y:2\\3); a = (x=0; y=2); if 5 do { a = (x=1; y=3) }; if a.x == 1 do {a.x}", "");
+  // test("a: (x:0\\1; y:2\\3); a = (x:0; y:2); if 5 do { a = (x:1; y:3) }; if a.x == 1 do {a.x}", "");
   // test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; c @= 1; a+b", "");
   // test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; if c == @a do {c @= 1}; a+b", "");
   // test("a: 1\\2; wh 2 do { a = 1 }; a+a", "");
@@ -2248,20 +2256,20 @@ void sem_test(void) {
   // test("a:I32; b:I32; a=0; b=0; wh a < 8 do {wh b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
   // test("a:I32; if a != 10 do {a = 1}; a", "");
   // test("I32 = 0; I32", "");
-  // test("Vec2 : (x:I32; y:I32); Vec2 = (x=1+2; y=2+3); Vec2.x + Vec2.y", "");
+  // test("Vec2 : (x:I32; y:I32); Vec2 = (x:1+2; y:2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
-  // test("foo:(a:I32) -> a+1; foo(2)", "");
+  // test("foo:(a:I32; b:I32) -> a+b; foo(b:1; a:2)", "");
   // test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");
-  // test("a:(x:1\\2; y:3\\4); a = (y=3; x=1); a.x", "");
-  // test("a:(x:I32; y:I32); a = (y=1; x=2); a.x", "");
+  // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x", "");
+  // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a:I32; b:@I32; b = @a; b@ = 1", "");
   // test("a:I32; foo:() -> a;", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("a : 1; a = 1", "");
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
-  test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
+  // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
   // test("f:#c foo ()->1", "");
 }
 

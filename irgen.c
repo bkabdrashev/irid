@@ -1107,7 +1107,7 @@ void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1; a = 1", "");
-  test("a:(x:I32; y:I32); a.x", "");
+  // test("a:(x:I32; y:I32); a.x", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
