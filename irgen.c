@@ -726,7 +726,6 @@ Fun* irgen_fun_leave(void) {
   fun->ret_block->irs = irgen_irs_perm(fun->ret_block->irs);
   fun->blocks = irgen_blocks_perm(fun->blocks);
   del(irgen.fun_stack);
-  irgen_scope_leave();
   return fun;
 }
 
@@ -816,12 +815,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Record* record = record_new(node->list->length);
     for (I32 i = 0; i < node->list->length; i++) {
       Ast_Node* field_node = node->list->base[i];
-      if (field_node->kind == Ast_Kind_assign_field) {
-        Ir* ir = irgen_ast_node(field_node->declare.node);
-        record_push_declare_name(record, field_node->declare.name, i);
-        record_push_declare_position(record, i, ir);
-      }
-      else if (field_node->kind == Ast_Kind_declare) {
+      if (field_node->kind == Ast_Kind_declare) {
         Ir* ir = irgen_ast_node(field_node->declare.node);
         record_push_declare_name(record, field_node->declare.name, i);
         record_push_declare_position(record, i, ir);
@@ -960,6 +954,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Hash_Map scope;
     {
       Ast_Node* lhs = node->binary.lhs;
+      // FIX: handle function paramaters similarly to assignment
       if (lhs->kind == Ast_Kind_record) {
         irgen_var_declare(fun->arg_var, lhs);
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
@@ -969,9 +964,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
             Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
             sym->ast = param->declare.node;
             hash_map_put(&scope, param->declare.name, sym);
-          }
-          else if (node->kind == Ast_Kind_assign_field) {
-            assert(0);
           }
           else {
             assert(0);
@@ -994,6 +986,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_push_binary(Ir_Kind_store, fun->ret_ir, rhs);
     irgen_fun_leave();
+    irgen_scope_leave();
     result = irgen_push_fun(fun);
   } break;
   case Ast_Kind_return: {
@@ -1019,7 +1012,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_break: case Ast_Kind_break_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:
   case Ast_Kind_none: { assert(0); }
-  case Ast_Kind_assign_field: { assert(0); }
   }
   return result;
 }
@@ -1081,6 +1073,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen_ast_node(ast.list->base[i]);
   }
   irgen_fun_leave();
+  irgen_scope_leave();
   del(irgen.scope_stack);
 
   arena_free(irgen.temp_block_arena);

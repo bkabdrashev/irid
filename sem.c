@@ -170,8 +170,8 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
 
       if (field.name) {
         string_builder_push_str(sb, field.name);
-        // string_builder_push_cstr(sb, "'");
-        // string_builder_push_i64(sb, field.offset);
+        string_builder_push_cstr(sb, "'");
+        string_builder_push_i64(sb, field.offset);
         string_builder_push_cstr(sb, ":");
         string_builder_push_type(sb, block, field.assigned_type);
       }
@@ -1293,10 +1293,16 @@ void sem_record_declare_fields(Var* var, Type* type) {
     field_var->state = Var_State_resolved;
     sem_record_declare_fields(field_var, field_type);
 
-    type->bits_align = max(type->bits_align, field_type->bits_align);
-    type->bits_size = align_up(type->bits_size, field_type->bits_align);
-    type->record->offsets[i] = type->bits_size;
-    type->bits_size += field_type->bits_size;
+    if (type_is_const(field_type)) {
+      field_var->kind = Var_Kind_constant;
+    }
+    else {
+      field_var->kind = Var_Kind_declared;
+      type->bits_align = max(type->bits_align, field_type->bits_align);
+      type->bits_size = align_up(type->bits_size, field_type->bits_align);
+      type->record->offsets[i] = type->bits_size;
+      type->bits_size += field_type->bits_size;
+    }
   }
   type->bits_size = align_up(type->bits_size, type->bits_align);
 }
@@ -1367,6 +1373,7 @@ void sem_ir(Block* block, Ir* ir) {
       I64 min_two = ranges_min(pair.two);
       I64 min = min_one + min_two;
       result = type_range(min, max);
+      result->size_defined = types.one->size_defined || types.two->size_defined;
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
         if (result->bits_size > bits_max_size) {
@@ -2286,6 +2293,7 @@ void sem_test(void) {
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
   // test("f:#c foo ()->1", "");
+  test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
 }
 
 #undef test

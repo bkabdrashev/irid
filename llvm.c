@@ -67,8 +67,12 @@ LLVMTypeRef llvm_of_type(Type* type) {
     }
     else if (type->function->arg->kind == Type_Kind_record) {
       Record* record = type->function->arg->record;
+      arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
+      for (I32 i = 0; i < record->length; i++) {
+        Type* arg_type = type_of_ir(record->declared[i]);
+        arg_types[i] = llvm_of_type(arg_type);
+      }
       arg_count = record->length;
-      assert(0);
     }
     else {
       LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
@@ -180,8 +184,7 @@ void llvm_ir(Ir* ir) {
   switch (ir->kind) {
   case Ir_Kind_var: {
     if (ir->var->declared->kind != Type_Kind_none) {
-      Type* type = type_of_ir(ir->var->declared_ir);
-      LLVMValueRef llvm_var_init = llvm_default_of_type(type);
+      LLVMValueRef llvm_var_init = llvm_default_of_type(ir->var->declared);
 
       if (ir->var->global) {
         if (ir->var->declared->kind == Type_Kind_fun) {
@@ -200,7 +203,9 @@ void llvm_ir(Ir* ir) {
         LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
       }
       // NOTE: declared_ir is used to store llvm value reference, so that pointer can refer to it
-      llvm_of_ir_put(ir->var->declared_ir, result);
+      if (ir->var->declared_ir) {
+        llvm_of_ir_put(ir->var->declared_ir, result);
+      }
     }
   } break;
   case Ir_Kind_int: {
@@ -235,8 +240,11 @@ void llvm_ir(Ir* ir) {
     }
     else if (arg_type->kind == Type_Kind_record) {
       Record* record = arg_type->record;
+      llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
+      for (I32 i = 0; i < record->length; i++) {
+        llvm_args[i] = llvm_of_ir(record->declared[i]);
+      }
       llvm_arg_count = record->length;
-      assert(0);
     }
     else {
       LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
@@ -363,7 +371,7 @@ LLVMValueRef llvm_fun(Fun* fun) {
   }
   else {
     LLVMTypeRef ret_var_type = llvm_of_type(fun->type->function->ret);
-    LLVMValueRef ret_var  = LLVMBuildAlloca(llvm_gen.builder, ret_var_type, "my_new_test");
+    LLVMValueRef ret_var  = LLVMBuildAlloca(llvm_gen.builder, ret_var_type, "ret_var");
 
     LLVMTypeRef llvm_ret_type = llvm_of_type(ret_type);
     LLVMValueRef ret_loaded = LLVMBuildLoad2(llvm_gen.builder, llvm_ret_type, ret_var, "loaded_ret_var");
@@ -416,6 +424,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     fprintf(stderr, "JIT creation error: %s\n", errMsg);
     LLVMDisposeMessage(triple);
     LLVMOrcDisposeLLJIT(jit);
+    LLVMDisposeBuilder(llvm_gen.builder);
     LLVMContextDispose(llvm_gen.context);
     LLVMDisposeModule(llvm_gen.module);
     LLVMDisposeErrorMessage(errMsg);
@@ -427,6 +436,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   if (LLVMOrcLLJITAddLLVMIRModule(jit, LLVMOrcLLJITGetMainJITDylib(jit), ts_module)) {
     fprintf(stderr, "Failed to add module\n");
     LLVMOrcDisposeLLJIT(jit);
+    LLVMDisposeBuilder(llvm_gen.builder);
     LLVMContextDispose(llvm_gen.context);
     return 1;
   }
@@ -436,6 +446,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     fprintf(stderr, "Function 'main' not found\n");
     LLVMDisposeMessage(triple);
     LLVMOrcDisposeLLJIT(jit);
+    LLVMDisposeBuilder(llvm_gen.builder);
     LLVMOrcDisposeThreadSafeContext(ts_context);
     return 1;
   }
@@ -445,6 +456,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
 
   LLVMDisposeMessage(triple);
   LLVMOrcDisposeLLJIT(jit);
+  LLVMDisposeBuilder(llvm_gen.builder);
   LLVMOrcDisposeThreadSafeContext(ts_context);
   return 0;
 }
@@ -466,9 +478,11 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   // test("a:I32; a=5", "");
-  test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
+  // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
+  // BUG: a+b is 0+0 because llvm_default_of_type declares 0
+  test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
   // test("f:()->1", "");
   // test("a:1; a+a", "");
 }
