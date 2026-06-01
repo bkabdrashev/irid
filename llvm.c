@@ -141,6 +141,12 @@ void llvm_ir(Ir* ir) {
         LLVMTypeRef llvm_type = llvm_of_type(type);
         LLVMValueRef llvm_var_init = 0;
         switch (type->kind) {
+        case Type_Kind_none: {
+        } break;
+        case Type_Kind_ptr: {
+          Var* var = type->pointer->stack.list[0];
+          llvm_var_init = llvm_of_ir(var->declared_ir);
+        } break;
         case Type_Kind_int: {
           I64 i64 = ranges_min(type->ranges);
           llvm_var_init = LLVMConstInt(llvm_type, i64, 0);
@@ -151,6 +157,9 @@ void llvm_ir(Ir* ir) {
           llvm_var_init = llvm_fun(type->function->fun);
           llvm_gen.function = save_function;
           LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
+        } break;
+        case Type_Kind_record: {
+          assert(0);
         } break;
         }
 
@@ -183,6 +192,8 @@ void llvm_ir(Ir* ir) {
           result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
         }
       }
+      // NOTE: declared_ir is used to store llvm value reference, so that pointer can refer to it
+      llvm_of_ir_put(ir->var->declared_ir, result);
     }
   } break;
   case Ir_Kind_int: {
@@ -241,7 +252,6 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_load:  {
     Type* type = type_of_ir(ir);
     if (type->kind == Type_Kind_fun) {
-      LLVMTypeRef llvm_type = llvm_of_type(type);
       result = llvm_of_fun(type->function->fun);
     }
     else {
@@ -259,7 +269,7 @@ void llvm_ir(Ir* ir) {
         Str* name = record_one->names[pos];
         if (name) {
           I32 position = hash_map_get_i32(&record_two->position_from_name, name);
-          LLVMValueRef llvm_assigned = llvm_of_ir(record_one->assigned[pos]);
+          LLVMValueRef llvm_assigned = llvm_of_ir(record_one->declared[pos]);
           LLVMTypeRef llvm_type = llvm_of_type(record_type);
           LLVMValueRef llvm_gep = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, llvm_one, position, "");
           LLVMBuildStore(llvm_gen.builder, llvm_assigned, llvm_gep);
