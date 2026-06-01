@@ -256,19 +256,17 @@ struct Irgen {
 
 Irgen irgen = {};
 
-Field record_get_by_name(Record* record, Str* name) {
-  Field field = {};
-  I32 position = hash_map_get_i32(&record->position_from_name, name);
-  field.name     = record->names[position];
-  field.var      = record->vars[position];
-  field.position = position;
-  return field;
-}
-
 Field record_get_by_position(Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
   field.position = position;
+  field.declared = record->declared[position];
+  return field;
+}
+
+Field record_get_by_name(Record* record, Str* name) {
+  I32 position = hash_map_get_i32(&record->position_from_name, name);
+  Field field = record_get_by_position(record, position);
   return field;
 }
 
@@ -358,7 +356,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       if (field.name) {
         string_builder_push_cstr(sb, " ");
         string_builder_push_str(sb, field.name);
-        if (field.declared != irgen.irid_nil) {
+        if (field.declared) {
           string_builder_push_cstr(sb, ":");
           string_builder_push_irid(sb, field.declared);
         }
@@ -794,8 +792,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_dot: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     if (node->binary.rhs->kind == Ast_Kind_name) {
-      Ir* name_offset_ir = irgen_push_name_offset(lhs, node->binary.rhs->str);
-      result = irgen_push_unary(Ir_Kind_load, name_offset_ir);
+      if (lhs->kind == Ir_Kind_load) {
+        lhs->kind = Ir_Kind_name_offset;
+        lhs->name.of = lhs->unary;
+        lhs->name.at = node->binary.rhs->str;
+        result = irgen_push_unary(Ir_Kind_load, lhs);
+      }
     }
   } break;
   case Ast_Kind_assign: {
@@ -1105,6 +1107,7 @@ void irgen_test(void) {
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1; a = 1", "");
+  test("a:(x:I32; y:I32); a.x", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
