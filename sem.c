@@ -1354,6 +1354,9 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_declare: {
     result = sem_ensure_declared(ir->declare.var);
   } break;
+  case Ir_Kind_arg: {
+    result = type_ptr_var(ir->var);
+  } break;
   case Ir_Kind_var: {
     result = type_ptr_var(ir->var);
   } break;
@@ -1470,6 +1473,30 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_record: {
     result = type_record(ir->record);
+  } break;
+  case Ir_Kind_position_offset: {
+    Type* of_type = type_of_ir(ir->name.of);
+    if (of_type->kind == Type_Kind_ptr) {
+      assert(of_type->pointer->stack.len > 0);
+      Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
+      Var* first_var = of_type->pointer->stack.list[0];
+      I32  first_offset = first_var->declared->record->offsets[ir->position.at];
+      Var* first_var_field = first_var->declared->record->vars[ir->position.at];
+      Type* declared = first_var_field->declared;
+      hash_set_put(&stack, first_var_field);
+      for (I32 i = 1; i < of_type->pointer->stack.len; i++) {
+        Var* var = of_type->pointer->stack.list[i];
+        I32  offset = var->declared->record->offsets[ir->position.at];
+        if (offset != first_offset) {
+          printf("field offsets don't match\n");
+          assert(0);
+        }
+        Var* field_var = var->declared->record->vars[ir->position.at];
+        declared = type_meet(declared, field_var->declared);
+        hash_set_put(&stack, field_var);
+      }
+      result = type_ptr(declared, stack);
+    }
   } break;
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name.of);

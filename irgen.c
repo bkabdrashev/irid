@@ -35,6 +35,7 @@ typedef enum Ir_Kind {
   Ir_Kind_name_offset     = 134,
 
   Ir_Kind_fun  = 136,
+  Ir_Kind_arg  = 137,
 
   Ir_Kind_range = 138 | Ir_Flag_binary,
   Ir_Kind_bits  = 139 | Ir_Flag_binary,
@@ -333,6 +334,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "var ");
     string_builder_push_var(sb, ir->var);
   break;
+  case Ir_Kind_arg:
+    string_builder_push_cstr(sb, "arg");
+  break;
   case Ir_Kind_fun:
     string_builder_push_cstr(sb, "fun ");
     string_builder_push_fun(sb, ir->fun);
@@ -512,6 +516,11 @@ Ir* irgen_push_int(I64 i64) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_arg(Var* var) {
+  Ir ir = { Ir_Kind_arg, .var = var};
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_str(Str* str) {
   Ir ir = { Ir_Kind_str, .str = str };
   return irgen_push(ir);
@@ -622,6 +631,11 @@ Block* irgen_block_return(void) {
 }
 
 Ir* irgen_ast_node(Ast_Node* node);
+
+void irgen_sym_put(Str* str, Symbol* sym) {
+  Hash_Map* scope = top(irgen.scope_stack);
+  hash_map_put(scope, str, sym);
+}
 
 Symbol* irgen_sym_get(Str* str) {
   for (I32 i = 0; i < irgen.scope_stack.length; i++) {
@@ -747,9 +761,29 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       assert(0);
     }
   } break;
+  case Ast_Kind_declare: {
+    Symbol* sym = irgen_sym_get(lhs->declare.name);
+    if (sym) {
+      printf("shadowing is not allowed\n");
+      assert(0);
+    }
+    else {
+      Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+      var->name = lhs->declare.name;
+      sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+      sym->kind = Symbol_Kind_variable;
+      sym->ast = 0;
+      sym->ir = irgen_push_var(var);
+      irgen_var_declare(var, lhs->declare.node);
+      irgen_sym_put(var->name, sym);
+      irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
+    }
+  } break;
+  case Ast_Kind_record:
   case Ast_Kind_tuple: {
     for (I32 i = 0; i < lhs->list->length; i++) {
-      Ir* at = irgen_push_position_offset(rhs, i);
+      Ir* offset = irgen_push_position_offset(rhs, i);
+      Ir* at = irgen_push_unary(Ir_Kind_load, offset);
       Ast_Node* node = lhs->list->base[i];
       irgen_assign(node, at);
     }
@@ -954,34 +988,18 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Hash_Map scope;
     {
       Ast_Node* lhs = node->binary.lhs;
-      // FIX: handle function paramaters similarly to assignment
+      Ir* arg = irgen_push_arg(fun->arg_var);
+      irgen_var_declare(fun->arg_var, lhs);
+      irgen_push_declare(fun->arg_var);
+      irgen_push_unary(Ir_Kind_load, arg);
       if (lhs->kind == Ast_Kind_record) {
-        irgen_var_declare(fun->arg_var, lhs);
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
-        for (I32 i = 0; i < lhs->list->length; i++) {
-          Ast_Node* param = lhs->list->base[i];
-          if (param->kind == Ast_Kind_declare) {
-            Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
-            sym->ast = param->declare.node;
-            hash_map_put(&scope, param->declare.name, sym);
-          }
-          else {
-            assert(0);
-          }
-        }
-        irgen_scope_enter(&scope);
       }
       else if (lhs->kind == Ast_Kind_declare) {
-        irgen_var_declare(fun->arg_var, lhs->declare.node);
         scope = hash_map_init(irgen.perm_arena, 1);
-        Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
-        sym->ast = lhs->declare.node;
-        hash_map_put(&scope, lhs->declare.name, sym);
-        irgen_scope_enter(&scope);
       }
-      else {
-        assert(0);
-      }
+      add(irgen.scope_stack, &scope);
+      irgen_assign(lhs, arg);
     }
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_push_binary(Ir_Kind_store, fun->ret_ir, rhs);
@@ -1060,7 +1078,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     }
 
     fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    fun->arg_var->name = str_from_cstr("#arg");
+    fun->arg_var->name = str_from_cstr("__arg");
 
     Ast_Node* node = arena_push(irgen.perm_arena, sizeof(Ast_Node));
     node->kind = Ast_Kind_record;
@@ -1097,6 +1115,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1; a = 1", "");
