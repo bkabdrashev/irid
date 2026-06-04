@@ -347,7 +347,10 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   // (1..3) is subtype of 1 -- false
   // (1..2) is subtype of (1..3) -- true
 
-  if (one->kind != two->kind) return false;
+  if (one->kind != two->kind) {
+    assert(0);
+    return false;
+  }
   switch (one->kind) {
   case Type_Kind_none: {
     return true;
@@ -357,6 +360,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   } break;
   case Type_Kind_record: {
     if (one->record->length != two->record->length) {
+      assert(0);
       return false;
     }
     for (I32 i = 0; i < one->record->length; i++) {
@@ -368,7 +372,10 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       else {
         field_two = type_record_get_by_position(block, two->record, i);
       }
-      if (!type_is_subtype_rec(block, field_one.assigned_type, field_two.declared_type, visited)) return false;
+      if (!type_is_subtype_rec(block, field_one.assigned_type, field_two.declared_type, visited)) {
+        assert(0);
+        return false;
+      }
     }
     return true;
   } break;
@@ -382,6 +389,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       for (I32 i = 0; i < one->pointer->stack.len; i++) {
         Var* var = one->pointer->stack.list[i];
         if (!hash_set_exists(&two->pointer->stack, var)) {
+          assert(0);
           return false;
         }
       }
@@ -390,15 +398,18 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     Type* two_declared = type_pointer_declared(two->pointer);
     if (one_declared && two_declared) {
       if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) {
+        assert(0);
         return false;
       }
     }
     return true;
   } break;
   case Type_Kind_fun: {
+    assert(0);
     return false;
   } break;
   }
+  assert(0);
   return false;
 }
 
@@ -2264,7 +2275,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Ast_Block ast        = parse_tokens(&arena, tokens);
   Funs funs            = irgen_ast(&arena, ast, source_length);
                          sem_funs(&arena, funs);
-  C8* buffer           = arena_push(&arena, 32 * source_length);
+  C8* buffer           = arena_push(&arena, 64 * source_length);
   Cstr result          = cstr_from_sem(funs, buffer);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
@@ -2320,7 +2331,12 @@ void sem_test(void) {
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
   // test("f:#c foo ()->1", "");
-  test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
+  // test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
+  // TODO: figure out how to handle annoying syntax quirk
+  // (1+2)          // works as single expression
+  // foo:(a:I32)->a // foo takes record with single element
+  // foo(1)         // doesn't work since (1) is single expression
+  test("foo : (a:I32) -> a+2; foo(1)", "");
 }
 
 #undef test

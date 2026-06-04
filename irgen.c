@@ -768,6 +768,13 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       assert(0);
     }
     else {
+      if (rhs->kind == Ir_Kind_load) {
+        rhs = rhs->unary;
+      }
+      Ir* offset = irgen_push_position_offset(rhs, 0);
+      Ir* at = irgen_push_unary(Ir_Kind_load, offset);
+      Fun* fun = irgen_fun_top();
+      fun->var_count++;
       Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
       var->name = lhs->declare.name;
       sym = arena_push(irgen.perm_arena, sizeof(Symbol));
@@ -776,11 +783,46 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       sym->ir = irgen_push_var(var);
       irgen_var_declare(var, lhs->declare.node);
       irgen_sym_put(var->name, sym);
-      irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
+      irgen_push_binary(Ir_Kind_store, sym->ir, at);
     }
   } break;
-  case Ast_Kind_record:
+  case Ast_Kind_record: {
+    if (rhs->kind == Ir_Kind_load) {
+      rhs = rhs->unary;
+    }
+    for (I32 i = 0; i < lhs->list->length; i++) {
+      Ir* offset = irgen_push_position_offset(rhs, i);
+      Ir* at = irgen_push_unary(Ir_Kind_load, offset);
+      Ast_Node* node = lhs->list->base[i];
+      if (node->kind == Ast_Kind_declare) {
+        Symbol* sym = irgen_sym_get(lhs->declare.name);
+        if (sym) {
+          printf("shadowing is not allowed\n");
+          assert(0);
+        }
+        else {
+          Fun* fun = irgen_fun_top();
+          fun->var_count++;
+          Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+          var->name = lhs->declare.name;
+          sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+          sym->kind = Symbol_Kind_variable;
+          sym->ast = 0;
+          sym->ir = irgen_push_var(var);
+          irgen_var_declare(var, lhs->declare.node);
+          irgen_sym_put(var->name, sym);
+          irgen_push_binary(Ir_Kind_store, sym->ir, at);
+        }
+      }
+      else {
+        irgen_assign(node, at);
+      }
+    }
+  } break;
   case Ast_Kind_tuple: {
+    if (rhs->kind == Ir_Kind_load) {
+      rhs = rhs->unary;
+    }
     for (I32 i = 0; i < lhs->list->length; i++) {
       Ir* offset = irgen_push_position_offset(rhs, i);
       Ir* at = irgen_push_unary(Ir_Kind_load, offset);
@@ -987,11 +1029,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
     fun->name = irgen.str_nil;
     Hash_Map scope;
     {
+      // TODO: figure out syntax for function call with single parameter
       Ast_Node* lhs = node->binary.lhs;
       Ir* arg = irgen_push_arg(fun->arg_var);
       irgen_var_declare(fun->arg_var, lhs);
       irgen_push_declare(fun->arg_var);
-      irgen_push_unary(Ir_Kind_load, arg);
+      arg = irgen_push_unary(Ir_Kind_load, arg);
       if (lhs->kind == Ast_Kind_record) {
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
       }
@@ -1115,7 +1158,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
+  test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1; a = 1", "");
