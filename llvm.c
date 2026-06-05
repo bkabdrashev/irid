@@ -61,12 +61,12 @@ LLVMTypeRef llvm_of_type(Type* type) {
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;
     I32 arg_count = 0;
-    if (type->function->fun->foreign) {
-      if (type->function->arg->kind == Type_Kind_none) {
-        arg_types = 0;
-        arg_count = 0;
-      }
-      else if (type->function->arg->kind == Type_Kind_record) {
+    if (type->function->arg->kind == Type_Kind_none) {
+      arg_types = 0;
+      arg_count = 0;
+    }
+    else if (type->function->fun->foreign) {
+      if (type->function->arg->kind == Type_Kind_record) {
         Record* record = type->function->arg->record;
         arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
         for (I32 i = 0; i < record->length; i++) {
@@ -506,8 +506,6 @@ void llvm_test(void) {
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
-  // BUG: a+b is 0+0 because llvm_default_of_type declares 0
-  // it doesn't like main void %0
   test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
   // test("f:()->1", "");
   // test("a:1; a+a", "");
