@@ -54,7 +54,12 @@ LLVMTypeRef llvm_of_type(Type* type) {
     LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_type = type_of_ir(type->record->declared[i]);
-      field_types[i] = llvm_of_type(field_type);
+      if (type_is_const(field_type)) {
+        field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
+      }
+      else {
+        field_types[i] = llvm_of_type(field_type);
+      }
     }
     result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
   } break;
@@ -166,7 +171,13 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMValueRef));
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_type = type_of_ir(type->record->declared[i]);
-      values[i] = llvm_default_of_type(field_type);
+      if (type_is_const(field_type)) {
+        LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
+        values[i] = LLVMConstInt(llvm_zero_type, 0, false);
+      }
+      else {
+        values[i] = llvm_default_of_type(field_type);
+      }
     }
     result = LLVMConstStructInContext(llvm_gen.context, values, type->record->length, false);
   } break;
