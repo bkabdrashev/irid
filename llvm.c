@@ -189,6 +189,22 @@ void llvm_ir(Ir* ir) {
   }
 
   switch (ir->kind) {
+  case Ir_Kind_arg: {
+    I32 count_params = LLVMCountParams(llvm_gen.function);
+    LLVMValueRef* params = arena_push(llvm_gen.perm_arena, count_params * sizeof(LLVMValueRef));
+    LLVMGetParams(llvm_gen.function, params);
+    if (count_params == 0) {
+      result = 0;
+    }
+    else if (count_params == 1) {
+      LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
+      result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
+      LLVMBuildStore(llvm_gen.builder, params[0], result);
+    }
+    else {
+      assert(0);
+    }
+  } break;
   case Ir_Kind_var: {
     if (ir->var->declared->kind != Type_Kind_none) {
       LLVMValueRef llvm_var_init = llvm_default_of_type(ir->var->declared);
@@ -395,11 +411,9 @@ LLVMValueRef llvm_fun(Fun* fun) {
     LLVMBuildRetVoid(llvm_gen.builder);
   }
   else {
-    LLVMTypeRef ret_var_type = llvm_of_type(fun->type->function->ret);
-    LLVMValueRef ret_var  = LLVMBuildAlloca(llvm_gen.builder, ret_var_type, "ret_var");
-
+    LLVMValueRef llvm_ret_var = llvm_of_ir(fun->ret_ir);
     LLVMTypeRef llvm_ret_type = llvm_of_type(ret_type);
-    LLVMValueRef ret_loaded = LLVMBuildLoad2(llvm_gen.builder, llvm_ret_type, ret_var, "loaded_ret_var");
+    LLVMValueRef ret_loaded = LLVMBuildLoad2(llvm_gen.builder, llvm_ret_type, llvm_ret_var, "");
     LLVMBuildRet(llvm_gen.builder, ret_loaded);
   }
   return llvm_gen.function;

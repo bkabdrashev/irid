@@ -219,7 +219,7 @@ struct Fun {
   B8      foreign;
   Blocks* blocks;
   Block*  ret_block;
-  Var*    arg_var;
+  Ir*     arg_var;
   Ir*     ret_ir;
   Type*   type;
   I32     var_count;
@@ -432,11 +432,6 @@ void string_builder_push_block(String_Builder* sb, Block* block, I32 indent) {
     string_builder_push_cstr(sb, " else ");
     string_builder_push_blockid(sb, block->branch.eqz.to_block);
   break;
-  // case Block_Kind_return:
-  //   string_builder_push_cstr(sb, "\n");
-  //   string_builder_push_indent(sb, indent+1);
-  //   string_builder_push_cstr(sb, "ret");
-  // break;
   }
 }
 
@@ -454,6 +449,9 @@ Cstr cstr_from_funs(C8* buffer, Funs funs) {
       Block* block = fun->blocks->base[b];
       string_builder_push_block(&sb, block, 1);
     }
+    string_builder_push_cstr(&sb, "\n");
+    string_builder_push_indent(&sb, 2);
+    string_builder_push_cstr(&sb, "ret");
     string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
@@ -997,7 +995,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
-    fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     fun->name = irgen.str_nil;
     Hash_Map scope;
     {
@@ -1005,24 +1003,25 @@ Ir* irgen_ast_node(Ast_Node* node) {
       if (lhs->kind == Ast_Kind_record) {
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
         add(irgen.scope_stack, &scope);
-        fun->arg_var->name = str_from_cstr("__arg");
-        Ir* arg = irgen_push_var(fun->arg_var);
-        irgen_var_declare(fun->arg_var, lhs);
-        irgen_push_declare(fun->arg_var);
-        irgen_assign(lhs, arg);
+        arg_var->name = str_from_cstr("__arg");
+        fun->arg_var = irgen_push_arg(arg_var);
+        irgen_var_declare(arg_var, lhs);
+        irgen_push_declare(arg_var);
+        irgen_assign(lhs, fun->arg_var);
       }
       else if (lhs->kind == Ast_Kind_declare) {
         scope = hash_map_init(irgen.perm_arena, 1);
         add(irgen.scope_stack, &scope);
-        fun->arg_var->name = lhs->declare.name;
+        arg_var->name = lhs->declare.name;
         fun->var_count++;
         Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
         sym->kind = Symbol_Kind_variable;
         sym->ast = lhs->declare.node;
-        sym->ir = irgen_push_var(fun->arg_var);
-        irgen_var_declare(fun->arg_var, lhs->declare.node);
-        irgen_push_declare(fun->arg_var);
-        irgen_sym_put(fun->arg_var->name, sym);
+        sym->ir = irgen_push_arg(arg_var);
+        fun->arg_var = sym->ir;
+        irgen_var_declare(arg_var, lhs->declare.node);
+        irgen_push_declare(arg_var);
+        irgen_sym_put(arg_var->name, sym);
       }
       else {
         assert(0);
@@ -1104,13 +1103,15 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       add(irgen.scope_stack, irgen.builtins);
     }
 
-    fun->arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    fun->arg_var->name = str_from_cstr("__arg");
+    Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    arg_var->name = str_from_cstr("__arg");
+    fun->arg_var = irgen_push_arg(arg_var);
 
     Ast_Node* node = arena_push(irgen.perm_arena, sizeof(Ast_Node));
     node->kind = Ast_Kind_record;
     node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
-    irgen_var_declare(fun->arg_var, node);
+    irgen_var_declare(arg_var, node);
+    irgen_push_declare(arg_var);
   }
 
   irgen_scope_enter(ast.scope);

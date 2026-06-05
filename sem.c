@@ -261,6 +261,9 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       break;
       }
     }
+    string_builder_push_cstr(&sb, "\n");
+    string_builder_push_indent(&sb, 2);
+    string_builder_push_cstr(&sb, "ret");
     string_builder_push_cstr(&sb, "\n}\n");
   }
   Cstr result = string_builder_end(&sb);
@@ -2196,7 +2199,7 @@ Type* sem_fun(Fun* fun) {
   Type* fun_type = type_of_fun(fun);
   if (fun_type) return fun_type;
 
-  sem_ensure_declared(fun->arg_var);
+  sem_ensure_declared(fun->arg_var->var);
 
   Block* entry_block = fun->blocks->base[0];
   entry_block->state = Block_State_reachable;
@@ -2227,7 +2230,7 @@ Type* sem_fun(Fun* fun) {
   new_type->kind = Type_Kind_fun;
   new_type->function = arena_push(sem.perm_arena, sizeof(Function));
   new_type->function->fun = fun;
-  new_type->function->arg = fun->arg_var->declared;
+  new_type->function->arg = fun->arg_var->var->declared;
   new_type->function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
   fun->ret_ir->var->declared = new_type->function->ret;
   Type* ret_type = type_of_ir(fun->ret_ir);
