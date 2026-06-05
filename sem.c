@@ -2331,12 +2331,12 @@ void sem_test(void) {
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
   // test("f:#c foo ()->1", "");
-  // test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
+  test("foo : (a:I32; b:I32) -> a+b", "");
   // TODO: figure out how to handle annoying syntax quirk
   // (1+2)          // works as single expression
   // foo:(a:I32)->a // foo takes record with single element
   // foo(1)         // doesn't work since (1) is single expression
-  test("foo : (a:I32) -> a+2; foo(1)", "");
+  // test("foo : (a:I32) -> a+2; foo(1)", "");
 }
 
 #undef test

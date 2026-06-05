@@ -61,18 +61,25 @@ LLVMTypeRef llvm_of_type(Type* type) {
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;
     I32 arg_count = 0;
-    if (type->function->arg->kind == Type_Kind_none) {
-      arg_types = 0;
-      arg_count = 0;
-    }
-    else if (type->function->arg->kind == Type_Kind_record) {
-      Record* record = type->function->arg->record;
-      arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
-      for (I32 i = 0; i < record->length; i++) {
-        Type* arg_type = type_of_ir(record->declared[i]);
-        arg_types[i] = llvm_of_type(arg_type);
+    if (type->function->fun->foreign) {
+      if (type->function->arg->kind == Type_Kind_none) {
+        arg_types = 0;
+        arg_count = 0;
       }
-      arg_count = record->length;
+      else if (type->function->arg->kind == Type_Kind_record) {
+        Record* record = type->function->arg->record;
+        arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
+        for (I32 i = 0; i < record->length; i++) {
+          Type* arg_type = type_of_ir(record->declared[i]);
+          arg_types[i] = llvm_of_type(arg_type);
+        }
+        arg_count = record->length;
+      }
+      else {
+        LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
+        arg_types = (LLVMTypeRef[1]){ arg_type };
+        arg_count = 1;
+      }
     }
     else {
       LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
@@ -234,17 +241,24 @@ void llvm_ir(Ir* ir) {
     Type* arg_type = type_of_ir(arg_ir);
     LLVMValueRef* llvm_args;
     I32 llvm_arg_count = 0;
-    if (arg_type->kind == Type_Kind_none) {
-      llvm_args = 0;
-      llvm_arg_count = 0;
-    }
-    else if (arg_type->kind == Type_Kind_record) {
-      Record* record = arg_type->record;
-      llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
-      for (I32 i = 0; i < record->length; i++) {
-        llvm_args[i] = llvm_of_ir(record->declared[i]);
+    if (fun_type->function->fun->foreign) {
+      if (arg_type->kind == Type_Kind_none) {
+        llvm_args = 0;
+        llvm_arg_count = 0;
       }
-      llvm_arg_count = record->length;
+      else if (arg_type->kind == Type_Kind_record) {
+        Record* record = arg_type->record;
+        llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
+        for (I32 i = 0; i < record->length; i++) {
+          llvm_args[i] = llvm_of_ir(record->declared[i]);
+        }
+        llvm_arg_count = record->length;
+      }
+      else {
+        LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
+        llvm_args = (LLVMValueRef[1]){ llvm_arg };
+        llvm_arg_count = 1;
+      }
     }
     else {
       LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
@@ -261,6 +275,13 @@ void llvm_ir(Ir* ir) {
     I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name.at);
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
     result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
+  } break;
+  case Ir_Kind_position_offset: {
+    Type* of_type = type_of_ir(ir->position.of);
+    Type* rec_type = of_type->pointer->declared;
+    LLVMValueRef ptr = llvm_of_ir(ir->position.of);
+    LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+    result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, ir->position.at, "");
   } break;
   case Ir_Kind_load:  {
     Type* type = type_of_ir(ir);
@@ -304,9 +325,13 @@ void llvm_ir(Ir* ir) {
     LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
   } break;
   case Ir_Kind_record: {
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->record->length * sizeof(LLVMValueRef));
+    for (I32 i = 0; i < ir->record->length; i++) {
+      values[i] =  llvm_of_ir(ir->record->declared[i]);
+    }
+    result = LLVMConstStructInContext(llvm_gen.context, values, ir->record->length, false);
   } break;
   case Ir_Kind_ptr: assert(0);
-  case Ir_Kind_position_offset: assert(0);
 
   case Ir_Kind_declare: break;
   case Ir_Kind_none:    break;
@@ -482,6 +507,7 @@ void llvm_test(void) {
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
   // BUG: a+b is 0+0 because llvm_default_of_type declares 0
+  // it doesn't like main void %0
   test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
   // test("f:()->1", "");
   // test("a:1; a+a", "");
