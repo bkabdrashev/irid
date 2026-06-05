@@ -209,7 +209,10 @@ void llvm_ir(Ir* ir) {
     if (ir->var->declared->kind != Type_Kind_none) {
       LLVMValueRef llvm_var_init = llvm_default_of_type(ir->var->declared);
 
-      if (ir->var->global) {
+      if (ir->var->kind == Var_Kind_constant) {
+        result = llvm_var_init;
+      }
+      else if (ir->var->global) {
         if (ir->var->declared->kind == Type_Kind_fun) {
           result = llvm_of_fun(ir->var->declared->function->fun);
         }
@@ -299,10 +302,13 @@ void llvm_ir(Ir* ir) {
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
     result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, ir->position.at, "");
   } break;
-  case Ir_Kind_load:  {
+  case Ir_Kind_load: {
     Type* type = type_of_ir(ir);
     if (type->kind == Type_Kind_fun) {
       result = llvm_of_fun(type->function->fun);
+    }
+    else if (type_is_const(type)) {
+      result = llvm_default_of_type(type);
     }
     else {
       LLVMTypeRef llvm_type = llvm_of_type(type);
@@ -516,11 +522,12 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); b: 68; putchar(b); putchar 10", "");
   // test("a:I32; a=5", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
-  test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
+  // test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
   // test("f:()->1", "");
   // test("a:1; a+a", "");
 }

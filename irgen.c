@@ -1144,7 +1144,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("foo : (a:I32) -> a+2; foo(1)", "");
-  test("foo : (a:I32; b:I32) -> a+b; foo(1;2)", "");
+  test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1; a = 1", "");

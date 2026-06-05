@@ -746,15 +746,6 @@ Type* type_define_size(I32 bits_size, Type* bits_of) {
   return new_type;
 }
 
-B8 type_not_equal(Type* one, Type* two) {
-  return one != two;
-}
-
-B8 type_equal(Type* one, Type* two) {
-  assert(0);
-  return one == two;
-}
-
 Type_Pair type_of_ir_binary(Ir* ir) {
   Type* one = type_of_ir(ir->binary.one);
   Type* two = type_of_ir(ir->binary.two);
@@ -2287,6 +2278,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("a:(x:I32; y:I32); a.x = 1; a.x", "");
   // test("a: (x:I32; y:I32); b:(x:I32; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
   // test("a: (x:1\\2; y:I32); b:(x:2\\3; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x = 2", "");
@@ -2334,11 +2326,7 @@ void sem_test(void) {
   // test("a:I32; b:I32; p:@I32; p = @a; p = @b", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar(60)", "");
   // test("f:#c foo ()->1", "");
-  test("foo : (a:I32; b:I32) -> a+b", "");
-  // TODO: figure out how to handle annoying syntax quirk
-  // (1+2)          // works as single expression
-  // foo:(a:I32)->a // foo takes record with single element
-  // foo(1)         // doesn't work since (1) is single expression
+  // test("foo : (a:I32; b:I32) -> a+b", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
 }
 
