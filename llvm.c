@@ -393,10 +393,14 @@ void llvm_block(Block* block) {
     LLVMBuildBr(llvm_gen.builder, llvm_to_block);
   } break;
   case Block_Kind_branch: {
-    LLVMValueRef cond = llvm_of_ir(block->branch.cond);
+    Type*        cond_type       = type_of_ir(block->branch.cond);
+    LLVMTypeRef  llvm_cond_type  = llvm_of_type(cond_type);
+    LLVMValueRef llvm_cond       = llvm_of_ir(block->branch.cond);
+    LLVMValueRef llvm_zero       = LLVMConstInt(llvm_cond_type, 0, false);
+    LLVMValueRef llvm_cond_bool  = LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_cond, llvm_zero, "");
     LLVMBasicBlockRef then_block = llvm_of_block(block->branch.nez.to_block);
     LLVMBasicBlockRef else_block = llvm_of_block(block->branch.eqz.to_block);
-    LLVMBuildCondBr(llvm_gen.builder, cond, then_block, else_block);
+    LLVMBuildCondBr(llvm_gen.builder, llvm_cond_bool, then_block, else_block);
   } break;
   }
 }
