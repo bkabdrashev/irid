@@ -142,12 +142,18 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   case Type_Kind_none: {
   } break;
   case Type_Kind_ptr: {
-    LLVMValueRef llvm_of_default = llvm_default_of_type(type->pointer->declared);
-    LLVMTypeRef llvm_var_type = llvm_of_type(type->pointer->declared);
-    LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__internal_default_stub");
-    LLVMSetInitializer(llvm_global, llvm_of_default);
-    LLVMSetGlobalConstant(llvm_global, false);
-    result = llvm_global;
+    if (type->pointer->stack.len == 1) {
+      Var* var = type->pointer->stack.list[0];
+      result = llvm_of_ir(var->declared_ir);
+    }
+    else {
+      LLVMValueRef llvm_of_default = llvm_default_of_type(type->pointer->declared);
+      LLVMTypeRef llvm_var_type = llvm_of_type(type->pointer->declared);
+      LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__internal_default_stub");
+      LLVMSetInitializer(llvm_global, llvm_of_default);
+      LLVMSetGlobalConstant(llvm_global, false);
+      result = llvm_global;
+    }
   } break;
   case Type_Kind_int: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
@@ -320,10 +326,6 @@ void llvm_ir(Ir* ir) {
     Type* type = type_of_ir(ir);
     if (type->kind == Type_Kind_fun) {
       result = llvm_of_fun(type->function->fun);
-    }
-    else if (type->kind == Type_Kind_ptr) {
-      LLVMTypeRef llvm_type = llvm_of_type(type);
-      result = LLVMBuildLoad2(llvm_gen.builder, llvm_type, llvm_unary, "");
     }
     else if (type_is_const(type)) {
       result = llvm_default_of_type(type);
