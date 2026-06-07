@@ -316,6 +316,17 @@ b = 10 // b is a ssa variable
 // b = 20 // error: b should have a declared type
 ```
 
+- [ ] Choose fun overload for that scope
+```irid
+foo:I32->I32
+foo:F32->F32
+{
+  use foo(I32)
+  foo(1)
+}
+
+```
+
 - [x] Optional do
 ```irid
 if 1 do 2
