@@ -10,8 +10,6 @@ typedef enum String_Kind {
   String_Kind_type   = 144,
 } String_Kind;
 
-typedef const char* Cstr;
-
 typedef struct Str Str;
 struct Str {
   String_Kind kind;

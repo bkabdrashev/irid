@@ -1,7 +1,9 @@
 #define false 0
 #define true 1
 
-typedef  char     C8;
+typedef  char       C8;
+typedef const char* Cstr;
+
 
 typedef int8_t    I8;
 typedef int16_t   I16;
@@ -500,4 +502,32 @@ B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
     }
   }
   return true;
+}
+
+Cstr file_read(Cstr path) {
+  I32 fd = open(path, O_RDONLY);
+  if (fd < 0) return NULL;
+
+  struct stat st;
+  if (fstat(fd, &st) < 0) {
+    close(fd);
+    return NULL;
+  }
+  Umi size = st.st_size;
+
+  U64 pagesz = sysconf(_SC_PAGESIZE);
+  Umi map_len = ((size + 1 + pagesz - 1) / pagesz) * pagesz;
+
+  C8* data = mmap(NULL, size,
+            PROT_READ|PROT_WRITE,
+            MAP_PRIVATE,
+            fd, 0);
+  close(fd);
+  if (data == MAP_FAILED) return NULL;
+
+  // data[size] = '\0';
+  if (mprotect(data, map_len, PROT_READ) != 0) {
+    perror("mprotect");
+  }
+  return data;
 }

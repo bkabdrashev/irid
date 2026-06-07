@@ -1,3 +1,8 @@
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -14,3 +19,4 @@
 #include "irgen.c"
 #include "sem.c"
 #include "llvm.c"
+#include "irid.c"
