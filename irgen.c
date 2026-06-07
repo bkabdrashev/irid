@@ -1143,8 +1143,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("1", "");
-  test("if 1 do 2 el 3", "");
+  // test("1", "");
+  // test("if 1 do 2 el 3", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");

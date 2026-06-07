@@ -700,6 +700,7 @@ Type* type_join(Type* one, Type* two) {
 Type* type_ptr(Type* declared, Hash_Set stack) {
   Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->stack = stack;
+  pointer->declared = declared;
   type_pointer_declared(pointer);
 
   Type* new_type = &new(sem.types);
@@ -709,8 +710,6 @@ Type* type_ptr(Type* declared, Hash_Set stack) {
 }
 
 Type* type_ptr_to(Type* type) {
-  Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
-  pointer->declared = type;
   Hash_Set stack    = hash_set_init(sem.perm_arena, 1);
   return type_ptr(type, stack);
 }
@@ -2278,6 +2277,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("a:(x:I32; y:I32); a.x = 1; a.x", "");
   // test("a: (x:I32; y:I32); b:(x:I32; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");

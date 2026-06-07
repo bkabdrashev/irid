@@ -142,9 +142,12 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   case Type_Kind_none: {
   } break;
   case Type_Kind_ptr: {
-    // TODO: create a default global object of `pointer->declared type`
-    assert(0);
-    result = llvm_default_of_type(type->pointer->declared);
+    LLVMValueRef llvm_of_default = llvm_default_of_type(type->pointer->declared);
+    LLVMTypeRef llvm_var_type = llvm_of_type(type->pointer->declared);
+    LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__internal_default_stub");
+    LLVMSetInitializer(llvm_global, llvm_of_default);
+    LLVMSetGlobalConstant(llvm_global, false);
+    result = llvm_global;
   } break;
   case Type_Kind_int: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
@@ -237,7 +240,7 @@ void llvm_ir(Ir* ir) {
       else {
         LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
         result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
-        LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
+        // LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
       }
       // NOTE: declared_ir is used to store llvm value reference, so that pointer can refer to it
       if (ir->var->declared_ir) {
@@ -317,6 +320,10 @@ void llvm_ir(Ir* ir) {
     Type* type = type_of_ir(ir);
     if (type->kind == Type_Kind_fun) {
       result = llvm_of_fun(type->function->fun);
+    }
+    else if (type->kind == Type_Kind_ptr) {
+      LLVMTypeRef llvm_type = llvm_of_type(type);
+      result = LLVMBuildLoad2(llvm_gen.builder, llvm_type, llvm_unary, "");
     }
     else if (type_is_const(type)) {
       result = llvm_default_of_type(type);
@@ -536,6 +543,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
   // test("a:I32; a=5", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
