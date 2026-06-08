@@ -44,6 +44,8 @@ typedef enum Token_Kind {
   Token_Kind_str                = 48,
   Token_Kind_sharp              = 49,
   Token_Kind_foreign_c          = 50,
+  Token_Kind_slash              = 51,
+  Token_Kind_percent            = 52,
 
   Token_Kind_name               = String_Kind_name,
   Token_Kind_if                 = String_Kind_if,
@@ -185,6 +187,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
       }
       token.i64 = val;
     } break;
+    case '_':
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
     case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
     case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
@@ -193,7 +196,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': {
       Cstr start = lexer.stream;
       token.kind = Token_Kind_name;
-      while (isalnum(*lexer.stream)) {
+      while (isalnum(*lexer.stream) || *lexer.stream == '_') {
         lexer.stream++;
       }
       token.str = str_from_range(start, lexer.stream);
@@ -219,6 +222,14 @@ Tokens lex_source(Arena* arena, Cstr source) {
     } break;
     case '*': {
       token.kind = Token_Kind_star;
+      lexer.stream++;
+    } break;
+    case '/': {
+      token.kind = Token_Kind_slash;
+      lexer.stream++;
+    } break;
+    case '%': {
+      token.kind = Token_Kind_percent;
       lexer.stream++;
     } break;
     case '!': {
@@ -388,6 +399,12 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_star:
       string_builder_push_cstr(&sb, "*");
+    break;
+    case Token_Kind_slash:
+      string_builder_push_cstr(&sb, "/");
+    break;
+    case Token_Kind_percent:
+      string_builder_push_cstr(&sb, "%");
     break;
     case Token_Kind_equal_equal:
       string_builder_push_cstr(&sb, "==");

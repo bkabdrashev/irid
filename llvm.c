@@ -149,7 +149,7 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     else {
       LLVMValueRef llvm_of_default = llvm_default_of_type(type->pointer->declared);
       LLVMTypeRef llvm_var_type = llvm_of_type(type->pointer->declared);
-      LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__internal_default_stub");
+      LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
       LLVMSetInitializer(llvm_global, llvm_of_default);
       LLVMSetGlobalConstant(llvm_global, false);
       result = llvm_global;
@@ -266,6 +266,8 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_add: result = LLVMBuildAdd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
   case Ir_Kind_sub: result = LLVMBuildSub(llvm_gen.builder, llvm_one, llvm_two, ""); break;
   case Ir_Kind_mul: result = LLVMBuildMul(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+  case Ir_Kind_div: result = LLVMBuildSDiv(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+  case Ir_Kind_rem: result = LLVMBuildSRem(llvm_gen.builder, llvm_one, llvm_two, ""); break;
   case Ir_Kind_eq:  result = LLVMBuildICmp(llvm_gen.builder, LLVMIntEQ, llvm_one, llvm_two, ""); break;
   case Ir_Kind_ne:  result = LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_one, llvm_two, ""); break;
   case Ir_Kind_lt:  result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSLT, llvm_one, llvm_two, ""); break;

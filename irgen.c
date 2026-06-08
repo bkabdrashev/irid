@@ -12,6 +12,8 @@ typedef enum Ir_Kind {
   Ir_Kind_add = Ast_Kind_add | Ir_Flag_binary,
   Ir_Kind_sub = Ast_Kind_sub | Ir_Flag_binary,
   Ir_Kind_mul = Ast_Kind_mul | Ir_Flag_binary,
+  Ir_Kind_div = Ast_Kind_div | Ir_Flag_binary,
+  Ir_Kind_rem = Ast_Kind_rem | Ir_Flag_binary,
   Ir_Kind_eq  = Ast_Kind_eq | Ir_Flag_binary,
   Ir_Kind_ne  = Ast_Kind_ne | Ir_Flag_binary,
   Ir_Kind_lt  = Ast_Kind_lt | Ir_Flag_binary,
@@ -373,6 +375,8 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_add:  string_builder_push_cstr(sb, "add "); break;
   case Ir_Kind_mul:  string_builder_push_cstr(sb, "mul "); break;
+  case Ir_Kind_div:  string_builder_push_cstr(sb, "div "); break;
+  case Ir_Kind_rem:  string_builder_push_cstr(sb, "mod "); break;
   case Ir_Kind_sub:  string_builder_push_cstr(sb, "sub "); break;
   case Ir_Kind_join: string_builder_push_cstr(sb, "join "); break;
   case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
@@ -940,7 +944,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_eq: case Ast_Kind_ne:
   case Ast_Kind_le: case Ast_Kind_lt:
   case Ast_Kind_ge: case Ast_Kind_gt:
-  case Ast_Kind_mul: case Ast_Kind_join:
+  case Ast_Kind_mul:
+  case Ast_Kind_div: case Ast_Kind_rem:
+  case Ast_Kind_join:
   case Ast_Kind_add: case Ast_Kind_sub: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     Ir* rhs = irgen_ast_node(node->binary.rhs);
