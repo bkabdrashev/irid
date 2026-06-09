@@ -1,4 +1,6 @@
 void irid_run_path(Cstr path) {
+// TODO: figure out how to store var declared type
+//       problem is pointer to var needs to be declared also
   Cstr source          = file_read(path);
   I32 source_length    = strlen(source) + 32;
   Arena arena          = arena_init(KB(4) * source_length);
