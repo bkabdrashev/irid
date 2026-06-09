@@ -312,6 +312,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name.of);
     Type* rec_type = of_type->pointer->declared;
+    assert(rec_type->kind == Type_Kind_record);
     LLVMValueRef ptr = llvm_of_ir(ir->name.of);
     I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name.at);
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
@@ -358,7 +359,10 @@ void llvm_ir(Ir* ir) {
       }
     }
     else {
-      result = LLVMBuildStore(llvm_gen.builder, llvm_two, llvm_one);
+      Type* type_two = type_of_ir(ir->binary.two);
+      if (type_two->kind != Type_Kind_none) {
+        result = LLVMBuildStore(llvm_gen.builder, llvm_two, llvm_one);
+      }
     }
   } break;
   case Ir_Kind_fun: {

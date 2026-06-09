@@ -626,7 +626,7 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
 }
 
 I32 sem_get_offset_by_name(Var* var, Str* name) {
-  assert(var->declared);
+  sem_ensure_declared(var);
   assert(var->declared->kind == Type_Kind_record);
   Record* record = var->declared->record;
   I32 position = hash_map_get_i32(&record->position_from_name, name);
@@ -701,7 +701,7 @@ Type* type_ptr(Type* declared, Hash_Set stack) {
   Pointer* pointer = arena_push_zero(sem.perm_arena, sizeof(Pointer));
   pointer->stack = stack;
   pointer->declared = declared;
-  type_pointer_declared(pointer);
+  // type_pointer_declared(pointer);
 
   Type* new_type = &new(sem.types);
   new_type->kind = Type_Kind_ptr;
@@ -717,7 +717,7 @@ Type* type_ptr_to(Type* type) {
 Type* type_ptr_var(Var* var) {
   Hash_Set stack  = hash_set_init(sem.perm_arena, 1);
   hash_set_put(&stack, var);
-  return type_ptr(0, stack);
+  return type_ptr(var->declared, stack);
 }
 
 Type* type_pointer_declared(Pointer* pointer) {
@@ -1251,7 +1251,8 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
     printf("cannot assign a constant '%s'\n", var->name->base);
     assert(0);
   }
-  if (!var->declared) {
+  if (!var->declared_ir) {
+    var->declared = type_join(var->declared, type);
     hash_map_put(&block->out_var_types, var, type);
   }
   else {
@@ -1327,10 +1328,9 @@ Type* sem_ensure_declared(Var* var) {
       sem_block(block);
     }
   }
-
   Type* type = type_of_ir(var->declared_ir);
-  var->declared = type;
   if (type) {
+    var->declared = type;
     if (type_is_const(type)) {
       var->kind = Var_Kind_constant;
     }
@@ -1348,6 +1348,9 @@ Type* sem_fun(Fun* fun);
 void sem_ir(Block* block, Ir* ir) {
   Type* result = type_of_ir(ir);
   switch (ir->kind) {
+  case Ir_Kind_none: {
+    result = sem.type_none;
+  } break;
   case Ir_Kind_int: {
     I64 i64 = ir->i64;
     result  = type_int(i64);
@@ -1362,6 +1365,7 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_ptr_var(ir->var);
   } break;
   case Ir_Kind_var: {
+    ir->var->declared = sem.type_none;
     result = type_ptr_var(ir->var);
   } break;
   case Ir_Kind_join: {
@@ -1448,6 +1452,54 @@ void sem_ir(Block* block, Ir* ir) {
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
+    }
+  } break;
+  case Ir_Kind_mul: {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+      // TODO: overflow/underflow
+      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+      I64 max_one = ranges_max(pair.one);
+      I64 max_two = ranges_max(pair.two);
+      I64 max = max_one * max_two;
+      I64 min_one = ranges_min(pair.one);
+      I64 min_two = ranges_min(pair.two);
+      I64 min = min_one * min_two;
+      result = type_range(min, max);
+      if (types.one->size_defined && types.two->size_defined) {
+        I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
+        result->bits_size  = bits_max_size;
+        result->bits_align = bits_max_size;
+        result->ranges->pairs[0].lo = bits_min(bits_max_size);
+        result->ranges->pairs[0].hi = bits_max(bits_max_size);
+      }
+    }
+  } break;
+  case Ir_Kind_div: {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+      // TODO: overflow/underflow
+      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+      I64 max_one = ranges_max(pair.one);
+      I64 max_two = ranges_max(pair.two);
+      I64 min_one = ranges_min(pair.one);
+      I64 min_two = ranges_min(pair.two);
+      I64 max = max_one / min_two;
+      I64 min = min_one / max_two;
+      result = type_range(min, max);
+    }
+  } break;
+  case Ir_Kind_rem: {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+      // TODO: overflow/underflow
+      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+      I64 max_one = ranges_max(pair.one);
+      I64 max_two = ranges_max(pair.two);
+      I64 min_one = ranges_min(pair.one);
+      I64 min_two = ranges_min(pair.two);
+      I64 min = min(min_one % min_two, max_one % min_two);
+      result = type_range(0, max_two-1);
     }
   } break;
   case Ir_Kind_eq: case Ir_Kind_ne:
@@ -2163,7 +2215,7 @@ void sem_loop_seed(Loop* loop, Hash_Map* innermost) {
   for (I32 i = 0; i < pool_len; i++) {
     Loop_Var* lv  = &pool[i];
     Var*      var = lv->var;
-    sem_ensure_declared(var);
+    // sem_ensure_declared(var);
     Type* seeded = 0;
     if (lv->affine && count.known) {
       Type* v0_type = type_of_var(loop->preheader, var);

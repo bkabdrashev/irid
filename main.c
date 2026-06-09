@@ -1,4 +1,4 @@
-// gcc -g -Wall -Wextra -Wno-unused-parameter -Wshadow -pedantic -fsanitize=address,undefined main.c -o build/main && build/main
+// gcc -g -Wall -Wextra -Wshadow -Wno-unused-parameter -pedantic -fsanitize=address,undefined $(llvm-config --cflags --libs core analysis bitwriter passes native support target) main.c -o build/main && build/main
 #include "includes.h"
 
 const char *__asan_default_options() {

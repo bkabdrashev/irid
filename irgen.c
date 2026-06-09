@@ -687,6 +687,7 @@ void irgen_scope_enter(Hash_Map* scope) {
     Symbol* sym = hash_map_get(scope, key);
     Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     var->kind = Var_Kind_declared;
+    var->state = Var_State_unresolved;
     var->global = irgen.scope_stack.length == 1;
     var->name = key;
     sym->kind = Symbol_Kind_variable;
@@ -893,6 +894,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Var* block_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
     block_var->name = str_from_cstr("#block");
     Ir* block_ir = irgen_push_var(block_var);
+    irgen_push_binary(Ir_Kind_store, block_ir, irgen.ir_none);
 
     for (I32 i = 0; i < node->block.list->length; i++) {
       Ast_Node* exp = node->block.list->base[i];
@@ -1041,7 +1043,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_return: {
     Fun* fun = irgen_fun_top();
-    Ir* none = irgen_push_none();
+    Ir* none = irgen.ir_none;
     result = irgen_push_binary(Ir_Kind_store, fun->ret_ir, none);
     irgen_block_return();
   } break;
@@ -1119,6 +1121,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen_var_declare(arg_var, node);
     irgen_push_declare(arg_var);
   }
+  irgen.ir_none = irgen_push_none();
 
   irgen_scope_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
