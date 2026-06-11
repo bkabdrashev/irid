@@ -645,7 +645,7 @@ Type* type_record(Record* record) {
   return new_type;
 }
 
-Type* type_ranges_intersection(Ranges* one, Ranges* two);
+Type* type_ranges_meet(Ranges* one, Ranges* two);
 Type* type_ptr(Type* declared, Hash_Set stack);
 
 Type* type_meet(Type* one, Type* two) {
@@ -655,7 +655,7 @@ Type* type_meet(Type* one, Type* two) {
   switch (one->kind) {
   case Type_Kind_none: break;
   case Type_Kind_int: {
-    result = type_ranges_intersection(one->ranges, two->ranges);
+    result = type_ranges_meet(one->ranges, two->ranges);
   } break;
   case Type_Kind_ptr: {
     Hash_Set stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
@@ -717,7 +717,7 @@ Type* type_ptr_to(Type* type) {
 Type* type_ptr_var(Var* var) {
   Hash_Set stack  = hash_set_init(sem.perm_arena, 1);
   hash_set_put(&stack, var);
-  return type_ptr(var->declared, stack);
+  return type_ptr(0, stack);
 }
 
 Type* type_pointer_declared(Pointer* pointer) {
@@ -778,7 +778,7 @@ B8 type_kind_of_ir_binary_operands_equal(Ir* ir, Type_Kind type_kind) {
   return pair.one->kind == type_kind && pair.two->kind == type_kind;
 }
 
-Type* type_ranges_intersection(Ranges* one, Ranges* two) {
+Type* type_ranges_meet(Ranges* one, Ranges* two) {
   Ranges* new_ranges = sem_ranges_init(max(one->length, two->length));
   I32 o = 0; I32 t = 0;
   while (o < one->length && t < two->length) {
@@ -798,7 +798,7 @@ Type* type_ranges_intersection(Ranges* one, Ranges* two) {
   return type_ranges(new_ranges);
 }
 
-Type* type_ranges_no_intersection(Ranges* one, Ranges* two) {
+Type* type_ranges_no_meet(Ranges* one, Ranges* two) {
   Ranges* new_ranges = sem_ranges_init(max(one->length, two->length));
   I32 o = 0; I32 t = 0;
   Range range1 = one->pairs[o];
@@ -955,7 +955,7 @@ void sem_type_of_ir_binary_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type_one, 
 
 void sem_type_narrow_int_eq(Sem_Tasks* tasks, Ir* ir) {
   Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-  Type* new_type = type_ranges_intersection(pair.one, pair.two);
+  Type* new_type = type_ranges_meet(pair.one, pair.two);
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
 
@@ -1004,7 +1004,7 @@ Type* sem_ranges_clamp(Ranges* ranges, I64 lo, I64 hi) {
   line->length = 1;
   line->pairs[0].lo = lo;
   line->pairs[0].hi = hi;
-  return type_ranges_intersection(ranges, line);
+  return type_ranges_meet(ranges, line);
 }
 
 Ir_Kind sem_cmp_negate(Ir_Kind op) {
@@ -1494,11 +1494,7 @@ void sem_ir(Block* block, Ir* ir) {
     if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       // TODO: overflow/underflow
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      I64 max_one = ranges_max(pair.one);
       I64 max_two = ranges_max(pair.two);
-      I64 min_one = ranges_min(pair.one);
-      I64 min_two = ranges_min(pair.two);
-      I64 min = min(min_one % min_two, max_one % min_two);
       result = type_range(0, max_two-1);
     }
   } break;
@@ -2329,6 +2325,12 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  /*
+  a:1..2 = 1 //
+  b:I32      //
+  b = a
+  */
+  test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("a:(x:I32; y:I32); a.x = 1; a.x", "");

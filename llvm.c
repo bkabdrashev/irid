@@ -44,7 +44,18 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMVoidTypeInContext(llvm_gen.context);
   } break;
   case Type_Kind_int: {
-    result = LLVMIntTypeInContext(llvm_gen.context, 32);
+    if (type->bits_size <= 8) {
+      result = LLVMInt8TypeInContext(llvm_gen.context);
+    }
+    else if (8 < type->bits_size && type->bits_size <= 16) {
+      result = LLVMInt16TypeInContext(llvm_gen.context);
+    }
+    else if (16 < type->bits_size && type->bits_size <= 32) {
+      result = LLVMInt32TypeInContext(llvm_gen.context);
+    }
+    else if (32 < type->bits_size && type->bits_size <= 64) {
+      result = LLVMInt64TypeInContext(llvm_gen.context);
+    }
   } break;
   case Type_Kind_ptr: {
     LLVMTypeRef pointer_to = llvm_of_type(type->pointer->declared);
@@ -311,7 +322,7 @@ void llvm_ir(Ir* ir) {
 
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name.of);
-    Type* rec_type = of_type->pointer->declared;
+    Type* rec_type = type_pointer_declared(of_type->pointer);
     assert(rec_type->kind == Type_Kind_record);
     LLVMValueRef ptr = llvm_of_ir(ir->name.of);
     I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name.at);
@@ -553,7 +564,9 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void llvm_test(void) {
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
-  // test("a:I32; a=5", "");
+  // 0000
+  // 1100
+  test("a:12\\13; b:I32; b = a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
