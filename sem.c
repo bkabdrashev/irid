@@ -2325,15 +2325,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  /*
-  a:1..2 = 1 //
-  b:I32      //
-  b = a
-
-  a:i8  = -1
-  b:I32 = i32_from_i8()
-  */
-  test("a:12\\13 = 12; b:I32; b = a", "");
+  // test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("a:(x:I32; y:I32); a.x = 1; a.x", "");

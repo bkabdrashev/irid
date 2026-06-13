@@ -730,6 +730,7 @@ Fun* irgen_fun_enter(void) {
   // irgen_var_declare(fun->ret_ir->var, ret_decl); // TODO: declare return var
 
   fun->var_count = irgen.builtins->cap;
+  fun->var_count++; // __ret
   return fun;
 }
 
