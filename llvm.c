@@ -205,6 +205,14 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   return result;
 }
 
+LLVMValueRef llvm_conversion(LLVMValueRef llvm_val, Type* from, Type* to) {
+  assert(from->kind == Type_Kind_int); // FIX: other types
+  assert(to->kind == Type_Kind_int);
+  LLVMTypeRef llvm_to = llvm_of_type(to);
+  LLVMValueRef result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
+  return result;
+}
+
 void llvm_ir(Ir* ir) {
   LLVMValueRef result = 0;
   LLVMValueRef llvm_one = 0;
@@ -308,12 +316,14 @@ void llvm_ir(Ir* ir) {
       }
       else {
         LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
+        llvm_arg = llvm_conversion(llvm_arg, arg_type, fun_type->function->arg);
         llvm_args = (LLVMValueRef[1]){ llvm_arg };
         llvm_arg_count = 1;
       }
     }
     else {
       LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
+      llvm_arg = llvm_conversion(llvm_arg, arg_type, fun_type->function->arg);
       llvm_args = (LLVMValueRef[1]){ llvm_arg };
       llvm_arg_count = 1;
     }

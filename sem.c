@@ -2329,6 +2329,9 @@ void sem_test(void) {
   a:1..2 = 1 //
   b:I32      //
   b = a
+
+  a:i8  = -1
+  b:I32 = i32_from_i8()
   */
   test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
