@@ -44,18 +44,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMVoidTypeInContext(llvm_gen.context);
   } break;
   case Type_Kind_int: {
-    if (type->bits_size <= 8) {
-      result = LLVMInt8TypeInContext(llvm_gen.context);
-    }
-    else if (8 < type->bits_size && type->bits_size <= 16) {
-      result = LLVMInt16TypeInContext(llvm_gen.context);
-    }
-    else if (16 < type->bits_size && type->bits_size <= 32) {
-      result = LLVMInt32TypeInContext(llvm_gen.context);
-    }
-    else if (32 < type->bits_size && type->bits_size <= 64) {
-      result = LLVMInt64TypeInContext(llvm_gen.context);
-    }
+    result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
   } break;
   case Type_Kind_ptr: {
     LLVMTypeRef pointer_to = llvm_of_type(type->pointer->declared);

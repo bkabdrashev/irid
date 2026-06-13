@@ -98,11 +98,9 @@ Type* sem_ensure_declared(Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
-  if (type->size_defined) {
-    string_builder_push_cstr(sb, "bits(");
-    string_builder_push_i64(sb, type->bits_size);
-    string_builder_push_cstr(sb, ", ");
-  }
+  string_builder_push_cstr(sb, "bits(");
+  string_builder_push_i64(sb, type->bits_size);
+  string_builder_push_cstr(sb, ", ");
   switch (type->kind) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "none");
@@ -185,9 +183,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, ")");
   } break;
   }
-  if (type->size_defined) {
-    string_builder_push_cstr(sb, ") ");
-  }
+  string_builder_push_cstr(sb, ") ");
 }
 
 Cstr cstr_from_sem(Funs funs, C8* buffer) {

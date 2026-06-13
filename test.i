@@ -25,5 +25,6 @@ putchar: #c putchar (char:I32) -> I32
 
 putchar 65
 putchar 10
-print_i32(Game.width)
+
+print_i32(123123)
 print_i32(Game.height)
