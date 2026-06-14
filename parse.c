@@ -27,6 +27,7 @@ typedef enum Ast_Kind {
   Ast_Kind_ptr       = Token_Kind_at+1,
   Ast_Kind_load      = Token_Kind_at,
   Ast_Kind_dot       = Token_Kind_dot,
+  Ast_Kind_range     = Token_Kind_dot_dot,
   Ast_Kind_join      = Token_Kind_backslash,
   Ast_Kind_subscript = Token_Kind_brace_open,
   Ast_Kind_array     = Token_Kind_brace_open + 1,
@@ -142,6 +143,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_ptr:          result = "@"; break;
   case Ast_Kind_load:         result = "@"; break;
   case Ast_Kind_dot:          result = "."; break;
+  case Ast_Kind_range:        result = ".."; break;
   case Ast_Kind_join:         result = "\\"; break;
   case Ast_Kind_subscript:    result = "s[]"; break;
   case Ast_Kind_array:        result = "a[]"; break;
@@ -286,7 +288,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_mul:
   case Ast_Kind_dot:
   case Ast_Kind_fun:
-  case Ast_Kind_join:
+  case Ast_Kind_join: case Ast_Kind_range:
     {
     string_builder_push_cstr(sb, "(");
     string_builder_push_ast_node(sb, node->binary.lhs);
@@ -378,6 +380,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_gt: case Ast_Kind_ge:
     return 6;
   case Ast_Kind_join:
+  case Ast_Kind_range:
     return 8;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -411,6 +414,7 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_gt: case Ast_Kind_ge:
     return 5;
   case Ast_Kind_join:
+  case Ast_Kind_range:
     return 7;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -566,6 +570,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     case Token_Kind_greater_equal:
     case Token_Kind_greater:
     case Token_Kind_backslash:
+    case Token_Kind_dot_dot:
     case Token_Kind_plus: case Token_Kind_minus:
     case Token_Kind_star: case Token_Kind_slash: case Token_Kind_percent:
     case Token_Kind_dot: {

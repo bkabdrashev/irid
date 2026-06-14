@@ -46,6 +46,7 @@ typedef enum Token_Kind {
   Token_Kind_foreign_c          = 50,
   Token_Kind_slash              = 51,
   Token_Kind_percent            = 52,
+  Token_Kind_dot_dot            = 53,
 
   Token_Kind_name               = String_Kind_name,
   Token_Kind_if                 = String_Kind_if,
@@ -271,6 +272,10 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case '.': {
       token.kind = Token_Kind_dot;
       lexer.stream++;
+      if (*lexer.stream == '.') {
+        token.kind = Token_Kind_dot_dot;
+        lexer.stream++;
+      }
     } break;
     case '(': {
       token.kind = Token_Kind_paren_open;
@@ -432,6 +437,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_dot:
       string_builder_push_cstr(&sb, ".");
+    break;
+    case Token_Kind_dot_dot:
+      string_builder_push_cstr(&sb, "..");
     break;
     case Token_Kind_at:
       string_builder_push_cstr(&sb, "@");

@@ -1522,8 +1522,47 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_record: {
     result = type_record(ir->record);
   } break;
+  case Ir_Kind_array: {
+    Type* one_type = type_of_ir(ir->binary.one);
+    Type* two_type = type_of_ir(ir->binary.two);
+    if (one_type->kind == Type_Kind_int) {
+      if (type_is_const(one_type)) {
+        I64 length = ranges_min(one_type->ranges);
+        Record* new_record = &new(irgen.records);
+        new_record->length   = length;
+        new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
+        new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
+        new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
+        new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
+        for (I32 i = 0; i < length; i++) {
+          new_record->declared[i] = ir->binary.two;
+        }
+        result = type_record(new_record);
+      }
+      else {
+        assert(0);
+      }
+    }
+    else {
+      assert(0);
+    }
+  } break;
+  case Ir_Kind_subscript: {
+    Type* of_type = type_of_ir(ir->binary.one);
+    Type* at_type = type_of_ir(ir->binary.two);
+    if (of_type->kind == Type_Kind_ptr) {
+      if (at_type->kind == Type_Kind_int) {
+      }
+      else {
+        assert(0);
+      }
+    }
+    else {
+      assert(0);
+    }
+  } break;
   case Ir_Kind_position_offset: {
-    Type* of_type = type_of_ir(ir->name.of);
+    Type* of_type = type_of_ir(ir->position.of);
     if (of_type->kind == Type_Kind_ptr) {
       assert(of_type->pointer->stack.len > 0);
       Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
@@ -1652,7 +1691,6 @@ void sem_ir(Block* block, Ir* ir) {
       assert(0);
     }
   } break;
-
   case Ir_Kind_range: {
     if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);

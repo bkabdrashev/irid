@@ -22,7 +22,10 @@ typedef enum Ir_Kind {
   Ir_Kind_ge  = Ast_Kind_ge | Ir_Flag_binary,
   Ir_Kind_call = Ast_Kind_call | Ir_Flag_binary,
 
+  Ir_Kind_array = Ast_Kind_array | Ir_Flag_binary,
+  Ir_Kind_subscript = Ast_Kind_subscript | Ir_Flag_binary,
   Ir_Kind_join = Ast_Kind_join | Ir_Flag_binary,
+  Ir_Kind_range = Ast_Kind_range | Ir_Flag_binary,
 
   Ir_Kind_neg = Ast_Kind_neg | Ir_Flag_unary,
 
@@ -39,7 +42,6 @@ typedef enum Ir_Kind {
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
 
-  Ir_Kind_range = 138 | Ir_Flag_binary,
   Ir_Kind_bits  = 139 | Ir_Flag_binary,
 
 } Ir_Kind;
@@ -837,7 +839,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
     }
     else {
-      printf("not found\n");
+      printf("not found %s\n", node->str->base);
       assert(0);
     }
   } break;
@@ -850,6 +852,23 @@ Ir* irgen_ast_node(Ast_Node* node) {
         lhs->name.at = node->binary.rhs->str;
         result = irgen_push_unary(Ir_Kind_load, lhs);
       }
+    }
+    else if (node->binary.rhs->kind == Ast_Kind_int) {
+      if (lhs->kind == Ir_Kind_load) {
+        lhs->kind = Ir_Kind_position_offset;
+        lhs->position.of = lhs->unary;
+        lhs->position.at = node->binary.rhs->i64;
+        result = irgen_push_unary(Ir_Kind_load, lhs);
+      }
+    }
+  } break;
+  case Ast_Kind_subscript: {
+    Ir* lhs = irgen_ast_node(node->binary.lhs);
+    if (lhs->kind == Ir_Kind_load) {
+      lhs->kind = Ir_Kind_subscript;
+      lhs->binary.one = lhs->unary;
+      lhs->binary.two = irgen_ast_node(node->binary.rhs);
+      result = irgen_push_unary(Ir_Kind_load, lhs);
     }
   } break;
   case Ast_Kind_assign: {
@@ -942,14 +961,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
   } break;
-  case Ast_Kind_call: case Ast_Kind_subscript:
+  case Ast_Kind_call:
   case Ast_Kind_array:
   case Ast_Kind_eq: case Ast_Kind_ne:
   case Ast_Kind_le: case Ast_Kind_lt:
   case Ast_Kind_ge: case Ast_Kind_gt:
   case Ast_Kind_mul:
   case Ast_Kind_div: case Ast_Kind_rem:
-  case Ast_Kind_join:
+  case Ast_Kind_join: case Ast_Kind_range:
   case Ast_Kind_add: case Ast_Kind_sub: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     Ir* rhs = irgen_ast_node(node->binary.rhs);

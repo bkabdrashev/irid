@@ -13,10 +13,17 @@ print_i32:(n:I32) -> {
     putchar 10
     re
   }
+  buf: [10](0..9)
+  i:0..9 = 0
   wh n > 0 do {
     digit := n % 10
-    putchar (digit + 48)
+    buf[i] = digit
     n = n / 10
+    i = i + 1
+  }
+  wh i > 0 do {
+    i = i - 1
+    putchar (buf[i] + 48)
   }
   putchar 10
 }
