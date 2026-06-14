@@ -1308,6 +1308,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
   type->bits_size = align_up(type->bits_size, type->bits_align);
   type->record->offsets_all_equal = true;
   I16 last_field_bit_size = type->bits_size - type->record->offsets[type->record->length-1];
+  // FIX: for some reason not all fields agree even for 10[0..9] case
   for (I32 i = 0; i+2 < type->record->length; i++) {
     I16 field_bit_size = type->record->offsets[i+1] - type->record->offsets[i];
     if (last_field_bit_size != field_bit_size) {
