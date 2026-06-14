@@ -61,11 +61,12 @@ typedef struct Declare Declare;
 struct Declare { Var* var; };
 
 typedef struct Position_Offset Position_Offset;
-struct Position_Offset { Ir* of; I32 at; };
+struct Position_Offset { Ir* of; Ir* at; };
 
 typedef struct Record Record;
 struct Record {
   I32      length;
+  B8       offsets_all_equal;
   Ir**     declared;
   I32*     offsets;
   Str**    names;
@@ -112,7 +113,7 @@ struct Ir {
     Ir_Pair binary;
     Ir*     unary;
     Position_Offset position;
-    Name_Offset     name;
+    Name_Offset     name_offset;
     Declare         declare;
   };
 };
@@ -286,7 +287,9 @@ void string_builder_push_var(String_Builder* sb, Var* var) {
     string_builder_push_var(sb, var->parent);
     string_builder_push_cstr(sb, ".");
   }
-  string_builder_push_str(sb, var->name);
+  if (var->name) {
+    string_builder_push_str(sb, var->name);
+  }
 }
 
 void string_builder_push_fun(String_Builder* sb, Fun* fun) {
@@ -349,16 +352,14 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "position offset ");
     string_builder_push_irid(sb, ir->position.of);
     string_builder_push_cstr(sb, ".");
-    string_builder_push_i64(sb, ir->position.at);
+    string_builder_push_irid(sb, ir->position.at);
   break;
   case Ir_Kind_name_offset:
-    string_builder_push_cstr(sb, "name offset ");
-    string_builder_push_irid(sb, ir->name.of);
-    string_builder_push_cstr(sb, ".");
-    string_builder_push_str(sb, ir->name.at);
+    string_builder_push_cstr(sb, "name ofset ");
+    string_builder_push_irid(sb, ir->    name_offset.of);
+    string_builder_push_cstr(sb, ".");   string_builder_push_str(sb, ir->    name_offset.at);
   break;
-  case Ir_Kind_record:
-    string_builder_push_cstr(sb, "record");
+  case Ir_Kind_record:    string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < ir->record->length; i++) {
       Field field = record_get_by_position(ir->record, i);
       if (field.name) {
@@ -394,6 +395,8 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_call: string_builder_push_cstr(sb, "call "); break;
   case Ir_Kind_range: string_builder_push_cstr(sb, "range "); break;
   case Ir_Kind_bits: string_builder_push_cstr(sb, "bits "); break;
+  case Ir_Kind_array: string_builder_push_cstr(sb, "array "); break;
+  case Ir_Kind_subscript: string_builder_push_cstr(sb, "subscript "); break;
   default: {
     assert(0);
   } break;
@@ -560,15 +563,14 @@ Ir* irgen_push_record(Record* record) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_position_offset(Ir* record, I32 position) {
+Ir* irgen_push_position_offset(Ir* record, Ir* position) {
   Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
   return irgen_push(ir);
 }
 
-Ir* irgen_push_name_offset(Ir* record, Str* name) {
-  Ir ir = { Ir_Kind_name_offset, .name = { .of = record, .at = name } };
-  return irgen_push(ir);
-}
+Ir* irgen_push_name_offset(Ir* record,Str* name) {
+  Ir ir = { Ir_Kind_name_offset, .    name_offset = { .of = record, .at = name } };
+  return irgen_push(ir);}
 
 Record* record_new(I32 length) {
   Fun* fun = top(irgen.fun_stack);
@@ -792,7 +794,8 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       rhs = rhs->unary;
     }
     for (I32 i = 0; i < lhs->list->length; i++) {
-      Ir* offset = irgen_push_position_offset(rhs, i);
+      Ir* int_ir = irgen_push_int(i);
+      Ir* offset = irgen_push_position_offset(rhs, int_ir);
       Ir* at = irgen_push_unary(Ir_Kind_load, offset);
       Ast_Node* node = lhs->list->base[i];
       irgen_assign(node, at);
@@ -803,7 +806,8 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       rhs = rhs->unary;
     }
     for (I32 i = 0; i < lhs->list->length; i++) {
-      Ir* offset = irgen_push_position_offset(rhs, i);
+      Ir* int_ir = irgen_push_int(i);
+      Ir* offset = irgen_push_position_offset(rhs, int_ir);
       Ir* at = irgen_push_unary(Ir_Kind_load, offset);
       Ast_Node* node = lhs->list->base[i];
       irgen_assign(node, at);
@@ -848,27 +852,28 @@ Ir* irgen_ast_node(Ast_Node* node) {
     if (node->binary.rhs->kind == Ast_Kind_name) {
       if (lhs->kind == Ir_Kind_load) {
         lhs->kind = Ir_Kind_name_offset;
-        lhs->name.of = lhs->unary;
-        lhs->name.at = node->binary.rhs->str;
+        lhs->name_offset.of = lhs->unary;
+        lhs->name_offset.at = node->binary.rhs->str;
         result = irgen_push_unary(Ir_Kind_load, lhs);
       }
     }
     else if (node->binary.rhs->kind == Ast_Kind_int) {
       if (lhs->kind == Ir_Kind_load) {
-        lhs->kind = Ir_Kind_position_offset;
-        lhs->position.of = lhs->unary;
-        lhs->position.at = node->binary.rhs->i64;
-        result = irgen_push_unary(Ir_Kind_load, lhs);
+        lhs->kind = Ir_Kind_int;
+        lhs->i64 = node->binary.rhs->i64;
+        Ir* position_offset = irgen_push_position_offset(lhs->unary, lhs);
+        result = irgen_push_unary(Ir_Kind_load, position_offset);
       }
     }
   } break;
   case Ast_Kind_subscript: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     if (lhs->kind == Ir_Kind_load) {
-      lhs->kind = Ir_Kind_subscript;
-      lhs->binary.one = lhs->unary;
-      lhs->binary.two = irgen_ast_node(node->binary.rhs);
-      result = irgen_push_unary(Ir_Kind_load, lhs);
+      Ir* ptr = lhs->unary;
+      irgen_pop();
+      Ir* rhs = irgen_ast_node(node->binary.rhs);
+      Ir* subscript = irgen_push_binary(Ir_Kind_subscript, ptr, rhs);
+      result = irgen_push_unary(Ir_Kind_load, subscript);
     }
   } break;
   case Ast_Kind_assign: {
@@ -1173,6 +1178,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("1", "");
+  test("a:[2]I32; a[0] = 1; a[0] + 2", "");
   // test("if 1 do 2 el 3", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");

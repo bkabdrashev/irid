@@ -326,20 +326,22 @@ void llvm_ir(Ir* ir) {
   } break;
 
   case Ir_Kind_name_offset: {
-    Type* of_type = type_of_ir(ir->name.of);
+    Type* of_type = type_of_ir(ir->name_offset.of);
     Type* rec_type = type_pointer_declared(of_type->pointer);
     assert(rec_type->kind == Type_Kind_record);
-    LLVMValueRef ptr = llvm_of_ir(ir->name.of);
-    I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name.at);
+    LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
+    I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name_offset.at);
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
     result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
   } break;
   case Ir_Kind_position_offset: {
     Type* of_type = type_of_ir(ir->position.of);
+    Type* at_type = type_of_ir(ir->position.at);
+    I64 at = ranges_min(at_type->ranges);
     Type* rec_type = of_type->pointer->declared;
     LLVMValueRef ptr = llvm_of_ir(ir->position.of);
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
-    result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, ir->position.at, "");
+    result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, at, "");
   } break;
   case Ir_Kind_load: {
     Type* type = type_of_ir(ir);
