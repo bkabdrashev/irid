@@ -2391,7 +2391,9 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a:[2]i32; a[0] = 1; a[0] + 2", "");
+  // FIX: vac_count undercounts every time Var is created at sema time.
+  //      Maybe add a pass that counts number of variables.
+  test("a:[2]I32; a[0] = 1; a[0] + 2", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
