@@ -14,7 +14,7 @@ print_i32:(n:I32) -> {
     re
   }
   buf: [10](0..9)
-  i:0..9 = 0
+  i:I32 = 0
   wh n > 0 do {
     digit := n % 10
     buf[i] = digit

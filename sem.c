@@ -508,7 +508,7 @@ Type* type_ranges(Ranges* ranges) {
     I64 min = ranges_min(ranges);
     I64 max = ranges_max(ranges);
     I32 bit_size = bits_needed(min, max);
-    new_type->bits_align = bit_size;
+    new_type->bits_align = align_up(bit_size, 8);
     new_type->bits_size  = bit_size;
   }
 
@@ -737,7 +737,7 @@ Type* type_define_size(I32 bits_size, Type* bits_of) {
   *new_type = *bits_of;
   new_type->size_defined = true;
   new_type->bits_size = bits_size;
-  new_type->bits_align = bits_size;
+  new_type->bits_align = align_up(bits_size, 8);
   return new_type;
 }
 
@@ -1308,7 +1308,6 @@ void sem_record_declare_fields(Var* var, Type* type) {
   type->bits_size = align_up(type->bits_size, type->bits_align);
   type->record->offsets_all_equal = true;
   I16 last_field_bit_size = type->bits_size - type->record->offsets[type->record->length-1];
-  // FIX: for some reason not all fields agree even for 10[0..9] case
   for (I32 i = 0; i+2 < type->record->length; i++) {
     I16 field_bit_size = type->record->offsets[i+1] - type->record->offsets[i];
     if (last_field_bit_size != field_bit_size) {
@@ -1396,7 +1395,7 @@ void sem_ir(Block* block, Ir* ir) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
           result->bits_size = bits_max_size;
-          result->bits_align = bits_max_size;
+          result->bits_align = align_up(bits_max_size, 8);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
@@ -1407,7 +1406,7 @@ void sem_ir(Block* block, Ir* ir) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
           result->bits_size = bits_max_size;
-          result->bits_align = bits_max_size;
+          result->bits_align = align_up(bits_max_size, 8);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
@@ -1418,7 +1417,7 @@ void sem_ir(Block* block, Ir* ir) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
           result->bits_size = bits_max_size;
-          result->bits_align = bits_max_size;
+          result->bits_align = align_up(bits_max_size, 8);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
@@ -1439,21 +1438,21 @@ void sem_ir(Block* block, Ir* ir) {
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
         result->bits_size  = bits_max_size;
-        result->bits_align = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
       else if (types.one->size_defined) {
         I16 bits_max_size = types.one->bits_size;
         result->bits_size  = bits_max_size;
-        result->bits_align = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
       else if (types.two->size_defined) {
         I16 bits_max_size = types.two->bits_size;
         result->bits_size  = bits_max_size;
-        result->bits_align = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
@@ -1474,7 +1473,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
         result->bits_size  = bits_max_size;
-        result->bits_align = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
