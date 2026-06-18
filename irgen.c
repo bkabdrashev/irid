@@ -227,7 +227,6 @@ struct Fun {
   Ir*     arg_var;
   Ir*     ret_ir;
   Type*   type;
-  I32     var_count;
 };
 
 typedef struct Fun_Stack Fun_Stack;
@@ -581,7 +580,6 @@ Record* record_new(I32 length) {
   new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
   new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
-  fun->var_count += length;
   return new_record;
 }
 
@@ -658,7 +656,6 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   Fun* fun = top(irgen.fun_stack);
   Fun temp_fun = {};
   temp_fun.name = 0;
-  temp_fun.var_count = 0;
   add(irgen.fun_stack, &temp_fun);
   {
     Block* block = &new(irgen.blocks);
@@ -672,7 +669,6 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   if (ir->kind == Ir_Kind_fun && !ir->fun->foreign) {
     ir->fun->name = var->name;
   }
-  fun->var_count += temp_fun.var_count;
   irgen_block_leave();
   var->blocks = irgen_blocks_perm(temp_fun.blocks);
   var->declared_ir = ir;
@@ -696,8 +692,6 @@ void irgen_scope_enter(Hash_Map* scope) {
     var->name = key;
     sym->kind = Symbol_Kind_variable;
     sym->ir = irgen_push_var(var);
-
-    fun->var_count++;
   }
   add(irgen.scope_stack, scope);
 
@@ -732,9 +726,6 @@ Fun* irgen_fun_enter(void) {
   fun->ret_ir = irgen_push_var(ret_var);
   fun->ret_ir->var->name = str_from_cstr("__ret");
   // irgen_var_declare(fun->ret_ir->var, ret_decl); // TODO: declare return var
-
-  fun->var_count = irgen.builtins->cap;
-  fun->var_count++; // __ret
   return fun;
 }
 
@@ -777,7 +768,6 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
     }
     else {
       Fun* fun = irgen_fun_top();
-      fun->var_count++;
       Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
       var->name = lhs->declare.name;
       sym = arena_push(irgen.perm_arena, sizeof(Symbol));
@@ -1046,7 +1036,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
         scope = hash_map_init(irgen.perm_arena, 1);
         add(irgen.scope_stack, &scope);
         arg_var->name = lhs->declare.name;
-        fun->var_count++;
         Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
         sym->kind = Symbol_Kind_variable;
         sym->ast = lhs->declare.node;
