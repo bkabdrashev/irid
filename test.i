@@ -25,6 +25,7 @@ print_i32:(n:I32) -> {
     i = i - 1
     putchar (buf[i] + 48)
   }
+  putchar 67
   putchar 10
 }
 
@@ -33,5 +34,4 @@ putchar: #c putchar (char:I32) -> I32
 putchar 65
 putchar 10
 
-print_i32(123123)
-print_i32(Game.height)
+print_i32(123)

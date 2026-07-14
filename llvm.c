@@ -82,13 +82,15 @@ LLVMTypeRef llvm_of_type(Type* type) {
       }
       else {
         LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
-        arg_types = (LLVMTypeRef[1]){ arg_type };
+        arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
+        arg_types[0] = arg_type;
         arg_count = 1;
       }
     }
     else {
       LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
-      arg_types = (LLVMTypeRef[1]){ arg_type };
+      arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
+      arg_types[0] = arg_type;
       arg_count = 1;
     }
     LLVMTypeRef ret_type = llvm_of_type(type->function->ret);
@@ -273,7 +275,8 @@ void llvm_ir(Ir* ir) {
   } break;
 
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
-  case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge: {
+  case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
+    {
     Type_Pair pair = type_of_ir_binary(ir);
     if (pair.one->bits_size < pair.two->bits_size) {
       llvm_one = llvm_conversion(llvm_one, pair.one, pair.two);
@@ -319,12 +322,21 @@ void llvm_ir(Ir* ir) {
     else {
       LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
       llvm_arg = llvm_conversion(llvm_arg, arg_type, fun_type->function->arg);
-      llvm_args = (LLVMValueRef[1]){ llvm_arg };
+      llvm_args = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMValueRef));
+      llvm_args[0] = llvm_arg;
       llvm_arg_count = 1;
     }
     result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
   } break;
-
+  case Ir_Kind_subscript: {
+    Type* of_type = type_of_ir(ir->name_offset.of);
+    Type* arr_type = type_pointer_declared(of_type->pointer);
+    assert(arr_type->kind == Type_Kind_record);
+    LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
+    LLVMTypeRef llvm_type = llvm_of_type(arr_type);
+    LLVMValueRef indices[1] = { llvm_of_ir(ir->binary.two) };
+    result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_type, ptr, indices, 1, "");
+  } break;
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
     Type* rec_type = type_pointer_declared(of_type->pointer);

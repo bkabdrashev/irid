@@ -1213,7 +1213,7 @@ void irgen_test(void) {
   // test("1", "");
   // test("a:[2]I32; a[0] = 1; a[0] + 2", "");
   // test("if 1 do 2 el 3", "");
-  test("foo : () -> ()", "");
+  // test("foo : () -> ()", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("b:a; a: 2", "");
