@@ -100,6 +100,7 @@ struct Var {
   Type* declared;
   Ir*     declared_ir;
   Blocks* blocks;
+  Type**  block_types;
 };
 
 struct Ir {
@@ -165,6 +166,12 @@ struct Block_Pool {
   Block* base;
 };
 
+typedef struct Var_Pool Var_Pool;
+struct Var_Pool {
+  I32  length;
+  Var* base;
+};
+
 typedef enum Block_Kind {
   Block_Kind_none,
   Block_Kind_jump,
@@ -182,6 +189,12 @@ struct Blocks {
   Block* base[];
 };
 
+typedef struct Vars Vars;
+struct Vars {
+  I32  length;
+  Var* base[];
+};
+
 typedef struct Block_List Block_List;
 struct Block_List {
   I32    length;
@@ -191,6 +204,7 @@ struct Block_List {
 struct Block {
   Block_Kind kind;
   Block_State state;
+  I32 id;
   B8 is_present_in_worklist;
 
   B8 is_scc_visited;
@@ -205,8 +219,8 @@ struct Block {
   Block_List preds;
 
   Irs* irs;
-  Hash_Map out_var_types;
-  Hash_Map assigned;
+  // Hash_Map out_var_types;
+  // Hash_Map assigned;
   union {
     Jump   jump;
     Branch branch;
@@ -224,6 +238,7 @@ struct Fun {
   B8      foreign;
   Blocks* blocks;
   Block*  ret_block;
+  Vars*   vars;
   Ir*     arg_var;
   Ir*     ret_ir;
   Type*   type;
@@ -241,9 +256,11 @@ struct Irgen {
 
   Arena*  perm_arena;
   Arena*  temp_block_arena;
+  Arena*  temp_var_arena;
   Arena*  temp_ir_arena;
 
   Funs        funs;
+  Var_Pool    vars;
   Block_Pool  blocks;
   Record_Pool records;
   Ir_Pool     irs;
@@ -470,14 +487,6 @@ void irgen_print(void) {
   assert(0);
 }
 
-Irs* irgen_irs_perm(Irs* temp_list) {
-  I32 size = sizeof(Irs) + temp_list->length * sizeof(Ir*);
-  Irs* perm_list = arena_push(irgen.perm_arena, size);
-  memcpy(perm_list, temp_list, size);
-  arena_release_mark(irgen.temp_ir_arena, temp_list);
-  return perm_list;
-}
-
 Blocks* irgen_blocks_perm(Blocks* temp_list) {
   I32 size = sizeof(Blocks) + temp_list->length * sizeof(Block*);
   Blocks* perm_list = arena_push(irgen.perm_arena, size);
@@ -486,9 +495,32 @@ Blocks* irgen_blocks_perm(Blocks* temp_list) {
   return perm_list;
 }
 
+Vars* irgen_vars_perm(Vars* temp_list) {
+  I32 size = sizeof(Vars) + temp_list->length * sizeof(Var*);
+  Vars* perm_list = arena_push(irgen.perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(irgen.temp_block_arena, temp_list);
+  return perm_list;
+}
+
+Irs* irgen_irs_perm(Irs* temp_list) {
+  I32 size = sizeof(Irs) + temp_list->length * sizeof(Ir*);
+  Irs* perm_list = arena_push(irgen.perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(irgen.temp_ir_arena, temp_list);
+  return perm_list;
+}
+
 Fun* irgen_fun_top(void) {
   Fun* fun = top(irgen.fun_stack);
   return fun;
+}
+
+Var* irgen_var_new(void) {
+  Fun* fun = irgen_fun_top();
+  Var* var = &new(irgen.vars);
+  fa_extend(irgen.temp_var_arena, fun->vars, var);
+  return var;
 }
 
 Block* irgen_block_top(void) {
@@ -619,6 +651,7 @@ Block* irgen_block_new(void) {
   irgen_block_leave();
   Fun* fun = irgen_fun_top();
   Block* block = &new(irgen.blocks);
+  block->id = fun->blocks->length;
   fa_extend(irgen.temp_block_arena, fun->blocks, block);
   memset(block, 0, sizeof(Block));
   fa_temp(irgen.temp_ir_arena, block->irs);
@@ -661,6 +694,7 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
     Block* block = &new(irgen.blocks);
     memset(block, 0, sizeof(Block));
     fa_temp(irgen.temp_ir_arena, block->irs);
+    fa_temp(irgen.temp_var_arena, temp_fun.vars);
     fa_temp(irgen.temp_block_arena, temp_fun.blocks);
     fa_extend(irgen.temp_block_arena, temp_fun.blocks, block);
   }
@@ -685,7 +719,7 @@ void irgen_scope_enter(Hash_Map* scope) {
       if (sym) assert(0);
     }
     Symbol* sym = hash_map_get(scope, key);
-    Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    Var* var = irgen_var_new();
     var->kind = Var_Kind_declared;
     var->state = Var_State_unresolved;
     var->global = irgen.scope_stack.length == 1;
@@ -719,10 +753,11 @@ Fun* irgen_fun_enter(void) {
     Block* block = &new(irgen.blocks);
     memset(block, 0, sizeof(Block));
     fa_temp(irgen.temp_ir_arena, block->irs);
+    fa_temp(irgen.temp_var_arena, fun->vars);
     fa_temp(irgen.temp_block_arena, fun->blocks);
     fa_extend(irgen.temp_block_arena, fun->blocks, block);
   }
-  Var* ret_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+  Var* ret_var = irgen_var_new();
   fun->ret_ir = irgen_push_var(ret_var);
   fun->ret_ir->var->name = str_from_cstr("__ret");
   // irgen_var_declare(fun->ret_ir->var, ret_decl); // TODO: declare return var
@@ -738,6 +773,10 @@ Fun* irgen_fun_leave(void) {
   fa_extend(irgen.temp_block_arena, fun->blocks, fun->ret_block);
   fun->ret_block->irs = irgen_irs_perm(fun->ret_block->irs);
   fun->blocks = irgen_blocks_perm(fun->blocks);
+  fun->vars = irgen_vars_perm(fun->vars);
+  for (I32 i = 0; i < fun->vars->length; i++) {
+    fun->vars->base[i]->block_types = arena_push(irgen.perm_arena, fun->blocks->length * sizeof(Type*));
+  }
   del(irgen.fun_stack);
   return fun;
 }
@@ -768,7 +807,7 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
     }
     else {
       Fun* fun = irgen_fun_top();
-      Var* var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+      Var* var = irgen_var_new();
       var->name = lhs->declare.name;
       sym = arena_push(irgen.perm_arena, sizeof(Symbol));
       sym->kind = Symbol_Kind_variable;
@@ -906,8 +945,8 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_block_value: {
     irgen_scope_enter(node->block.scope);
 
-    Var* block_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
-    block_var->name = str_from_cstr("#block");
+    Var* block_var = irgen_var_new();
+    block_var->name = str_from_cstr("__block");
     Ir* block_ir = irgen_push_var(block_var);
     irgen_push_binary(Ir_Kind_store, block_ir, irgen.ir_none);
 
@@ -1018,7 +1057,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
-    Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    Var* arg_var = irgen_var_new();
     fun->name = irgen.str_nil;
     Hash_Map scope;
     {
@@ -1084,13 +1123,17 @@ Ir* irgen_ast_node(Ast_Node* node) {
 
 Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   Arena temp_block_arena = arena_init(arena->capacity);
+  Arena temp_var_arena   = arena_init(arena->capacity);
   Arena temp_ir_arena    = arena_init(arena->capacity);
   irgen.ast = ast;
   irgen.perm_arena = arena;
   irgen.temp_block_arena = &temp_block_arena;
+  irgen.temp_var_arena   = &temp_var_arena;
   irgen.temp_ir_arena    = &temp_ir_arena;
   irgen.funs.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Fun));
   irgen.funs.length    = 0;
+  irgen.vars.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Var));
+  irgen.vars.length    = 0;
   irgen.blocks.base    = arena_push(irgen.perm_arena, total_nodes * sizeof(Block));
   irgen.blocks.length  = 0;
   irgen.irs.base       = arena_push(irgen.perm_arena, total_nodes * sizeof(Ir));
@@ -1125,7 +1168,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       add(irgen.scope_stack, irgen.builtins);
     }
 
-    Var* arg_var = arena_push_zero(irgen.perm_arena, sizeof(Var));
+    Var* arg_var = irgen_var_new();
     arg_var->name = str_from_cstr("__arg");
     fun->arg_var = irgen_push_arg(arg_var);
 
@@ -1146,6 +1189,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   del(irgen.scope_stack);
 
   arena_free(irgen.temp_block_arena);
+  arena_free(irgen.temp_var_arena);
   arena_free(irgen.temp_ir_arena);
   return irgen.funs;
 }
@@ -1166,12 +1210,24 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+/*
+a: (b1, 0); (b1, 1); (b2, 2); (b3, 1\2)
+  b1:
+    a = 0
+    a = 1
+    if 2 then b2 else b3
+  b2:
+    a = 2
+    jump b5
+  b3:
+    a + a
+*/
+  test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");
-  test("a:[2]I32; a[0] = 1; a[0] + 2", "");
+  // test("a:[2]I32; a[0] = 1; a[0] + 2", "");
   // test("if 1 do 2 el 3", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
-  // test("a: 1; wh 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("b:a; a: 2", "");
   // test("a:1; a = 1", "");
   // test("a:(x:I32; y:I32); a.x", "");

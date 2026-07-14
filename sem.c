@@ -60,9 +60,9 @@ struct Types {
 
 typedef struct Sem_Tasks Sem_Tasks;
 struct Sem_Tasks {
-  Hash_Map* out_vars;
-  Type**  types;
-  Var**   vars;
+  Block*  block;
+  Type*   type;
+  Var*    var;
   I32     length;
 };
 
@@ -79,7 +79,7 @@ struct Sem {
   I32 sccid;
   Blocks* scc_stack;
 
-  I32 current_fun_var_count;
+  Fun* current_fun;
 };
 
 Sem sem = {};
@@ -215,17 +215,17 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       string_builder_push_cstr(&sb, "|");
 
       string_builder_push_cstr(&sb, " out{");
-      for (I32 i = 0; i < block->out_var_types.len; i++) {
-        Var* var = block->out_var_types.list[i];
-        Type* type = hash_map_get(&block->out_var_types, var);
-        string_builder_push_var(&sb, var);
-        string_builder_push_cstr(&sb, "=");
+      // for (I32 i = 0; i < block->out_var_types.len; i++) {
+      //   Var* var = block->out_var_types.list[i];
+      //   Type* type = hash_map_get(&block->out_var_types, var);
+      //   string_builder_push_var(&sb, var);
+      //   string_builder_push_cstr(&sb, "=");
 
-        string_builder_push_type(&sb, block, type);
-        if (i+1 < block->out_var_types.len) {
-          string_builder_push_cstr(&sb, "; ");
-        }
-      }
+      //   string_builder_push_type(&sb, block, type);
+      //   if (i+1 < block->out_var_types.len) {
+      //     string_builder_push_cstr(&sb, "; ");
+      //   }
+      // }
       string_builder_push_cstr(&sb, "}");
       for (I32 i = 0; i < block->irs->length; i++) {
         Ir* ir = block->irs->base[i];
@@ -921,24 +921,18 @@ Type* type_ranges_exclude(Ranges* ranges, I64 val) {
   return type_ranges(new_ints);
 }
 
-void sem_tasks_push_var(Sem_Tasks* tasks, Var* var, Type* old) {
-  tasks->vars[tasks->length] = var;
-  tasks->types[tasks->length] = old;
-  tasks->length++;
-}
-
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
   if (ir->kind == Ir_Kind_load) {
     Type* ptr_type = type_of_ir(ir->unary);
     Pointer* ptr = ptr_type->pointer;
     for (I32 i = 0; i < ptr->stack.len; i++) {
       Var* var = ptr->stack.list[i];
-      Type* old_type = hash_map_get(tasks->out_vars, var);
+      Type* old_type = var->block_types[tasks->block->id];
       new_type->size_defined = old_type->size_defined;
       new_type->bits_size = old_type->bits_size;
       new_type->bits_align = old_type->bits_align;
-      if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
-        sem_tasks_push_var(tasks, var, old_type);
+      if (old_type) {
+        var->block_types[tasks->block->id] = new_type;
       }
     }
   }
@@ -1110,13 +1104,9 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
     Type* ptr_type = type_of_ir(cond_ir->unary);
     if (ptr_type->kind == Type_Kind_ptr) {
       Pointer* ptr = ptr_type->pointer;
-      for (I32 i = 0; i < ptr->stack.len; i++) {
-        Var* var = ptr->stack.list[i];
-        Type* old_type = hash_map_get(tasks->out_vars, var);
-        Type* new_type = type_narrow_nez(old_type);
-        if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
-          sem_tasks_push_var(tasks, var, old_type);
-        }
+      if (hash_set_exists(&ptr->stack, tasks->var)) {
+        Type* new_type = type_narrow_nez(tasks->type);
+        tasks->var->block_types[tasks->block->id] = new_type;
       }
     }
   } break;
@@ -1161,10 +1151,10 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
       Pointer* ptr = ptr_type->pointer;
       for (I32 i = 0; i < ptr->stack.len; i++) {
         Var* var = ptr->stack.list[i];
-        Type* old_type = hash_map_get(tasks->out_vars, var);
+        Type* old_type = var->block_types[tasks->block->id];
         Type* new_type = type_narrow_eqz(old_type);
-        if (hash_map_change_if_exists(tasks->out_vars, var, new_type)) {
-          sem_tasks_push_var(tasks, var, old_type);
+        if (old_type) {
+          var->block_types[tasks->block->id] = new_type;
         }
       }
     }
@@ -1174,18 +1164,16 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
 }
 
 void sem_unnarrow(Sem_Tasks tasks) {
-  for (I32 i = 0; i < tasks.length; i++) {
-    Var*  var = tasks.vars[i];
-    Type* old = tasks.types[i];
-    hash_map_put(tasks.out_vars, var, old);
-  }
+  Var*  var = tasks.var;
+  Type* old = tasks.type;
+  var->block_types[tasks.block->id] = old;
 }
 
 Type* type_of_var_rec(Block* block, Var* var) {
-  Type* type = hash_map_get(&block->out_var_types, var);
+  Type* type = var->block_types[block->id];
   if (type) return type;
 
-  hash_map_put(&block->out_var_types, var, sem.type_none);
+  var->block_types[block->id] = sem.type_none;
   type = sem.type_none;
 
   for (I32 i = 0; i < block->preds.length; i++) {
@@ -1193,12 +1181,10 @@ Type* type_of_var_rec(Block* block, Var* var) {
     if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
       if (pred->kind == Block_Kind_branch) {
         Sem_Tasks tasks = {};
-        tasks.out_vars = &pred->out_var_types;
+        tasks.block = pred;
         tasks.length = 0;
-        tasks.vars = arena_push(sem.temp_arena, sizeof(Var*) * tasks.out_vars->len);
-        tasks.types = arena_push(sem.temp_arena, sizeof(Type*) * tasks.out_vars->len);
-        // TODO: this does narrowing again and again for each variable load
-        //       either do it once for all variables, or, narrow only a requested variable
+        tasks.var = var;
+        tasks.type = var->block_types[pred->id];
         { // condition is not equal to zero branch
           Jump jump = pred->branch.nez;
           if (jump.to_block == block) {
@@ -1219,8 +1205,6 @@ Type* type_of_var_rec(Block* block, Var* var) {
             tasks.length = 0;
           }
         }
-
-        arena_release_mark(sem.temp_arena, tasks.vars);
       }
       else if (pred->kind == Block_Kind_jump) {
         Type* pred_type = type_of_var_rec(pred, var);
@@ -1229,7 +1213,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
     }
   }
 
-  hash_map_put(&block->out_var_types, var, type);
+  var->block_types[block->id] = type;
   return type;
 }
 
@@ -1237,7 +1221,7 @@ Type* type_of_var(Block* block, Var* var) {
   Type* type = type_of_var_rec(block, var);
   if (type->kind == Type_Kind_none) {
     type = var->declared ? var->declared : sem.type_none;
-    hash_map_put(&block->out_var_types, var, type);
+    var->block_types[block->id] = type;
   }
   return type;
 }
@@ -1249,7 +1233,7 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
   }
   if (!var->declared_ir) {
     var->declared = type_join(var->declared, type);
-    hash_map_put(&block->out_var_types, var, type);
+    var->block_types[block->id] = type;
   }
   else {
     if (type_is_subtype(block, type, var->declared)) {
@@ -1264,7 +1248,7 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
         type->size_defined = var->declared->size_defined;
         type->bits_size = var->declared->bits_size;
         type->bits_align = var->declared->bits_align;
-        hash_map_put(&block->out_var_types, var, type);
+        var->block_types[block->id] = type;
       }
     }
     else {
@@ -1314,6 +1298,10 @@ void sem_record_declare_fields(Var* var, Type* type) {
       type->record->offsets_all_equal = false;
     }
   }
+
+  for (I32 i = 0; i < type->record->length; i++) {
+    type->record->vars[i]->block_types = arena_push(irgen.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+  }
 }
 
 Type* sem_ensure_declared(Var* var) {
@@ -1324,11 +1312,9 @@ Type* sem_ensure_declared(Var* var) {
   var->state = Var_State_resolving;
 
   if (var->blocks) {
-    I32 cap = sem.current_fun_var_count;
     for (I32 i = 0; i < var->blocks->length; i++) {
       Block* block = var->blocks->base[i];
       sem_init_block_preds(block);
-      block->out_var_types = hash_map_init(sem.perm_arena, cap);
       sem_block(block);
     }
   }
@@ -1689,8 +1675,9 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_ptr_to(type);
   } break;
   case Ir_Kind_fun: {
-    I32 save_count = sem.current_fun_var_count;
+    Fun* save_fun = sem.current_fun;
     result = sem_fun(ir->fun);
+    sem.current_fun = save_fun;
   } break;
   case Ir_Kind_call: {
     Type_Pair types = type_of_ir_binary(ir);
@@ -1938,6 +1925,7 @@ B8 sem_dominates(Block* one, Block* two) {
 }
 
 Type* sem_fun(Fun* fun) {
+  sem.current_fun = fun;
   Type* fun_type = type_of_fun(fun);
   if (fun_type) return fun_type;
 
@@ -1949,13 +1937,10 @@ Type* sem_fun(Fun* fun) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
     sem_scc_block(block);
-    // FIX: figure out var count
-    // block->out_var_types = hash_map_init(sem.perm_arena, fun->var_count);
-    // block->assigned      = hash_map_init(sem.perm_arena, fun->var_count);
   }
 
   Blocks*  rpo = sem_cfg_rpo(fun);
-                 // sem_cfg_doms(fun, rpo);
+                 sem_cfg_doms(fun, rpo);
   for (I32 i = 0; i < rpo->length; i++) {
     Block* block = rpo->base[i];
     sem_block(block);
@@ -1990,7 +1975,6 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;
 
-  sem.current_fun_var_count = irgen.builtins->len;
   // for (I32 i = 0; i < irgen.builtins->len; i++) {
   //   Str* str = irgen.builtins->list[i];
   //   Symbol* sym = hash_map_get(irgen.builtins, str);
