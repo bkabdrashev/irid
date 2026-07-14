@@ -20,12 +20,15 @@ print_i32:(n:I32) -> {
     buf[i] = digit
     n = n / 10
     i = i + 1
+    putchar 67
   }
+  // TODO: comments
+  // BUG: i is considered to be 0 here, even though it is incremented by the previous while loop
   wh i > 0 do {
     i = i - 1
     putchar (buf[i] + 48)
+    putchar 68
   }
-  putchar 67
   putchar 10
 }
 
