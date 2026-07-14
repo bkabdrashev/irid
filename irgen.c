@@ -94,6 +94,7 @@ typedef enum Var_Kind {
 struct Var {
   Var_Kind  kind;
   Var_State state;
+  I32   offset;
   B8    global;
   Var*  parent;
   Str*  name;
@@ -306,6 +307,9 @@ void string_builder_push_var(String_Builder* sb, Var* var) {
   if (var->name) {
     string_builder_push_str(sb, var->name);
   }
+  else {
+    string_builder_push_i64(sb, var->offset);
+  }
 }
 
 void string_builder_push_fun(String_Builder* sb, Fun* fun) {
@@ -499,7 +503,7 @@ Vars* irgen_vars_perm(Vars* temp_list) {
   I32 size = sizeof(Vars) + temp_list->length * sizeof(Var*);
   Vars* perm_list = arena_push(irgen.perm_arena, size);
   memcpy(perm_list, temp_list, size);
-  arena_release_mark(irgen.temp_block_arena, temp_list);
+  arena_release_mark(irgen.temp_var_arena, temp_list);
   return perm_list;
 }
 
@@ -604,8 +608,6 @@ Ir* irgen_push_name_offset(Ir* record,Str* name) {
   return irgen_push(ir);}
 
 Record* record_new(I32 length) {
-  Fun* fun = top(irgen.fun_stack);
-
   Record* new_record = &new(irgen.records);
   new_record->length   = length;
   new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
@@ -686,7 +688,6 @@ Symbol* irgen_sym_get(Str* str) {
 }
 
 void irgen_var_declare(Var* var, Ast_Node* node) {
-  Fun* fun = top(irgen.fun_stack);
   Fun temp_fun = {};
   temp_fun.name = 0;
   add(irgen.fun_stack, &temp_fun);
@@ -711,7 +712,6 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
 }
 
 void irgen_scope_enter(Hash_Map* scope) {
-  Fun* fun = top(irgen.fun_stack);
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     {
@@ -775,7 +775,7 @@ Fun* irgen_fun_leave(void) {
   fun->blocks = irgen_blocks_perm(fun->blocks);
   fun->vars = irgen_vars_perm(fun->vars);
   for (I32 i = 0; i < fun->vars->length; i++) {
-    fun->vars->base[i]->block_types = arena_push(irgen.perm_arena, fun->blocks->length * sizeof(Type*));
+    fun->vars->base[i]->block_types = arena_push_zero(irgen.perm_arena, fun->blocks->length * sizeof(Type*));
   }
   del(irgen.fun_stack);
   return fun;
@@ -806,7 +806,6 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       assert(0);
     }
     else {
-      Fun* fun = irgen_fun_top();
       Var* var = irgen_var_new();
       var->name = lhs->declare.name;
       sym = arena_push(irgen.perm_arena, sizeof(Symbol));
@@ -1210,22 +1209,11 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-/*
-a: (b1, 0); (b1, 1); (b2, 2); (b3, 1\2)
-  b1:
-    a = 0
-    a = 1
-    if 2 then b2 else b3
-  b2:
-    a = 2
-    jump b5
-  b3:
-    a + a
-*/
-  test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
+  // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");
   // test("a:[2]I32; a[0] = 1; a[0] + 2", "");
   // test("if 1 do 2 el 3", "");
+  test("foo : () -> ()", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
   // test("b:a; a: 2", "");

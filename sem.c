@@ -174,7 +174,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
         string_builder_push_type(sb, block, field.assigned_type);
       }
       else {
-        string_builder_push_type(sb, block, field.declared_type);
+        string_builder_push_type(sb, block, field.assigned_type);
       }
       if (pos+1 < record->length) {
         string_builder_push_cstr(sb, ", ");
@@ -700,6 +700,8 @@ Type* type_ptr(Type* declared, Hash_Set stack) {
   // type_pointer_declared(pointer);
 
   Type* new_type = &new(sem.types);
+  new_type->bits_size  = 64;
+  new_type->bits_align = 64;
   new_type->kind = Type_Kind_ptr;
   new_type->pointer = pointer;
   return new_type;
@@ -1270,6 +1272,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
   type->record->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
   for (I32 i = 0; i < type->record->length; i++) {
     Var* field_var = arena_push_zero(sem.perm_arena, sizeof(Var));
+    field_var->offset = i;
     type->record->vars[i] = field_var;
     field_var->name = type->record->names[i];
     field_var->parent = var;
@@ -1300,7 +1303,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
   }
 
   for (I32 i = 0; i < type->record->length; i++) {
-    type->record->vars[i]->block_types = arena_push(irgen.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    type->record->vars[i]->block_types = arena_push_zero(irgen.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
   }
 }
 
@@ -1518,7 +1521,6 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_array: {
     Type* one_type = type_of_ir(ir->binary.one);
-    Type* two_type = type_of_ir(ir->binary.two);
     if (one_type->kind == Type_Kind_int) {
       if (type_is_const(one_type)) {
         I64 length = ranges_min(one_type->ranges);
@@ -1552,7 +1554,7 @@ void sem_ir(Block* block, Ir* ir) {
           if (!var->declared->record->offsets_all_equal) {
             assert(0);
           }
-          // TODO: position offset information for pointers
+          // FIX: position offset information for pointers. hardcoded with 0 instead
           hash_set_put(&stack, var->declared->record->vars[0]);
         }
         Var* var = of_type->pointer->stack.list[0];
@@ -2005,9 +2007,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // FIX: vac_count undercounts every time Var is created at sema time.
-  //      Maybe add a pass that counts number of variables.
-  test("a:[2]I32; a[0] = 1; a[0] + 2", "");
+  test("a:[2]I32; a[0] = 1; a[0] + a[1]", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
