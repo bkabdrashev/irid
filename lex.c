@@ -228,6 +228,31 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case '/': {
       token.kind = Token_Kind_slash;
       lexer.stream++;
+      if (*lexer.stream == '/') {
+        lexer.stream++;
+        while (*lexer.stream && *lexer.stream != '\n') {
+          lexer.stream++;
+        }
+        continue;
+      }
+      else if (*lexer.stream == '*') {
+        lexer.stream++;
+        I32 level = 1;
+        while (*lexer.stream && level > 0) {
+          if (lexer.stream[0] == '/' && lexer.stream[1] == '*') {
+            level++;
+            lexer.stream += 2;
+          }
+          else if (lexer.stream[0] == '*' && lexer.stream[1] == '/') {
+            level--;
+            lexer.stream += 2;
+          }
+          else {
+            lexer.stream++;
+          }
+        }
+        continue;
+      }
     } break;
     case '%': {
       token.kind = Token_Kind_percent;
