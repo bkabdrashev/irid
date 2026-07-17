@@ -183,7 +183,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, ")");
   } break;
   }
-  string_builder_push_cstr(sb, ") ");
+  string_builder_push_cstr(sb, ")");
 }
 
 Cstr cstr_from_sem(Funs funs, C8* buffer) {
@@ -214,19 +214,6 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       }
       string_builder_push_cstr(&sb, "|");
 
-      string_builder_push_cstr(&sb, " out{");
-      // for (I32 i = 0; i < block->out_var_types.len; i++) {
-      //   Var* var = block->out_var_types.list[i];
-      //   Type* type = hash_map_get(&block->out_var_types, var);
-      //   string_builder_push_var(&sb, var);
-      //   string_builder_push_cstr(&sb, "=");
-
-      //   string_builder_push_type(&sb, block, type);
-      //   if (i+1 < block->out_var_types.len) {
-      //     string_builder_push_cstr(&sb, "; ");
-      //   }
-      // }
-      string_builder_push_cstr(&sb, "}");
       for (I32 i = 0; i < block->irs->length; i++) {
         Ir* ir = block->irs->base[i];
         string_builder_push_cstr(&sb, "\n");
@@ -261,6 +248,25 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
     string_builder_push_indent(&sb, 2);
     string_builder_push_cstr(&sb, "ret");
     string_builder_push_cstr(&sb, "\n}\n");
+
+    for (I32 i = 0; i < fun->vars->length; i++) {
+      Var* var = fun->vars->base[i];
+      string_builder_push_var(&sb, var);
+      string_builder_push_cstr(&sb, " = { ");
+      for (I32 b = 0; b < fun->blocks->length; b++) {
+        Block* block = fun->blocks->base[b];
+        Type* type = var->block_types[block->id];
+        if (type) {
+          string_builder_push_blockid(&sb, block);
+          string_builder_push_cstr(&sb, ": ");
+          string_builder_push_type(&sb, block, type);
+          if (b + 1 < fun->blocks->length) {
+            string_builder_push_cstr(&sb, ", ");
+          }
+        }
+      }
+      string_builder_push_cstr(&sb, "}\n");
+    }
   }
   Cstr result = string_builder_end(&sb);
   return result;
@@ -1172,6 +1178,10 @@ void sem_unnarrow(Sem_Tasks tasks) {
 }
 
 Type* type_of_var_rec(Block* block, Var* var) {
+  if (var->global) {
+    // FIXME: globals can be refered by blocks from other functions, so their block_types map should accomodate them.
+    return var->declared;
+  }
   Type* type = var->block_types[block->id];
   if (type) return type;
 
@@ -2007,6 +2017,60 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // n:I32
+  // i:I32 = 0
+  // wh n > 0 do {
+  //   n = n / 10
+  //   i = i + 1
+  // }
+  // i+n
+// @main : bits(0, bits(0, none)  -> bits(0, none) )  {
+//   b1:0$2|| out{}
+//     r1 = var __ret : bits(64, @|__ret|)
+//     r2 = int -2147483648 : bits(32, -2147483648)
+//     r3 = int 2147483647 : bits(32, 2147483647)
+//     r4 = range r2 r3 : bits(32, -2147483648..2147483647)
+//     r5 = int 32 : bits(7, 32)
+//     r6 = bits r4 r5 : bits(32, -2147483648..2147483647)
+//     r7 = arg : bits(64, @|__arg|)
+//     r9 = declare __arg: r8
+//       b2:
+//         r8 = record : bits(0, none)
+//     r10 = none : bits(0, none)
+//     r11 = var n : bits(64, @|n|)
+//     r12 = var i : bits(64, @|i|)
+//     r13 = declare n: r6
+//       b3: : bits(32, -2147483648..2147483647)
+//     r14 = declare i: r6
+//       b4: : bits(32, -2147483648..2147483647)
+//     r15 = int 0 : bits(32, 0)
+//     r16 = store r12 r15 :
+//     jump b5
+//   b5:1$2|b6,b1,| out{}
+//     r17 = load r11 : bits(32, -2147483648..2147483647)
+//     r18 = int 0 : bits(2, 0)
+//     r19 = gt r17 r18 : bits(2, 0..1)
+//     if r19 then b6 else b7
+//   b6:1$2|b5,| out{}
+//     r20 = load r11 : bits(32, -2147483648..2147483647)
+//     r21 = int 10 : bits(5, 10)
+//     r22 = div r20 r21 : bits(32, -214748364..214748364)
+//     r23 = store r11 r22 :
+//     r24 = load r12 : bits(32, 0)
+//     r25 = int 1 : bits(2, 1)
+//     r26 = add r24 r25 : bits(32, 1)
+//     r27 = store r12 r26 :
+//     jump b5
+//   b7:3$2|b5,| out{}
+//     r28 = load r12 : bits(32, 0)
+//     r29 = load r11 : bits(32, -2147483648..2147483647)
+//     r30 = add r28 r29 : bits(32, -2147483648..2147483647)
+//     jump b0
+//   b0:4$2|b7,| out{}
+//     ret
+// }
+  // test("a:I32 = 0; if 0\\1 do {a = 1}; a+a", "");
+  // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
   // test("a:[2]I32; a[0] = 1; a[0] + a[1]", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");

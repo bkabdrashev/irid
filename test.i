@@ -22,7 +22,7 @@ print_i32:(n:I32) -> {
     i = i + 1
     putchar 67
   }
-  // BUG: i is considered to be 0 here, even though it is incremented by the previous while loop
+  // FIXME: i is considered to be 0 here, even though it is incremented by the previous while loop
   wh i > 0 do {
     i = i - 1
     putchar (buf[i] + 48)

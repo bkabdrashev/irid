@@ -653,9 +653,9 @@ Block* irgen_block_new(void) {
   irgen_block_leave();
   Fun* fun = irgen_fun_top();
   Block* block = &new(irgen.blocks);
+  memset(block, 0, sizeof(Block));
   block->id = fun->blocks->length;
   fa_extend(irgen.temp_block_arena, fun->blocks, block);
-  memset(block, 0, sizeof(Block));
   fa_temp(irgen.temp_ir_arena, block->irs);
   return block;
 }
