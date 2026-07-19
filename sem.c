@@ -1178,8 +1178,8 @@ void sem_unnarrow(Sem_Tasks tasks) {
 }
 
 Type* type_of_var_rec(Block* block, Var* var) {
-  if (var->global) {
-    // FIXME: globals can be refered by blocks from other functions, so their block_types map should accomodate them.
+  // FIXME: globals can be refered by blocks from other functions, so their block_types map should accomodate them.
+  if (var->kind == Var_Kind_constant) {
     return var->declared;
   }
   Type* type = var->block_types[block->id];
@@ -1954,6 +1954,9 @@ Type* sem_fun(Fun* fun) {
   Blocks*  rpo = sem_cfg_rpo(fun);
                  sem_cfg_doms(fun, rpo);
   for (I32 i = 0; i < rpo->length; i++) {
+    // BUG: rpo is not correct order
+    // TODO: find all natural loops. Topological order loops. Visit in topological order.
+    //       Loop header should resolve loop variables.
     Block* block = rpo->base[i];
     sem_block(block);
   }
@@ -2069,7 +2072,7 @@ void sem_test(void) {
 //   b0:4$2|b7,| out{}
 //     ret
 // }
-  // test("a:I32 = 0; if 0\\1 do {a = 1}; a+a", "");
+  test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
   // test("a:[2]I32; a[0] = 1; a[0] + a[1]", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
