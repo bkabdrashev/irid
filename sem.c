@@ -73,6 +73,7 @@ struct Sem {
   Funs   funs;
   Hash_Map  type_of_irs;
   Type_Pool types;
+  Blocks* worklist;
 
   Type* type_none;
 
@@ -1936,6 +1937,37 @@ B8 sem_dominates(Block* one, Block* two) {
   }
 }
 
+void sem_worklist_sort(void) {
+  for (I32 i = 0; i < sem.worklist->length; i++) {
+    I32 max_i = i;
+    for (I32 j = max_i+1; j < sem.worklist->length; j++) {
+      if (sem.worklist->base[max_i]->sccid < sem.worklist->base[j]->sccid) {
+        max_i = j;
+      }
+    }
+    Block* temp = sem.worklist->base[i];
+    sem.worklist->base[i] = sem.worklist->base[max_i];
+    sem.worklist->base[max_i] = temp;
+  }
+}
+
+void sem_worklist_push(Block* block) {
+  if (!block->is_present_in_worklist) {
+    block->is_present_in_worklist = true;
+    fa_add(sem.worklist, block);
+  }
+}
+
+B8 sem_worklist_is_not_empty() {
+  return sem.worklist->length != 0;
+}
+
+Block* sem_worklist_pop(void) {
+  Block* block = fa_pop(sem.worklist);
+  block->is_present_in_worklist = false;
+  return block;
+}
+
 Type* sem_fun(Fun* fun) {
   sem.current_fun = fun;
   Type* fun_type = type_of_fun(fun);
@@ -1949,17 +1981,21 @@ Type* sem_fun(Fun* fun) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
     sem_scc_block(block);
+    sem_worklist_push(block);
   }
+  sem_worklist_sort();
 
-  Blocks*  rpo = sem_cfg_rpo(fun);
-                 sem_cfg_doms(fun, rpo);
-  for (I32 i = 0; i < rpo->length; i++) {
-    // BUG: rpo is not correct order
-    // TODO: find all natural loops. Topological order loops. Visit in topological order.
-    //       Loop header should resolve loop variables.
-    Block* block = rpo->base[i];
+  // BUG: worklist overlaps with each fun
+  while (sem_worklist_is_not_empty()) {
+    Block* block = sem_worklist_pop();
     sem_block(block);
   }
+  // Blocks*  rpo = sem_cfg_rpo(fun);
+  //                sem_cfg_doms(fun, rpo);
+  // for (I32 i = 0; i < rpo->length; i++) {
+  //   Block* block = rpo->base[i];
+  //   sem_block(block);
+  // }
 
   Type* new_type = &new(sem.types);
   new_type->kind = Type_Kind_fun;
@@ -1981,6 +2017,8 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.temp_arena = &temp;
   sem.funs = funs;
   sem.sccid = 0;
+  sem.worklist = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
+  sem.worklist->length = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length);
@@ -2072,7 +2110,8 @@ void sem_test(void) {
 //   b0:4$2|b7,| out{}
 //     ret
 // }
-  test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
+  // test("foo:#c foo () -> 1", "");
+  // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
   // test("a:[2]I32; a[0] = 1; a[0] + a[1]", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
