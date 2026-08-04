@@ -73,7 +73,6 @@ struct Sem {
   Funs   funs;
   Hash_Map  type_of_irs;
   Type_Pool types;
-  Blocks* worklist;
 
   Type* type_none;
 
@@ -1350,6 +1349,7 @@ Type* sem_ensure_declared(Var* var) {
 
 Type* sem_fun(Fun* fun);
 void sem_ir(Block* block, Ir* ir) {
+  // printf("  r%ld\n", ir-irgen.irs.base);
   Type* result = type_of_ir(ir);
   switch (ir->kind) {
   case Ir_Kind_none: {
@@ -1938,32 +1938,32 @@ B8 sem_dominates(Block* one, Block* two) {
 }
 
 void sem_worklist_sort(void) {
-  for (I32 i = 0; i < sem.worklist->length; i++) {
+  for (I32 i = 0; i < sem.current_fun->worklist->length; i++) {
     I32 max_i = i;
-    for (I32 j = max_i+1; j < sem.worklist->length; j++) {
-      if (sem.worklist->base[max_i]->sccid < sem.worklist->base[j]->sccid) {
+    for (I32 j = max_i+1; j < sem.current_fun->worklist->length; j++) {
+      if (sem.current_fun->worklist->base[max_i]->sccid < sem.current_fun->worklist->base[j]->sccid) {
         max_i = j;
       }
     }
-    Block* temp = sem.worklist->base[i];
-    sem.worklist->base[i] = sem.worklist->base[max_i];
-    sem.worklist->base[max_i] = temp;
+    Block* temp = sem.current_fun->worklist->base[i];
+    sem.current_fun->worklist->base[i] = sem.current_fun->worklist->base[max_i];
+    sem.current_fun->worklist->base[max_i] = temp;
   }
 }
 
 void sem_worklist_push(Block* block) {
   if (!block->is_present_in_worklist) {
     block->is_present_in_worklist = true;
-    fa_add(sem.worklist, block);
+    fa_add(sem.current_fun->worklist, block);
   }
 }
 
 B8 sem_worklist_is_not_empty() {
-  return sem.worklist->length != 0;
+  return sem.current_fun->worklist->length != 0;
 }
 
 Block* sem_worklist_pop(void) {
-  Block* block = fa_pop(sem.worklist);
+  Block* block = fa_pop(sem.current_fun->worklist);
   block->is_present_in_worklist = false;
   return block;
 }
@@ -1972,6 +1972,9 @@ Type* sem_fun(Fun* fun) {
   sem.current_fun = fun;
   Type* fun_type = type_of_fun(fun);
   if (fun_type) return fun_type;
+  fun->worklist = arena_push(sem.temp_arena, sizeof(Blocks) + sizeof(Block*)*fun->blocks->length);
+  fun->worklist->length = 0;
+  printf("fun: %s\n", fun->name->base);
 
   sem_ensure_declared(fun->arg_var->var);
 
@@ -1988,6 +1991,7 @@ Type* sem_fun(Fun* fun) {
   // BUG: worklist overlaps with each fun
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
+    printf(" b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
     sem_block(block);
   }
   // Blocks*  rpo = sem_cfg_rpo(fun);
@@ -2008,6 +2012,9 @@ Type* sem_fun(Fun* fun) {
   assert(ret_type->kind == Type_Kind_ptr);
   ret_type->pointer->declared = new_type->function->ret;
   fun->type = new_type;
+
+  arena_release_mark(sem.temp_arena, fun->worklist);
+  printf("end: %s\n", fun->name->base);
   return new_type;
 }
 
@@ -2017,8 +2024,6 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.temp_arena = &temp;
   sem.funs = funs;
   sem.sccid = 0;
-  sem.worklist = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
-  sem.worklist->length = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length);

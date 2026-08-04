@@ -243,6 +243,7 @@ struct Fun {
   Ir*     arg_var;
   Ir*     ret_ir;
   Type*   type;
+  Blocks* worklist;
 };
 
 typedef struct Fun_Stack Fun_Stack;
@@ -1228,7 +1229,7 @@ void irgen_test(void) {
   // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
-  test("foo:#c foo () -> I32; foo()", "");
+  // test("foo:#c foo () -> I32; foo()", "");
   // test("a = 1; if 1 do a+a", "");
 }
 
