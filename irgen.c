@@ -465,7 +465,7 @@ void string_builder_push_block(String_Builder* sb, Block* block, I32 indent) {
   }
 }
 
-Cstr cstr_from_funs(C8* buffer, Funs funs) {
+Cstr cstr_from_funs(Funs funs, C8* buffer) {
   String_Builder sb = string_builder_begin(buffer);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
@@ -1202,7 +1202,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Ast_Block ast        = parse_tokens(&arena, tokens);
   Funs funs            = irgen_ast(&arena, ast, source_length);
   C8* buffer           = arena_push(&arena, KB(1) * source_length);
-  Cstr result          = cstr_from_funs(buffer, funs);
+  Cstr result          = cstr_from_funs(funs, buffer);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
 }

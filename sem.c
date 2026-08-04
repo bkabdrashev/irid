@@ -1799,18 +1799,36 @@ void sem_block(Block* block) {
   }
 }
 
+void sem_worklist_push(Block* block) {
+  if (!block->is_present_in_worklist) {
+    block->is_present_in_worklist = true;
+    fa_add(sem.current_fun->worklist, block);
+  }
+}
+
+B8 sem_worklist_is_not_empty() {
+  return sem.current_fun->worklist->length != 0;
+}
+
+Block* sem_worklist_pop(void) {
+  Block* block = fa_pop(sem.current_fun->worklist);
+  block->is_present_in_worklist = false;
+  return block;
+}
+
 void sem_scc_block(Block* block);
 I32 sem_scc_block_jump(Block* parent, Block* kid) {
-  sem_scc_block(kid);
-  if (kid->is_on_scc_stack) {
-    I32 new_low = min(parent->low_sccid, kid->low_sccid);
-    parent->low_sccid = new_low;
+  if (!kid->is_scc_visited) {
+    sem_scc_block(kid);
+    parent->low_sccid = min(parent->low_sccid, kid->low_sccid);
+  }
+  else if (kid->is_on_scc_stack) {
+    parent->low_sccid = min(parent->low_sccid, kid->sccid);
   }
   return parent->low_sccid;
 }
 
 void sem_scc_block(Block* block) {
-  if (block->is_scc_visited) return;
   block->is_scc_visited = true;
   I32 sccid = sem.sccid++;
   block->sccid = sccid;
@@ -1832,7 +1850,11 @@ void sem_scc_block(Block* block) {
       pop_block = fa_pop(sem.scc_stack);
       pop_block->is_on_scc_stack = false;
       pop_block->sccid = sccid;
+      sem_worklist_push(pop_block);
+      // printf("b%ld, sccid: %d\n", pop_block-irgen.blocks.base, pop_block->sccid);
     } while (block != pop_block);
+    sem_worklist_push(block);
+    // printf("b%ld, sccid: %d\n", block-irgen.blocks.base, block->sccid);
   }
 }
 
@@ -1937,37 +1959,6 @@ B8 sem_dominates(Block* one, Block* two) {
   }
 }
 
-void sem_worklist_sort(void) {
-  for (I32 i = 0; i < sem.current_fun->worklist->length; i++) {
-    I32 max_i = i;
-    for (I32 j = max_i+1; j < sem.current_fun->worklist->length; j++) {
-      if (sem.current_fun->worklist->base[max_i]->sccid < sem.current_fun->worklist->base[j]->sccid) {
-        max_i = j;
-      }
-    }
-    Block* temp = sem.current_fun->worklist->base[i];
-    sem.current_fun->worklist->base[i] = sem.current_fun->worklist->base[max_i];
-    sem.current_fun->worklist->base[max_i] = temp;
-  }
-}
-
-void sem_worklist_push(Block* block) {
-  if (!block->is_present_in_worklist) {
-    block->is_present_in_worklist = true;
-    fa_add(sem.current_fun->worklist, block);
-  }
-}
-
-B8 sem_worklist_is_not_empty() {
-  return sem.current_fun->worklist->length != 0;
-}
-
-Block* sem_worklist_pop(void) {
-  Block* block = fa_pop(sem.current_fun->worklist);
-  block->is_present_in_worklist = false;
-  return block;
-}
-
 Type* sem_fun(Fun* fun) {
   sem.current_fun = fun;
   Type* fun_type = type_of_fun(fun);
@@ -1983,15 +1974,14 @@ Type* sem_fun(Fun* fun) {
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
-    sem_scc_block(block);
-    sem_worklist_push(block);
+    if (!block->is_scc_visited) {
+      sem_scc_block(block);
+    }
   }
-  sem_worklist_sort();
 
-  // BUG: worklist overlaps with each fun
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
-    printf(" b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    // printf(" b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
     sem_block(block);
   }
   // Blocks*  rpo = sem_cfg_rpo(fun);
