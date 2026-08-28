@@ -1823,6 +1823,7 @@ I32 sem_scc_block_jump(Block* parent, Block* kid) {
     parent->low_sccid = min(parent->low_sccid, kid->low_sccid);
   }
   else if (kid->is_on_scc_stack) {
+    kid->is_loop_head = true;
     parent->low_sccid = min(parent->low_sccid, kid->sccid);
   }
   return parent->low_sccid;
@@ -1981,7 +1982,12 @@ Type* sem_fun(Fun* fun) {
 
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
-    // printf(" b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    // if (block->is_loop_head) {
+    //   printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    // }
+    // else {
+    //   printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    // }
     sem_block(block);
   }
   // Blocks*  rpo = sem_cfg_rpo(fun);

@@ -207,6 +207,7 @@ struct Block {
   Block_State state;
   I32 id;
   B8 is_present_in_worklist;
+  B8 is_loop_head;
 
   B8 is_scc_visited;
   B8 is_on_scc_stack;
