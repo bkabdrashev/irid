@@ -67,6 +67,7 @@ typedef struct Record Record;
 struct Record {
   I32      length;
   B8       offsets_all_equal;
+  B8       is_array;
   Ir**     declared;
   I32*     offsets;
   Str**    names;

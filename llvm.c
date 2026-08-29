@@ -61,7 +61,14 @@ LLVMTypeRef llvm_of_type(Type* type) {
         field_types[i] = llvm_of_type(field_type);
       }
     }
-    result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
+    if (type->record->is_array) {
+      Type* field_type = type_of_ir(type->record->declared[0]);
+      LLVMTypeRef llvm_field_type = llvm_of_type(field_type);
+      result = LLVMArrayType2(llvm_field_type, type->record->length);
+    }
+    else {
+      result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
+    }
   } break;
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;

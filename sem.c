@@ -98,6 +98,9 @@ Type* sem_ensure_declared(Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
+  if (type->size_defined) {
+    string_builder_push_cstr(sb, "*");
+  }
   string_builder_push_cstr(sb, "bits(");
   string_builder_push_i64(sb, type->bits_size);
   string_builder_push_cstr(sb, ", ");
@@ -1184,10 +1187,13 @@ Type* type_of_var_rec(Block* block, Var* var) {
   }
   Type* type = var->block_types[block->id];
   if (type) return type;
+
   type = sem.type_none;
 
   if (block->is_loop_head) {
     type = var->declared;
+    var->block_types[block->id] = type;
+    return type;
   }
 
   var->block_types[block->id] = type;
@@ -1540,6 +1546,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_const(one_type)) {
         I64 length = ranges_min(one_type->ranges);
         Record* new_record = &new(irgen.records);
+        new_record->is_array = true;
         new_record->length   = length;
         new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
         new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));

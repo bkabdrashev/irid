@@ -20,14 +20,19 @@ print_i32:(n:I32) -> {
     buf[i] = digit
     n = n / 10
   // FIX: i is considered to be 0 here, even though it's incrementing inside a loop
-    i = i + 1
+    putchar (i + 48)
     putchar 67
+    putchar (digit + 48)
+    putchar 10
+    i = i + 1
   }
+  putchar 10
   wh i > 0 do {
     i = i - 1
     putchar (i + 48)
-    putchar (buf[i] + 48)
     putchar 68
+    putchar (buf[i] + 48)
+    putchar 10
   }
   putchar 10
 }
