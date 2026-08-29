@@ -1178,15 +1178,19 @@ void sem_unnarrow(Sem_Tasks tasks) {
 }
 
 Type* type_of_var_rec(Block* block, Var* var) {
-  // FIXME: globals can be refered by blocks from other functions, so their block_types map should accomodate them.
+  // FIX: globals can be refered by blocks from other functions, so their block_types map should accomodate them.
   if (var->kind == Var_Kind_constant) {
     return var->declared;
   }
   Type* type = var->block_types[block->id];
   if (type) return type;
-
-  var->block_types[block->id] = sem.type_none;
   type = sem.type_none;
+
+  if (block->is_loop_head) {
+    type = var->declared;
+  }
+
+  var->block_types[block->id] = type;
 
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];

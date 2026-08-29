@@ -19,7 +19,7 @@ print_i32:(n:I32) -> {
     digit := n % 10
     buf[i] = digit
     n = n / 10
-  // FIXME: i is considered to be 0 here, even though it's incrementing inside a loop
+  // FIX: i is considered to be 0 here, even though it's incrementing inside a loop
     i = i + 1
     putchar 67
   }
