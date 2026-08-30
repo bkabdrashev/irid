@@ -283,7 +283,7 @@ void llvm_ir(Ir* ir) {
 
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
-    {
+  {
     Type_Pair pair = type_of_ir_binary(ir);
     if (pair.one->bits_size < pair.two->bits_size) {
       llvm_one = llvm_conversion(llvm_one, pair.one, pair.two);
@@ -304,6 +304,11 @@ void llvm_ir(Ir* ir) {
       case Ir_Kind_gt: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGT, llvm_one, llvm_two, ""); break;
       case Ir_Kind_ge: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
       default: assert(0);
+    }
+
+    Type* type = type_of_ir(ir);
+    if (type->bits_size != pair.one->bits_size) {
+      result = llvm_conversion(result, pair.one, type);
     }
   } break;
   case Ir_Kind_neg: result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, ""); break;
@@ -341,8 +346,10 @@ void llvm_ir(Ir* ir) {
     assert(arr_type->kind == Type_Kind_record);
     LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
     LLVMTypeRef llvm_type = llvm_of_type(arr_type);
-    LLVMValueRef indices[1] = { llvm_of_ir(ir->binary.two) };
-    result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_type, ptr, indices, 1, "");
+    LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
+    LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
+    LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
+    result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_type, ptr, indices, 2, "");
   } break;
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
