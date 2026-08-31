@@ -1445,6 +1445,7 @@ void sem_ir(Block* block, Ir* ir) {
       I64 min_two = ranges_min(pair.two);
       I64 min = min_one - min_two;
       result = type_range(min, max);
+      result->size_defined = types.one->size_defined || types.two->size_defined;
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
         result->bits_size  = bits_max_size;
@@ -1480,8 +1481,23 @@ void sem_ir(Block* block, Ir* ir) {
       I64 min_two = ranges_min(pair.two);
       I64 min = min_one * min_two;
       result = type_range(min, max);
+      result->size_defined = types.one->size_defined || types.two->size_defined;
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
+        result->bits_size  = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
+        result->ranges->pairs[0].lo = bits_min(bits_max_size);
+        result->ranges->pairs[0].hi = bits_max(bits_max_size);
+      }
+      else if (types.one->size_defined) {
+        I16 bits_max_size = types.one->bits_size;
+        result->bits_size  = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
+        result->ranges->pairs[0].lo = bits_min(bits_max_size);
+        result->ranges->pairs[0].hi = bits_max(bits_max_size);
+      }
+      else if (types.two->size_defined) {
+        I16 bits_max_size = types.two->bits_size;
         result->bits_size  = bits_max_size;
         result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
@@ -1534,6 +1550,22 @@ void sem_ir(Block* block, Ir* ir) {
       }
       else {
         result = type_range(0, 1);
+      }
+    }
+  } break;
+  case Ir_Kind_neg: {
+    Type* one = type_of_ir(ir->unary);
+    if (one->kind == Type_Kind_int) {
+      // TODO: overflow/underflow
+      I64 hi = -ranges_min(one->ranges);
+      I64 lo = -ranges_max(one->ranges);
+      result = type_range(lo, hi);
+      result->size_defined = one->size_defined;
+      if (result->size_defined) {
+        result->bits_size  = one->bits_size;
+        result->bits_align = one->bits_align;
+        result->ranges->pairs[0].lo = bits_min(one->bits_size);
+        result->ranges->pairs[0].hi = bits_max(one->bits_size);
       }
     }
   } break;

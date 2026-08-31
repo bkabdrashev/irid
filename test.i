@@ -13,6 +13,10 @@ print_i32:(n:I32) -> {
     putchar 10
     re
   }
+  if n < 0 do {
+    putchar 45 // -
+    n = -1 * n
+  }
   buf: [10](0..9)
   i:I32 = 0
   wh n > 0 do {
@@ -31,4 +35,4 @@ print_i32:(n:I32) -> {
 
 putchar: #c putchar (char:I32) -> I32
 
-print_i32(12305)
+print_i32(3 * 4)
