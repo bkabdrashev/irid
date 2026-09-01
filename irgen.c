@@ -997,6 +997,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
   } break;
+  case Ast_Kind_bits: {
+    Ir* unary = irgen_ast_node(node->unary);
+    Ir* min = irgen_push_int(bits_min(I32_MIN));
+    Ir* max = irgen_push_int(bits_max(I32_MAX));
+    // TODO
+    Ir* range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
+    result = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
+  } break;
   case Ast_Kind_call:
   case Ast_Kind_array:
   case Ast_Kind_eq: case Ast_Kind_ne:

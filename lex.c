@@ -55,6 +55,7 @@ typedef enum Token_Kind {
   Token_Kind_return             = String_Kind_return,
   Token_Kind_break              = String_Kind_break,
   Token_Kind_while              = String_Kind_while,
+  Token_Kind_bits               = String_Kind_bits,
 } Token_Kind;
 
 typedef struct {

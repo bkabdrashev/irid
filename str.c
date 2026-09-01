@@ -8,6 +8,7 @@ typedef enum String_Kind {
   String_Kind_break  = 142,
   String_Kind_while  = 143,
   String_Kind_type   = 144,
+  String_Kind_bits   = 145,
 } String_Kind;
 
 typedef struct Str Str;
@@ -114,10 +115,11 @@ void str_init(Arena* arena, I32 capacity) {
   internal.set = hash_set_init(arena, capacity);
   str_from_cstr_with_kind("if", String_Kind_if);
   str_from_cstr_with_kind("do", String_Kind_do);
-  str_from_cstr_with_kind("el", String_Kind_else);
-  str_from_cstr_with_kind("re", String_Kind_return);
-  str_from_cstr_with_kind("wh", String_Kind_while);
-  str_from_cstr_with_kind("br", String_Kind_break);
+  str_from_cstr_with_kind("else", String_Kind_else);
+  str_from_cstr_with_kind("return", String_Kind_return);
+  str_from_cstr_with_kind("while", String_Kind_while);
+  str_from_cstr_with_kind("break", String_Kind_break);
+  str_from_cstr_with_kind("bits", String_Kind_bits);
 }
 
 String_Builder string_builder_begin(C8* buffer) {

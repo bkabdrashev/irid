@@ -48,6 +48,7 @@ typedef enum Ast_Kind {
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_foreign_c   = Token_Kind_foreign_c,
+  Ast_Kind_bits        = Token_Kind_bits,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
 } Ast_Kind;
@@ -396,6 +397,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_load:
     return 18;
   case Ast_Kind_call:
+  case Ast_Kind_bits:
   case Ast_Kind_dot:
     return 20;
   default :
@@ -426,6 +428,7 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return 17;
   case Ast_Kind_subscript:
   case Ast_Kind_call:
+  case Ast_Kind_bits:
   case Ast_Kind_dot:
     return 19;
   default :
@@ -636,6 +639,18 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
           node = parse_new_infix(parser, kind, lhs);
         }
         else {
+          return node;
+        }
+      }
+      else if (token.kind == Token_Kind_bits) {
+        Ast_Kind kind = Ast_Kind_bits;
+        I32 precedence = parse_left_precedence(kind);
+        if (precedence > precedence_to_beat) {
+          lhs = node;
+          node = parse_new_unary(parser, kind, lhs);
+        }
+        else {
+          parser->tok--;
           return node;
         }
       }
@@ -939,9 +954,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  return;
-
-  test("#c abc () -> 1",     "#c abc (() -> 1)");
+  test("32 bits",     "(bits)");
 
   test("a:1",            "a : 1; ");
 

@@ -11,7 +11,7 @@ print_i32:(n:I32) -> {
   if n == 0 do {
     putchar 48
     putchar 10
-    re
+    return
   }
   if n < 0 do {
     putchar 45 // -
@@ -19,14 +19,14 @@ print_i32:(n:I32) -> {
   }
   buf: [10](0..9)
   i:I32 = 0
-  wh n > 0 do {
+  while n > 0 do {
     digit := n % 10
     buf[i] = digit
     n = n / 10
   // FIX: i is considered to be 0 here, even though it's incrementing inside a loop
     i = i + 1
   }
-  wh i > 0 do {
+  while i > 0 do {
     i = i - 1
     putchar (buf[i] + 48)
   }
@@ -35,4 +35,6 @@ print_i32:(n:I32) -> {
 
 putchar: #c putchar (char:I32) -> I32
 
-print_i32(WINDOW_WIDTH * WINDOW_HEIGHT)
+print_i32(Game.width * Game.heigth)
+
+sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
