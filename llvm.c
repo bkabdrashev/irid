@@ -288,17 +288,13 @@ void llvm_ir(Ir* ir) {
     Type_Pair pair = type_of_ir_binary(ir);
     if (pair.one->bits_size < pair.two->bits_size) {
       llvm_one = llvm_conversion(llvm_one, pair.one, pair.two);
-      if (pair.two->bits_size < type->bits_size) {
-        llvm_one = llvm_conversion(llvm_one, pair.one, type);
-        llvm_two = llvm_conversion(llvm_two, pair.two, type);
-      }
     }
     else if (pair.one->bits_size > pair.two->bits_size) {
       llvm_two = llvm_conversion(llvm_two, pair.two, pair.one);
-      if (pair.one->bits_size < type->bits_size) {
-        llvm_one = llvm_conversion(llvm_one, pair.one, type);
-        llvm_two = llvm_conversion(llvm_two, pair.two, type);
-      }
+    }
+    if (pair.one->bits_size < type->bits_size || pair.two->bits_size < type->bits_size) {
+      llvm_one = llvm_conversion(llvm_one, pair.one, type);
+      llvm_two = llvm_conversion(llvm_two, pair.two, type);
     }
     switch (ir->kind) {
       case Ir_Kind_add: result = LLVMBuildAdd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
@@ -313,10 +309,6 @@ void llvm_ir(Ir* ir) {
       case Ir_Kind_gt: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGT, llvm_one, llvm_two, ""); break;
       case Ir_Kind_ge: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
       default: assert(0);
-    }
-
-    if (type->bits_size != pair.one->bits_size) {
-      result = llvm_conversion(result, pair.one, type);
     }
   } break;
   case Ir_Kind_neg: result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, ""); break;

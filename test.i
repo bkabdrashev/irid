@@ -35,4 +35,4 @@ print_i32:(n:I32) -> {
 
 putchar: #c putchar (char:I32) -> I32
 
-print_i32(3 * 4)
+print_i32(WINDOW_WIDTH * WINDOW_HEIGHT)
