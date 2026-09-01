@@ -284,12 +284,21 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
   {
+    Type* type = type_of_ir(ir);
     Type_Pair pair = type_of_ir_binary(ir);
     if (pair.one->bits_size < pair.two->bits_size) {
       llvm_one = llvm_conversion(llvm_one, pair.one, pair.two);
+      if (pair.two->bits_size < type->bits_size) {
+        llvm_one = llvm_conversion(llvm_one, pair.one, type);
+        llvm_two = llvm_conversion(llvm_two, pair.two, type);
+      }
     }
     else if (pair.one->bits_size > pair.two->bits_size) {
       llvm_two = llvm_conversion(llvm_two, pair.two, pair.one);
+      if (pair.one->bits_size < type->bits_size) {
+        llvm_one = llvm_conversion(llvm_one, pair.one, type);
+        llvm_two = llvm_conversion(llvm_two, pair.two, type);
+      }
     }
     switch (ir->kind) {
       case Ir_Kind_add: result = LLVMBuildAdd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
@@ -306,7 +315,6 @@ void llvm_ir(Ir* ir) {
       default: assert(0);
     }
 
-    Type* type = type_of_ir(ir);
     if (type->bits_size != pair.one->bits_size) {
       result = llvm_conversion(result, pair.one, type);
     }
