@@ -33,6 +33,8 @@ typedef enum Ir_Kind {
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
+  Ir_Kind_bits      = Ast_Kind_bits,
+  Ir_Kind_type      = Ast_Kind_type | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
   Ir_Kind_record          = 131,
@@ -42,7 +44,6 @@ typedef enum Ir_Kind {
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
 
-  Ir_Kind_bits  = 139,
 
 } Ir_Kind;
 
@@ -563,6 +564,11 @@ Ir* irgen_push_bits(void) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_type(Ir* of) {
+  Ir ir = { Ir_Kind_type, {.unary = of} };
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_int(I64 i64) {
   Ir ir = { Ir_Kind_int, .i64 = i64 };
   return irgen_push(ir);
@@ -735,15 +741,23 @@ void irgen_scope_enter(Hash_Map* scope) {
     var->global = irgen.scope_stack.length == 1;
     var->name = key;
     sym->kind = Symbol_Kind_variable;
-    sym->ir = irgen_push_var(var);
+    if (sym->ast->kind == Ast_Kind_type) {
+      sym->kind = Symbol_Kind_constant;
+      sym->ir = irgen_ast_node(sym->ast->unary);
+    }
+    else {
+      sym->ir = irgen_push_var(var);
+    }
   }
   add(irgen.scope_stack, scope);
 
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
-    irgen_var_declare(sym->ir->var, sym->ast);
-    irgen_push_declare(sym->ir->var);
+    if (sym->kind != Symbol_Kind_constant) {
+      irgen_var_declare(sym->ir->var, sym->ast);
+      irgen_push_declare(sym->ir->var);
+    }
   }
 }
 
@@ -999,7 +1013,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       result = irgen_push_unary(Ir_Kind_ptr, unary);
     }
   } break;
-  case Ast_Kind_load:
+  case Ast_Kind_load: case Ast_Kind_type:
   case Ast_Kind_pos: case Ast_Kind_neg: {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);

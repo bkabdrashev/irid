@@ -49,6 +49,7 @@ typedef enum Ast_Kind {
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_foreign_c   = Token_Kind_foreign_c,
   Ast_Kind_bits        = Token_Kind_bits,
+  Ast_Kind_type        = Token_Kind_type+1,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
 } Ast_Kind;
@@ -257,6 +258,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   break;
   case Ast_Kind_bits:
     string_builder_push_cstr(sb, "bits");
+  break;
+  case Ast_Kind_type:
+    string_builder_push_cstr(sb, "type ");
+    string_builder_push_ast_node(sb, node->unary);
   break;
   case Ast_Kind_return:
     string_builder_push_cstr(sb, "return");
@@ -680,6 +685,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
   case Token_Kind_at_prefix:    case Token_Kind_at:
+  case Token_Kind_type:
   {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind);
@@ -945,6 +951,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("type 32",     "(bits 32)");
   test("bits 32",     "(bits 32)");
   test("bits 32 (0..9)",     "(bits 32)");
   return;

@@ -2115,59 +2115,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // n:I32
-  // i:I32 = 0
-  // wh n > 0 do {
-  //   n = n / 10
-  //   i = i + 1
-  // }
-  // i+n
-// @main : bits(0, bits(0, none)  -> bits(0, none) )  {
-//   b1:0$2|| out{}
-//     r1 = var __ret : bits(64, @|__ret|)
-//     r2 = int -2147483648 : bits(32, -2147483648)
-//     r3 = int 2147483647 : bits(32, 2147483647)
-//     r4 = range r2 r3 : bits(32, -2147483648..2147483647)
-//     r5 = int 32 : bits(7, 32)
-//     r6 = bits r4 r5 : bits(32, -2147483648..2147483647)
-//     r7 = arg : bits(64, @|__arg|)
-//     r9 = declare __arg: r8
-//       b2:
-//         r8 = record : bits(0, none)
-//     r10 = none : bits(0, none)
-//     r11 = var n : bits(64, @|n|)
-//     r12 = var i : bits(64, @|i|)
-//     r13 = declare n: r6
-//       b3: : bits(32, -2147483648..2147483647)
-//     r14 = declare i: r6
-//       b4: : bits(32, -2147483648..2147483647)
-//     r15 = int 0 : bits(32, 0)
-//     r16 = store r12 r15 :
-//     jump b5
-//   b5:1$2|b6,b1,| out{}
-//     r17 = load r11 : bits(32, -2147483648..2147483647)
-//     r18 = int 0 : bits(2, 0)
-//     r19 = gt r17 r18 : bits(2, 0..1)
-//     if r19 then b6 else b7
-//   b6:1$2|b5,| out{}
-//     r20 = load r11 : bits(32, -2147483648..2147483647)
-//     r21 = int 10 : bits(5, 10)
-//     r22 = div r20 r21 : bits(32, -214748364..214748364)
-//     r23 = store r11 r22 :
-//     r24 = load r12 : bits(32, 0)
-//     r25 = int 1 : bits(2, 1)
-//     r26 = add r24 r25 : bits(32, 1)
-//     r27 = store r12 r26 :
-//     jump b5
-//   b7:3$2|b5,| out{}
-//     r28 = load r12 : bits(32, 0)
-//     r29 = load r11 : bits(32, -2147483648..2147483647)
-//     r30 = add r28 r29 : bits(32, -2147483648..2147483647)
-//     jump b0
-//   b0:4$2|b7,| out{}
-//     ret
-// }
-  test("a: 32'bits (0\\1) = 0; a = 1; a+a", "");
+  test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
   // test("foo:#c foo () -> 1", "");
   // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");

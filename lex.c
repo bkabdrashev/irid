@@ -56,6 +56,7 @@ typedef enum Token_Kind {
   Token_Kind_break              = String_Kind_break,
   Token_Kind_while              = String_Kind_while,
   Token_Kind_bits               = String_Kind_bits,
+  Token_Kind_type               = String_Kind_type,
 } Token_Kind;
 
 typedef struct {
@@ -529,6 +530,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_bits:
       string_builder_push_cstr(&sb, "bits");
+    break;
+    case Token_Kind_type:
+      string_builder_push_cstr(&sb, "type");
     break;
     case Token_Kind_sharp:
       string_builder_push_cstr(&sb, "#");
