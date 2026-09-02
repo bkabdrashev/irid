@@ -310,6 +310,18 @@ add:(a:I32; b:I32) -> I32 do
   re a+b
 ```
 
+- [ ] Function call with ''
+```irid
+'a+b'foo
+```
+
+- [ ] Operator precedence non ordered
+```irid
+2+3..4*5 // (2+3)..(4*5)
+8'bits 0..10 // 32'bits (0..10)
+8'bits 2 + 3 // (8'bits 2) + 3
+```
+
 - [ ] Static single assignment
 ```irid
 b = 10 // b is a ssa variable
