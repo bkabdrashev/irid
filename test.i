@@ -37,4 +37,4 @@ putchar: #c putchar (char:I32) -> I32
 
 print_i32(Game.width * Game.heigth)
 
-sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
+// sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)

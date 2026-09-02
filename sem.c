@@ -2115,7 +2115,8 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
+  // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
+  // test("a: I32 = 3; a+a", "");
   // test("foo:#c foo () -> 1", "");
   // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");

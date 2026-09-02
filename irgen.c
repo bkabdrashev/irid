@@ -743,7 +743,6 @@ void irgen_scope_enter(Hash_Map* scope) {
     sym->kind = Symbol_Kind_variable;
     if (sym->ast->kind == Ast_Kind_type) {
       sym->kind = Symbol_Kind_constant;
-      sym->ir = irgen_ast_node(sym->ast->unary);
     }
     else {
       sym->ir = irgen_push_var(var);
@@ -757,6 +756,9 @@ void irgen_scope_enter(Hash_Map* scope) {
     if (sym->kind != Symbol_Kind_constant) {
       irgen_var_declare(sym->ir->var, sym->ast);
       irgen_push_declare(sym->ir->var);
+    }
+    else {
+      sym->ir = irgen_ast_node(sym->ast->unary);
     }
   }
 }
@@ -1180,21 +1182,21 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     *irgen.builtins = hash_map_init(irgen.perm_arena, 1);
     Fun* fun = irgen_fun_enter();
     fun->name = str_from_cstr("main");
-    {
-      Str* i32_str = str_from_cstr("I32");
-      Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-      i32_sym->kind = Symbol_Kind_constant;
-      Ir* i32_min = irgen_push_int(I32_MIN);
-      Ir* i32_max = irgen_push_int(I32_MAX);
-      Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
-      Ir* bits_fun  = irgen_push_bits();
-      Ir* i32_bits  = irgen_push_int(32);
-      Ir* bits_call = irgen_push_binary(Ir_Kind_call, bits_fun, i32_bits);
-      i32_sym->ir = irgen_push_binary(Ir_Kind_call, bits_call, i32_range);
+    // {
+    //   Str* i32_str = str_from_cstr("I32");
+    //   Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
+    //   i32_sym->kind = Symbol_Kind_constant;
+    //   Ir* i32_min = irgen_push_int(I32_MIN);
+    //   Ir* i32_max = irgen_push_int(I32_MAX);
+    //   Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
+    //   Ir* bits_fun  = irgen_push_bits();
+    //   Ir* i32_bits  = irgen_push_int(32);
+    //   Ir* bits_call = irgen_push_binary(Ir_Kind_call, bits_fun, i32_bits);
+    //   i32_sym->ir = irgen_push_binary(Ir_Kind_call, bits_call, i32_range);
 
-      hash_map_put(irgen.builtins, i32_str, i32_sym);
-      add(irgen.scope_stack, irgen.builtins);
-    }
+    //   hash_map_put(irgen.builtins, i32_str, i32_sym);
+    //   add(irgen.scope_stack, irgen.builtins);
+    // }
 
     Var* arg_var = irgen_var_new();
     arg_var->name = str_from_cstr("__arg");

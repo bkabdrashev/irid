@@ -1,0 +1,4 @@
+I32_MAX : 2147483647
+I32_MIN : -2147483648
+I32 : type 32'bits (I32_MIN..I32_MAX)
+B8 : type 8'bits (0\1)
