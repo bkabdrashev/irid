@@ -314,31 +314,39 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_neg: result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, ""); break;
   case Ir_Kind_call: {
     Type* fun_type = type_of_ir(ir->binary.one);
-    LLVMTypeRef llvm_fun_type = llvm_of_type(fun_type);
-    Ir*   arg_ir   = ir->binary.two;
-    Type* arg_type = type_of_ir(arg_ir);
-    LLVMValueRef* llvm_args;
-    I32 llvm_arg_count = 0;
-    if (arg_type->kind == Type_Kind_none) {
-      llvm_args = 0;
-      llvm_arg_count = 0;
+    if (fun_type == sem.bits_fun) {
+      // NOTE: LLVM NOP
     }
-    else if (fun_type->function->fun->foreign && arg_type->kind == Type_Kind_record) {
-      Record* record = arg_type->record;
-      llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
-      for (I32 i = 0; i < record->length; i++) {
-        llvm_args[i] = llvm_of_ir(record->declared[i]);
+    else if (fun_type->kind == Type_Kind_fun) {
+      LLVMTypeRef llvm_fun_type = llvm_of_type(fun_type);
+      Ir*   arg_ir   = ir->binary.two;
+      Type* arg_type = type_of_ir(arg_ir);
+      LLVMValueRef* llvm_args;
+      I32 llvm_arg_count = 0;
+      if (arg_type->kind == Type_Kind_none) {
+        llvm_args = 0;
+        llvm_arg_count = 0;
       }
-      llvm_arg_count = record->length;
+      else if (fun_type->function->fun->foreign && arg_type->kind == Type_Kind_record) {
+        Record* record = arg_type->record;
+        llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
+        for (I32 i = 0; i < record->length; i++) {
+          llvm_args[i] = llvm_of_ir(record->declared[i]);
+        }
+        llvm_arg_count = record->length;
+      }
+      else {
+        LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
+        llvm_arg = llvm_conversion(llvm_arg, arg_type, fun_type->function->arg);
+        llvm_args = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMValueRef));
+        llvm_args[0] = llvm_arg;
+        llvm_arg_count = 1;
+      }
+      result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
-    else {
-      LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
-      llvm_arg = llvm_conversion(llvm_arg, arg_type, fun_type->function->arg);
-      llvm_args = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMValueRef));
-      llvm_args[0] = llvm_arg;
-      llvm_arg_count = 1;
+    else if (fun_type->kind == Type_Kind_none) {
+      // TODO: Type conversions?
     }
-    result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
   } break;
   case Ir_Kind_subscript: {
     Type* of_type = type_of_ir(ir->name_offset.of);

@@ -1741,12 +1741,12 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_call: {
     Type_Pair types = type_of_ir_binary(ir);
-    Type* call = types.one;
-    Type* arg  = types.two;
-    if (call == sem.bits_fun) {
-      if (arg->kind == Type_Kind_int) {
-        if (ranges_is_single(arg->ranges)) {
-          I64 val = ranges_min(arg->ranges);
+    Type* fun_type = types.one;
+    Type* arg_type = types.two;
+    if (fun_type == sem.bits_fun) {
+      if (arg_type->kind == Type_Kind_int) {
+        if (ranges_is_single(arg_type->ranges)) {
+          I64 val = ranges_min(arg_type->ranges);
           if (val < I16_MAX) {
             result = &new(sem.types);
             result->kind = Type_Kind_none;
@@ -1765,8 +1765,8 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
     }
-    else if (call->kind == Type_Kind_fun) {
-      Function* fun = call->function;
+    else if (fun_type->kind == Type_Kind_fun) {
+      Function* fun = fun_type->function;
       // if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
       //   Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
       //   if (type_is_subtype(block, arg, field_two.declared_type)) {
@@ -1778,7 +1778,7 @@ void sem_ir(Block* block, Ir* ir) {
       //   }
       // }
       // else
-      if (type_is_subtype(block, arg, fun->arg)) {
+      if (type_is_subtype(block, arg_type, fun->arg)) {
         result = fun->ret;
       }
       else {
@@ -1786,9 +1786,9 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
     }
-    else if (call->kind == Type_Kind_none) {
-      if (call->size_defined) {
-        result = type_define_size(call->bits_size, arg);
+    else if (fun_type->kind == Type_Kind_none) {
+      if (fun_type->size_defined) {
+        result = type_define_size(fun_type->bits_size, arg_type);
       }
       else {
         assert(0);
@@ -1821,6 +1821,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_bits: {
+    result = sem.bits_fun;
   } break;
   default: assert(0);
   }
@@ -2086,6 +2087,9 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;
+
+  sem.bits_fun = &new(sem.types);
+  sem.bits_fun->kind = Type_Kind_none;
 
   // for (I32 i = 0; i < irgen.builtins->len; i++) {
   //   Str* str = irgen.builtins->list[i];
