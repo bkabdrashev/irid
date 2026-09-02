@@ -527,6 +527,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     case Token_Kind_break:
       string_builder_push_cstr(&sb, "break");
     break;
+    case Token_Kind_bits:
+      string_builder_push_cstr(&sb, "bits");
+    break;
     case Token_Kind_sharp:
       string_builder_push_cstr(&sb, "#");
     break;

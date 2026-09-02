@@ -255,6 +255,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     }
     string_builder_push_cstr(sb, ")");
   break;
+  case Ast_Kind_bits:
+    string_builder_push_cstr(sb, "bits");
+  break;
   case Ast_Kind_return:
     string_builder_push_cstr(sb, "return");
   break;
@@ -397,7 +400,6 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_load:
     return 18;
   case Ast_Kind_call:
-  case Ast_Kind_bits:
   case Ast_Kind_dot:
     return 20;
   default :
@@ -428,7 +430,6 @@ I32 parse_left_precedence(Ast_Kind kind) {
     return 17;
   case Ast_Kind_subscript:
   case Ast_Kind_call:
-  case Ast_Kind_bits:
   case Ast_Kind_dot:
     return 19;
   default :
@@ -642,18 +643,6 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
           return node;
         }
       }
-      else if (token.kind == Token_Kind_bits) {
-        Ast_Kind kind = Ast_Kind_bits;
-        I32 precedence = parse_left_precedence(kind);
-        if (precedence > precedence_to_beat) {
-          lhs = node;
-          node = parse_new_unary(parser, kind, lhs);
-        }
-        else {
-          parser->tok--;
-          return node;
-        }
-      }
       else {
         return node;
       }
@@ -690,7 +679,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   switch (token.kind) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
-  case Token_Kind_at_prefix:    case Token_Kind_at: {
+  case Token_Kind_at_prefix:    case Token_Kind_at:
+  {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind);
     Ast_Node* unary = parse_new_expression(parser, precedence);
@@ -698,6 +688,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node->kind = kind;
     node->unary = unary;
   } break;
+  case Token_Kind_bits:
   case Token_Kind_str: case Token_Kind_int: case Token_Kind_name: {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
     node = arena_push(parser->perm_arena, sizeof(Ast_Node));
@@ -954,7 +945,9 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("32 bits",     "(bits)");
+  test("bits 32",     "(bits 32)");
+  test("bits 32 (0..9)",     "(bits 32)");
+  return;
 
   test("a:1",            "a : 1; ");
 
@@ -980,14 +973,14 @@ void parse_test(void) {
 
   test("a'b",     "(b a)");
   test("[2]\\ 2+3",     "[2](2 + 3)");
-  test("if 2 br 3",     "if 2 do break 3");
+  test("if 2 break 3",     "if 2 do break 3");
   test("a.b@.c",     "((a . b)@ . c)");
   test("a, b -> 1, 2",     "((a, b) -> (1, 2))");
-  test("wh 1 do 2",        "while 1 do 2");
+  test("while 1 do 2",        "while 1 do 2");
   test("(if 1 do 2)",      "if 1 do 2");
-  test("(if 1 do 2 el 3)", "if 1 do 2 else 3");
+  test("(if 1 do 2 else 3)", "if 1 do 2 else 3");
   test("if 1 do 2",      "if 1 do 2");
-  test("if 1 do 2 el 3", "if 1 do 2 else 3");
+  test("if 1 do 2 else 3", "if 1 do 2 else 3");
 
   test("{1; 2}",         "{1; 2;}");
 
@@ -1013,8 +1006,8 @@ void parse_test(void) {
   test("foo 1\n2",       "(foo 1); 2");
   test("bar 1 2",        "((bar 1) 2)");
 
-  test("re 1",        "return 1");
-  test("re\n1",        "return; 1");
+  test("return 1",        "return 1");
+  test("return\n1",        "return; 1");
   return;
 }
 

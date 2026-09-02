@@ -42,7 +42,7 @@ typedef enum Ir_Kind {
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
 
-  Ir_Kind_bits  = 139 | Ir_Flag_binary,
+  Ir_Kind_bits  = 139,
 
 } Ir_Kind;
 
@@ -340,6 +340,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_none:
     string_builder_push_cstr(sb, "none");
   break;
+  case Ir_Kind_bits:
+    string_builder_push_cstr(sb, "bits");
+  break;
   case Ir_Kind_int:
     string_builder_push_cstr(sb, "int ");
     string_builder_push_i64(sb, ir->i64);
@@ -417,7 +420,6 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_ge: string_builder_push_cstr(sb, "ge "); break;
   case Ir_Kind_call: string_builder_push_cstr(sb, "call "); break;
   case Ir_Kind_range: string_builder_push_cstr(sb, "range "); break;
-  case Ir_Kind_bits: string_builder_push_cstr(sb, "bits "); break;
   case Ir_Kind_array: string_builder_push_cstr(sb, "array "); break;
   case Ir_Kind_subscript: string_builder_push_cstr(sb, "subscript "); break;
   default: {
@@ -553,6 +555,11 @@ Ir* irgen_pop(void) {
 
 Ir* irgen_push_none(void) {
   Ir ir = { Ir_Kind_none, {0} };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_bits(void) {
+  Ir ir = { Ir_Kind_bits, {0} };
   return irgen_push(ir);
 }
 
@@ -998,12 +1005,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
   } break;
   case Ast_Kind_bits: {
-    Ir* unary = irgen_ast_node(node->unary);
-    Ir* min = irgen_push_int(bits_min(I32_MIN));
-    Ir* max = irgen_push_int(bits_max(I32_MAX));
-    // TODO
-    Ir* range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
-    result = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
+    result = irgen_push_bits();
   } break;
   case Ast_Kind_call:
   case Ast_Kind_array:
@@ -1171,8 +1173,10 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
       Ir* i32_min = irgen_push_int(I32_MIN);
       Ir* i32_max = irgen_push_int(I32_MAX);
       Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
-      Ir* i32_bits = irgen_push_int(32);
-      i32_sym->ir = irgen_push_binary(Ir_Kind_bits, i32_range, i32_bits);
+      Ir* bits_fun  = irgen_push_bits();
+      Ir* i32_bits  = irgen_push_int(32);
+      Ir* bits_call = irgen_push_binary(Ir_Kind_call, bits_fun, i32_bits);
+      i32_sym->ir = irgen_push_binary(Ir_Kind_call, bits_call, i32_range);
 
       hash_map_put(irgen.builtins, i32_str, i32_sym);
       add(irgen.scope_stack, irgen.builtins);
@@ -1220,6 +1224,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");
   // test("a:[2]I32; a[0] = 1; a[0] + 2", "");

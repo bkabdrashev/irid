@@ -75,6 +75,7 @@ struct Sem {
   Type_Pool types;
 
   Type* type_none;
+  Type* bits_fun;
 
   I32 sccid;
   Blocks* scc_stack;
@@ -1401,33 +1402,33 @@ void sem_ir(Block* block, Ir* ir) {
       result->size_defined = types.one->size_defined || types.two->size_defined;
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
+        result->bits_size = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         if (result->bits_size > bits_max_size) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
-          result->bits_size = bits_max_size;
-          result->bits_align = align_up(bits_max_size, 8);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
       }
       else if (types.one->size_defined) {
         I16 bits_max_size = types.one->bits_size;
+        result->bits_size = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         if (result->bits_size > bits_max_size) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
-          result->bits_size = bits_max_size;
-          result->bits_align = align_up(bits_max_size, 8);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
       }
       else if (types.two->size_defined) {
         I16 bits_max_size = types.two->bits_size;
+        result->bits_size = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
         if (result->bits_size > bits_max_size) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
-          result->bits_size = bits_max_size;
-          result->bits_align = align_up(bits_max_size, 8);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
@@ -1437,6 +1438,7 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_sub: {
     Type_Pair types = type_of_ir_binary(ir);
     if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+      // TODO: overflow/underflow
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
       I64 max_one = ranges_max(pair.one);
       I64 max_two = ranges_max(pair.two);
@@ -1739,7 +1741,29 @@ void sem_ir(Block* block, Ir* ir) {
     Type_Pair types = type_of_ir_binary(ir);
     Type* call = types.one;
     Type* arg  = types.two;
-    if (call->kind == Type_Kind_fun) {
+    if (call == sem.bits_fun) {
+      if (arg->kind == Type_Kind_int) {
+        if (ranges_is_single(arg->ranges)) {
+          I64 val = ranges_min(arg->ranges);
+          if (val < I16_MAX) {
+            result = &new(sem.types);
+            result->kind = Type_Kind_none;
+            result->size_defined = true;
+            result->bits_size = val;
+            result->bits_align = align_up(val, 8);
+          }
+          else {
+            assert(0);
+          }
+        }
+        else {
+          assert(0);
+        }
+      } else {
+        assert(0);
+      }
+    }
+    else if (call->kind == Type_Kind_fun) {
       Function* fun = call->function;
       // if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
       //   Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
@@ -1757,6 +1781,14 @@ void sem_ir(Block* block, Ir* ir) {
       }
       else {
         printf("call not subtype\n");
+        assert(0);
+      }
+    }
+    else if (call->kind == Type_Kind_none) {
+      if (call->size_defined) {
+        result = type_define_size(call->bits_size, arg);
+      }
+      else {
         assert(0);
       }
     }
@@ -1787,25 +1819,6 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_bits: {
-    Type* one_type = type_of_ir(ir->binary.one);
-    Type* two_type = type_of_ir(ir->binary.two);
-    if (two_type->kind == Type_Kind_int) {
-      if (ranges_is_single(two_type->ranges)) {
-        I64 val = ranges_min(two_type->ranges);
-        if (val < I16_MAX) {
-          result = type_define_size(val, one_type);
-        }
-        else {
-          assert(0);
-        }
-      }
-      else {
-        assert(0);
-      }
-    }
-    else {
-      assert(0);
-    }
   } break;
   default: assert(0);
   }
@@ -2154,6 +2167,7 @@ void sem_test(void) {
 //   b0:4$2|b7,| out{}
 //     ret
 // }
+  test("a: 32'bits (0\\1) = 0; a = 1; a+a", "");
   // test("foo:#c foo () -> 1", "");
   // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
