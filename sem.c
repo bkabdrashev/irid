@@ -1402,36 +1402,36 @@ void sem_ir(Block* block, Ir* ir) {
       result->size_defined = types.one->size_defined || types.two->size_defined;
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
-        result->bits_size = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
         if (result->bits_size > bits_max_size) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
+        result->bits_size = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
       }
       else if (types.one->size_defined) {
         I16 bits_max_size = types.one->bits_size;
-        result->bits_size = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
         if (result->bits_size > bits_max_size) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
+        result->bits_size = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
       }
       else if (types.two->size_defined) {
         I16 bits_max_size = types.two->bits_size;
-        result->bits_size = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
         if (result->bits_size > bits_max_size) {
           min = bits_min(bits_max_size);
           max = bits_max(bits_max_size);
           result->ranges->pairs[0].lo = min;
           result->ranges->pairs[0].hi = max;
         }
+        result->bits_size = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
       }
     }
   } break;
@@ -1486,24 +1486,26 @@ void sem_ir(Block* block, Ir* ir) {
       result->size_defined = types.one->size_defined || types.two->size_defined;
       if (types.one->size_defined && types.two->size_defined) {
         I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
+        if (result->bits_size > bits_max_size) {
+          result->ranges->pairs[0].lo = bits_min(bits_max_size);
+          result->ranges->pairs[0].hi = bits_max(bits_max_size);
+        }
         result->bits_size  = bits_max_size;
         result->bits_align = align_up(bits_max_size, 8);
-        result->ranges->pairs[0].lo = bits_min(bits_max_size);
-        result->ranges->pairs[0].hi = bits_max(bits_max_size);
       }
       else if (types.one->size_defined) {
         I16 bits_max_size = types.one->bits_size;
-        result->bits_size  = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
+        result->bits_size  = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
       }
       else if (types.two->size_defined) {
         I16 bits_max_size = types.two->bits_size;
-        result->bits_size  = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
         result->ranges->pairs[0].lo = bits_min(bits_max_size);
         result->ranges->pairs[0].hi = bits_max(bits_max_size);
+        result->bits_size  = bits_max_size;
+        result->bits_align = align_up(bits_max_size, 8);
       }
     }
   } break;
