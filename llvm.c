@@ -361,12 +361,18 @@ void llvm_ir(Ir* ir) {
   } break;
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
-    Type* rec_type = type_pointer_declared(of_type->pointer);
-    assert(rec_type->kind == Type_Kind_record);
-    LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
-    I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name_offset.at);
-    LLVMTypeRef llvm_type = llvm_of_type(rec_type);
-    result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
+    if (of_type->kind == Type_Kind_ptr) {
+      Type* rec_type = type_pointer_declared(of_type->pointer);
+      assert(rec_type->kind == Type_Kind_record);
+      LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
+      I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name_offset.at);
+      LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+      result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
+    }
+    else if (of_type->kind == Type_Kind_record) {
+      Type* type = type_of_ir(ir);
+      result = llvm_default_of_type(type);
+    }
   } break;
   case Ir_Kind_position_offset: {
     Type* of_type = type_of_ir(ir->position.of);
@@ -435,8 +441,14 @@ void llvm_ir(Ir* ir) {
 
   case Ir_Kind_declare: break;
   case Ir_Kind_none:    break;
-  case Ir_Kind_range:   break;
-  case Ir_Kind_join:    break;
+  case Ir_Kind_range: {
+    Type* type = type_of_ir(ir);
+    result = llvm_default_of_type(type);
+  } break;
+  case Ir_Kind_join: {
+    Type* type = type_of_ir(ir);
+    result = llvm_default_of_type(type);
+  } break;
   case Ir_Kind_bits:    break;
 
   }

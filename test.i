@@ -23,7 +23,6 @@ print_i32:(n:I32) -> {
     digit := n % 10
     buf[i] = digit
     n = n / 10
-  // FIX: i is considered to be 0 here, even though it's incrementing inside a loop
     i = i + 1
   }
   while i > 0 do {
@@ -35,6 +34,8 @@ print_i32:(n:I32) -> {
 
 putchar: #c putchar (char:I32) -> I32
 
-print_i32(Game.width * Game.heigth)
+Opa : type 32'bits (test:0\1)
+
+print_i32(Opa.test)
 
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)

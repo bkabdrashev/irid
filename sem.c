@@ -1686,6 +1686,10 @@ void sem_ir(Block* block, Ir* ir) {
       }
       result = type_ptr(declared, stack);
     }
+    else if (of_type->kind == Type_Kind_record) {
+      Field field = type_record_get_by_name(block, of_type->record, ir->name_offset.at);
+      result = field.declared_type;
+    }
   } break;
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(ir->unary);

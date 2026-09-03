@@ -620,8 +620,9 @@ Ir* irgen_push_position_offset(Ir* record, Ir* position) {
 }
 
 Ir* irgen_push_name_offset(Ir* record,Str* name) {
-  Ir ir = { Ir_Kind_name_offset, .    name_offset = { .of = record, .at = name } };
-  return irgen_push(ir);}
+  Ir ir = { Ir_Kind_name_offset, .name_offset = { .of = record, .at = name } };
+  return irgen_push(ir);
+}
 
 Record* record_new(I32 length) {
   Record* new_record = &new(irgen.records);
@@ -909,6 +910,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
         lhs->name_offset.of = lhs->unary;
         lhs->name_offset.at = node->binary.rhs->str;
         result = irgen_push_unary(Ir_Kind_load, lhs);
+      }
+      else {
+        result = irgen_push_name_offset(lhs, node->binary.rhs->str);
       }
     }
     else if (node->binary.rhs->kind == Ast_Kind_int) {

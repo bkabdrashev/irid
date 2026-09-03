@@ -40,11 +40,18 @@ void irid_run_path(Cstr path) {
   }
 
   Funs funs            = irgen_ast(&arena, ast, length);
+  {
+    C8* buffer           = arena_push(&arena, 64 * length);
+    Cstr result          = cstr_from_funs(funs, buffer);
+    printf("\n%s", result);
+  }
 
                          sem_funs(&arena, funs);
-  C8* buffer           = arena_push(&arena, 64 * length);
-  Cstr result          = cstr_from_sem(funs, buffer);
-  printf("\n%s", result);
+  {
+    C8* buffer           = arena_push(&arena, 64 * length);
+    Cstr result          = cstr_from_sem(funs, buffer);
+    printf("\n%s", result);
+  }
                          llvm_funs(&arena, funs);
   arena_free(&arena);
 }
