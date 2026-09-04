@@ -223,6 +223,7 @@ struct Block {
   Block_List preds;
 
   Irs* irs;
+  Irs* sem_irs;
   // Hash_Map out_var_types;
   // Hash_Map assigned;
   union {

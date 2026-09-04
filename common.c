@@ -77,6 +77,20 @@ I64 bits_min(I16 bits) {
   return -(1LL << (bits-1));
 }
 
+I64 bits_convert(I64 x, I16 bits) {
+  if (bits == 64) return x;
+
+  U64 mask = (1ULL << bits) - 1;
+
+  U64 value = (U64)x & mask;
+
+  if (value & (1ULL << (bits - 1))) {
+    value |= ~mask;
+  }
+
+  return (I64)value;
+}
+
 I16 bits_needed(I64 min, I64 max) {
   // if (min == max) return 0;
 

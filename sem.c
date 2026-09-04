@@ -1361,7 +1361,7 @@ Type* sem_ensure_declared(Var* var) {
 Type* sem_fun(Fun* fun);
 void sem_ir(Block* block, Ir* ir) {
   // printf("  r%ld\n", ir-irgen.irs.base);
-  Type* result = type_of_ir(ir);
+  Type* result = sem.type_none;
   switch (ir->kind) {
   case Ir_Kind_none: {
     result = sem.type_none;
@@ -1390,49 +1390,31 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_add: {
     Type_Pair types = type_of_ir_binary(ir);
     if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      // TODO: overflow/underflow
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
       I64 max_one = ranges_max(pair.one);
       I64 max_two = ranges_max(pair.two);
-      I64 max = max_one + max_two;
+      I64 res_max = max_one + max_two;
       I64 min_one = ranges_min(pair.one);
       I64 min_two = ranges_min(pair.two);
-      I64 min = min_one + min_two;
-      result = type_range(min, max);
+      I64 res_min = min_one + min_two;
+      result = type_range(res_min, res_max);
       result->size_defined = types.one->size_defined || types.two->size_defined;
-      if (types.one->size_defined && types.two->size_defined) {
-        I16 bits_max_size = max(types.one->bits_size, types.two->bits_size);
-        if (result->bits_size > bits_max_size) {
-          min = bits_min(bits_max_size);
-          max = bits_max(bits_max_size);
-          result->ranges->pairs[0].lo = min;
-          result->ranges->pairs[0].hi = max;
+      I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
+      if (result->size_defined) {
+        if (result->bits_size > res_bits_size) {
+          res_min = bits_convert(res_min, res_bits_size);
+          res_max = bits_convert(res_max, res_bits_size);
+          res_min = min(res_min, res_max);
+          res_max = max(res_max, res_min);
+          result->ranges->pairs[0].lo = res_min;
+          result->ranges->pairs[0].hi = res_max;
         }
-        result->bits_size = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
+        result->bits_size = res_bits_size;
+        result->bits_align = align_up(res_bits_size, 8);
       }
-      else if (types.one->size_defined) {
-        I16 bits_max_size = types.one->bits_size;
-        if (result->bits_size > bits_max_size) {
-          min = bits_min(bits_max_size);
-          max = bits_max(bits_max_size);
-          result->ranges->pairs[0].lo = min;
-          result->ranges->pairs[0].hi = max;
-        }
-        result->bits_size = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
-      }
-      else if (types.two->size_defined) {
-        I16 bits_max_size = types.two->bits_size;
-        if (result->bits_size > bits_max_size) {
-          min = bits_min(bits_max_size);
-          max = bits_max(bits_max_size);
-          result->ranges->pairs[0].lo = min;
-          result->ranges->pairs[0].hi = max;
-        }
-        result->bits_size = bits_max_size;
-        result->bits_align = align_up(bits_max_size, 8);
-      }
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ir_Kind_sub: {
@@ -1829,7 +1811,8 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   default: assert(0);
   }
-  type_of_ir_put(ir, result);
+  Ir* new_ir = &new(irgen.irs);
+  type_of_ir_put(new_ir, result);
 }
 
 void sem_block(Block* block) {
