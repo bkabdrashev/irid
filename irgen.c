@@ -44,6 +44,8 @@ typedef enum Ir_Kind {
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
 
+  Ir_Kind_int_extend = 140,
+
 
 } Ir_Kind;
 
@@ -63,6 +65,9 @@ struct Declare { Var* var; };
 
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Ir* of; Ir* at; };
+
+typedef struct Int_Extend Int_Extend;
+struct Int_Extend { Ir* value; I16 bits; };
 
 typedef struct Record Record;
 struct Record {
@@ -119,6 +124,7 @@ struct Ir {
     Position_Offset position;
     Name_Offset     name_offset;
     Declare         declare;
+    Int_Extend      int_extend;
   };
 };
 
@@ -383,9 +389,16 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_irid(sb, ir->position.at);
   break;
   case Ir_Kind_name_offset:
-    string_builder_push_cstr(sb, "name ofset ");
-    string_builder_push_irid(sb, ir->    name_offset.of);
-    string_builder_push_cstr(sb, ".");   string_builder_push_str(sb, ir->    name_offset.at);
+    string_builder_push_cstr(sb, "name offset ");
+    string_builder_push_irid(sb, ir->name_offset.of);
+    string_builder_push_cstr(sb, ".");
+    string_builder_push_str(sb, ir->name_offset.at);
+  break;
+  case Ir_Kind_int_extend:
+    string_builder_push_cstr(sb, "int extend ");
+    string_builder_push_irid(sb, ir->int_extend.value);
+    string_builder_push_cstr(sb, " to ");
+    string_builder_push_i64(sb, ir->int_extend.bits);
   break;
   case Ir_Kind_record:    string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < ir->record->length; i++) {
