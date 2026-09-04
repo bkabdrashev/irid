@@ -284,7 +284,7 @@ I64 ranges_min(Ranges* ranges) {
   return ranges->pairs[0].lo;
 }
 
-Range ranges_limit(Ranges* ranges) {
+Range ranges_limits(Ranges* ranges) {
   Range range = { .lo = ranges_min(ranges), .hi = ranges_max(ranges) };
   return range;
 }
@@ -299,12 +299,36 @@ B8 ranges_have(Ranges* ranges, I64 i64) {
   return false;
 }
 
-Range range_reflow(Range range, I16 bits) {
-  range.lo = bits_convert(range.lo, bits);
-  range.hi = bits_convert(range.hi, bits);
-  range.lo = min(range.lo, range.hi);
-  range.hi = max(range.hi, range.lo);
-  return range;
+Ranges* sem_ranges_init(I32 max_len) {
+  Ranges* result = arena_push(sem.perm_arena, sizeof(Ranges) + max_len * sizeof(Range));
+  result->length = 0;
+  return result;
+}
+
+Ranges* ranges_reflow(Range range, I16 bits) {
+  Ranges* result = sem_ranges_init(2);
+  I64 lo_converted = bits_convert(range.lo, bits);
+  I64 hi_converted = bits_convert(range.hi, bits);
+  if (lo_converted == range.lo && hi_converted == range.hi) {
+    result->length = 1;
+    result->pairs[0] = range;
+  }
+  else if (lo_converted < range.lo && hi_converted == range.hi && range.hi < lo_converted-1 ||
+      hi_converted > range.hi && lo_converted == range.lo && range.lo > hi_converted+1) {
+    // -128..118 \ 120..127
+    result->length = 2;
+    result->pairs[0].lo = bits_min(bits);
+    result->pairs[0].hi = hi_converted;
+    result->pairs[1].lo = lo_converted;
+    result->pairs[1].hi = bits_max(bits);
+  }
+  else {
+    // -128..127 or -128..119 \ 120..127
+    result->length = 1;
+    result->pairs[0].lo = bits_min(bits);
+    result->pairs[0].hi = bits_max(bits);
+  }
+  return result;
 }
 
 B8 ranges_is_single(Ranges* ranges) {
@@ -512,12 +536,6 @@ void type_of_ir_put(Ir* ir, Type* type) {
   hash_map_put(&sem.type_of_irs, ir, type);
 }
 
-Ranges* sem_ranges_init(I32 max_len) {
-  Ranges* result = arena_push(sem.perm_arena, sizeof(Ranges) + max_len * sizeof(Range));
-  result->length = 0;
-  return result;
-}
-
 Type* type_ranges(Ranges* ranges) {
   Type* new_type = &new(sem.types);
 
@@ -536,6 +554,26 @@ Type* type_ranges(Ranges* ranges) {
   }
 
   return new_type;
+}
+
+Type* type_ranges_reflow(Range range, Type_Pair types) {
+  Type* result = sem.type_none;
+  I16 bit_size = bits_needed(range.lo, range.hi);
+  I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
+  if (types.one->size_defined || types.two->size_defined) {
+    if (!types.two->size_defined && types.one->bits_size < types.two->bits_size) {
+      assert(0);
+    }
+    else if (!types.one->size_defined && types.two->bits_size < types.one->bits_size) {
+      assert(0);
+    }
+    Ranges* ranges = ranges_reflow(range, res_bits_size);
+    result = type_ranges(ranges);
+  }
+  else {
+    result = type_range(range.lo, range.hi);
+  }
+  return result;
 }
 
 Type* type_range(I64 min, I64 max) {
@@ -1404,21 +1442,10 @@ void sem_ir(Block* block, Ir* ir) {
     Type_Pair types = type_of_ir_binary(ir);
     if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      Range range = {0,0};
-      Range one = ranges_limit(pair.one);
-      Range two = ranges_limit(pair.two);
-      range.lo = one.lo + two.lo;
-      range.hi = one.hi + two.hi;
-      result = type_range(range.lo, range.hi);
-      result->size_defined = types.one->size_defined || types.two->size_defined;
-      I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
-      if (result->size_defined) {
-        if (result->bits_size > res_bits_size) {
-          result->ranges->pairs[0] = range_reflow(range, res_bits_size);
-        }
-        result->bits_size = res_bits_size;
-        result->bits_align = align_up(res_bits_size, 8);
-      }
+      Range one = ranges_limits(pair.one);
+      Range two = ranges_limits(pair.two);
+      Range range = { one.lo+two.lo, one.hi+two.hi };
+      result = type_ranges_reflow(range, types);
     }
     else {
       assert(0);
@@ -1428,21 +1455,10 @@ void sem_ir(Block* block, Ir* ir) {
     Type_Pair types = type_of_ir_binary(ir);
     if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      Range range = {0,0};
-      Range one = ranges_limit(pair.one);
-      Range two = ranges_limit(pair.two);
-      range.lo = one.lo - two.lo;
-      range.hi = one.hi - two.hi;
-      result = type_range(range.lo, range.hi);
-      result->size_defined = types.one->size_defined || types.two->size_defined;
-      I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
-      if (result->size_defined) {
-        if (result->bits_size > res_bits_size) {
-          result->ranges->pairs[0] = range_reflow(range, res_bits_size);
-        }
-        result->bits_size = res_bits_size;
-        result->bits_align = align_up(res_bits_size, 8);
-      }
+      Range one = ranges_limits(pair.one);
+      Range two = ranges_limits(pair.two);
+      Range range = { one.lo-two.lo, one.hi-two.hi };
+      result = type_ranges_reflow(range, types);
     }
     else {
       assert(0);
@@ -1452,25 +1468,15 @@ void sem_ir(Block* block, Ir* ir) {
     Type_Pair types = type_of_ir_binary(ir);
     if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      Range range = {0,0};
-      Range one = ranges_limit(pair.one);
-      Range two = ranges_limit(pair.two);
+      Range one = ranges_limits(pair.one);
+      Range two = ranges_limits(pair.two);
       I64 a = one.lo * two.lo;
       I64 b = one.hi * two.lo;
       I64 c = one.lo * two.hi;
       I64 d = one.hi * two.hi;
-      range.lo = min(a, min(b, min(c, d)));
-      range.hi = max(a, max(b, max(c, d)));
-      result = type_range(range.lo, range.hi);
-      result->size_defined = types.one->size_defined || types.two->size_defined;
-      I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
-      if (result->size_defined) {
-        if (result->bits_size > res_bits_size) {
-          result->ranges->pairs[0] = range_reflow(range, res_bits_size);
-        }
-        result->bits_size = res_bits_size;
-        result->bits_align = align_up(res_bits_size, 8);
-      }
+      // TODO: check that this works, even with undeflow/overflow
+      Range range = { .lo = min(a, min(b, min(c, d))), .hi = max(a, max(b, max(c, d))) };
+      result = type_ranges_reflow(range, types);
     }
     else {
       assert(0);
