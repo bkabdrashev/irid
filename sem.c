@@ -2109,16 +2109,33 @@ void sem_funs(Arena* arena, Funs funs) {
 }
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  I32 source_length    = strlen(source) + 32;
-  Arena arena          = arena_init(KB(4) * source_length);
-  str_init(&arena, 2*source_length);
-  Tokens tokens        = lex_source(&arena, source);
-  Ast_Block ast        = parse_tokens(&arena, tokens);
-  Funs funs            = irgen_ast(&arena, ast, source_length);
+  Cstr builtin        = file_read("builtin.i");
+  I32  builtin_length = strlen(builtin);
+  I32  source_length  = strlen(source);
+  I32  length         = source_length + builtin_length + 32;
+
+  Arena arena         = arena_init(KB(4) * length);
+                        str_init(&arena, 2*length);
+
+  Tokens builtin_tokens = lex_source(&arena, builtin);
+  Ast_Block ast         = parse_tokens(&arena, builtin_tokens);
+
+  Tokens source_tokens = lex_source(&arena, source);
+  Ast_Block source_ast = parse_tokens(&arena, source_tokens);
+
+  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
+  node->block    = source_ast;
+
+  fa_init(&arena, ast.list, 1);
+  fa_add(ast.list, node);
+
+  Funs funs            = irgen_ast(&arena, ast, length);
                          sem_funs(&arena, funs);
-  C8* buffer           = arena_push(&arena, 64 * source_length);
-  Cstr result          = cstr_from_sem(funs, buffer);
-  test_at_source(result, expected, file_name, line, source);
+  {
+    C8* buffer           = arena_push(&arena, 64 * length);
+    Cstr result          = cstr_from_sem(funs, buffer);
+    test_at_source(result, expected, file_name, line, source);
+  }
   arena_free(&arena);
 }
 
