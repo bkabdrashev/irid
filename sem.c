@@ -564,16 +564,15 @@ Type* type_range(I64 min, I64 max) {
   return type_ranges(ranges);
 }
 
-Ir* sem_push_ir(Block* block, Ir new_ir) {
-  Ir* sem_ir = &new(irgen.irs);
+void sem_push_ir(Block* block, Ir* sem_ir) {
   fa_add(block->sem_irs, sem_ir);
-  *sem_ir = new_ir;
-  return sem_ir;
 }
 
 Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
   Ir new_ir = { Ir_Kind_int_extend, .int_extend = { .value=value, .bits = bits } };
-  Ir* sem_ir = sem_push_ir(block, new_ir);
+  Ir* sem_ir = &new(irgen.irs);
+  *sem_ir = new_ir;
+  sem_push_ir(block, sem_ir);
   Type* value_type = type_of_ir(value);
   Type* new_type = &new(sem.types);
   *new_type = *value_type;
@@ -583,15 +582,14 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
   return sem_ir;
 }
 
-Type* sem_ranges_reflow(Block* block, Ir* old_ir, Ir* new_ir, Range range, Type_Pair types) {
+Type* sem_ranges_reflow(Block* block, Ir* ir, Range range, Type_Pair types) {
   Type* result = sem.type_none;
   I16 bits_size = bits_needed(range.lo, range.hi);
   I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
   if (types.one->size_defined || types.two->size_defined) {
     if (!types.two->size_defined) {
       if (types.one->bits_size >= types.two->bits_size) {
-        // FIX: old_ir->binary.two is wrong. In fact every operand of a Ir is wrong
-        new_ir->binary.two = sem_push_int_extend(block, old_ir->binary.two, types.one->bits_size);
+        ir->binary.two = sem_push_int_extend(block, ir->binary.two, types.one->bits_size);
       }
       else {
         assert(0);
@@ -599,7 +597,7 @@ Type* sem_ranges_reflow(Block* block, Ir* old_ir, Ir* new_ir, Range range, Type_
     }
     if (!types.one->size_defined) {
       if (types.two->bits_size >= types.one->bits_size) {
-        new_ir->binary.one = sem_push_int_extend(block, old_ir->binary.one, types.two->bits_size);
+        ir->binary.one = sem_push_int_extend(block, ir->binary.one, types.two->bits_size);
       }
       else {
         assert(0);
@@ -613,10 +611,10 @@ Type* sem_ranges_reflow(Block* block, Ir* old_ir, Ir* new_ir, Range range, Type_
   }
   else {
     if (bits_size > types.one->bits_size) {
-      new_ir->binary.one = sem_push_int_extend(block, old_ir->binary.one, bits_size);
+      ir->binary.one = sem_push_int_extend(block, ir->binary.one, bits_size);
     }
     if (bits_size > types.two->bits_size) {
-      new_ir->binary.two = sem_push_int_extend(block, old_ir->binary.two, bits_size);
+      ir->binary.two = sem_push_int_extend(block, ir->binary.two, bits_size);
     }
     result = type_range(range.lo, range.hi);
   }
@@ -1453,7 +1451,6 @@ Type* sem_fun(Fun* fun);
 void sem_ir(Block* block, Ir* ir) {
   // printf("  r%ld\n", ir-irgen.irs.base);
   Type* result = sem.type_none;
-  Ir new_ir = *ir;
   switch (ir->kind) {
   case Ir_Kind_none: {
     result = sem.type_none;
@@ -1486,7 +1483,7 @@ void sem_ir(Block* block, Ir* ir) {
       Range one = ranges_limits(pair.one);
       Range two = ranges_limits(pair.two);
       Range range = { one.lo+two.lo, one.hi+two.hi };
-      result = sem_ranges_reflow(block, ir, &new_ir, range, types);
+      result = sem_ranges_reflow(block, ir, range, types);
     }
     else {
       assert(0);
@@ -1499,7 +1496,7 @@ void sem_ir(Block* block, Ir* ir) {
       Range one = ranges_limits(pair.one);
       Range two = ranges_limits(pair.two);
       Range range = { one.lo-two.lo, one.hi-two.hi };
-      result = sem_ranges_reflow(block, ir, &new_ir, range, types);
+      result = sem_ranges_reflow(block, ir, range, types);
     }
     else {
       assert(0);
@@ -1517,7 +1514,7 @@ void sem_ir(Block* block, Ir* ir) {
       I64 d = one.hi * two.hi;
       // TODO: check that this works, even with undeflow/overflow
       Range range = { .lo = min(a, min(b, min(c, d))), .hi = max(a, max(b, max(c, d))) };
-      result = sem_ranges_reflow(block, ir, &new_ir, range, types);
+      result = sem_ranges_reflow(block, ir, range, types);
     }
     else {
       assert(0);
@@ -1843,8 +1840,7 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   default: assert(0);
   }
-  Ir* sem_ir = sem_push_ir(block, new_ir);
-  type_of_ir_put(sem_ir, result);
+  sem_push_ir(block, ir);
   type_of_ir_put(ir, result);
 }
 
