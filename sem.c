@@ -1432,6 +1432,14 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
   else {
     if (type_is_subtype(block, type, var->declared)) {
       if (type->kind == Type_Kind_record) {
+        // FIX: think
+        for (I32 i = 0; i < type->record->length; i++) {
+          Field field = type_record_get_by_position(block, type->record, i);
+          Ir* int_ir = irgen_push_int(i);
+          Ir* offset = irgen_push_position_offset(store->binary.one, int_ir);
+          Ir* at = irgen_push_unary(Ir_Kind_load, offset);
+          sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
+        }
         for (I32 i = 0; i < type->record->length; i++) {
           Field field = type_record_get_by_position(block, type->record, i);
           Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
@@ -1442,6 +1450,7 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
         if (type->bits_size != var->declared->bits_size) {
           store->binary.two = sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
           type = type_of_ir(store->binary.two);
+          type->size_defined = var->declared->size_defined;
         }
         var->block_types[block->id] = type;
       }
@@ -2238,6 +2247,9 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x", "");
+  test("a:(x:I32; y:I32); a = (1; 2); a.x", "");
+  // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
   // test("a: 8'bits 0..100 = 100; a+10", "");
   // test("a: I32 = 3; a+a", "");
@@ -2288,8 +2300,6 @@ void sem_test(void) {
   // test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
   // test("if 1\\2 do 3 el 4;", "");
-  // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x", "");
-  // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a:I32; b:@I32; b = @a; b@ = 1", "");
   // test("a:I32; foo:() -> a;", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
