@@ -677,6 +677,8 @@ void irgen_block_link_jump_to_block(Jump* jump, Block* block) {
 Block* irgen_block_leave(void) {
   Block* block = irgen_block_top();
   block->irs = irgen_irs_perm(block->irs);
+  // NOTE: per each ir only one cast is allowed possible
+  fa_init(irgen.perm_arena, block->sem_irs, block->irs->length*2);
   return block;
 }
 
@@ -813,6 +815,7 @@ Fun* irgen_fun_leave(void) {
   irgen_block_leave();
   fa_extend(irgen.temp_block_arena, fun->blocks, fun->ret_block);
   fun->ret_block->irs = irgen_irs_perm(fun->ret_block->irs);
+  fa_init(irgen.perm_arena, fun->ret_block->sem_irs, fun->ret_block->irs->length*2);
   fun->blocks = irgen_blocks_perm(fun->blocks);
   fun->vars = irgen_vars_perm(fun->vars);
   for (I32 i = 0; i < fun->vars->length; i++) {
@@ -1243,21 +1246,40 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 }
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Umi source_length    = strlen(source) + 32;
-  Arena arena          = arena_init(KB(2) * source_length + KB(64));
-                         str_init(&arena, 2*source_length);
-  Tokens tokens        = lex_source(&arena, source);
-  Ast_Block ast        = parse_tokens(&arena, tokens);
-  Funs funs            = irgen_ast(&arena, ast, source_length);
-  C8* buffer           = arena_push(&arena, KB(1) * source_length);
-  Cstr result          = cstr_from_funs(funs, buffer);
-  test_at_source(result, expected, file_name, line, source);
+  Cstr builtin        = file_read("builtin.i");
+  I32  builtin_length = strlen(builtin);
+  I32  source_length  = strlen(source);
+  I32  length         = source_length + builtin_length + 32;
+
+  Arena arena         = arena_init(KB(4) * length);
+                        str_init(&arena, 2*length);
+
+  Tokens builtin_tokens = lex_source(&arena, builtin);
+  Ast_Block ast         = parse_tokens(&arena, builtin_tokens);
+
+  Tokens source_tokens = lex_source(&arena, source);
+  Ast_Block source_ast = parse_tokens(&arena, source_tokens);
+
+  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
+  node->block    = source_ast;
+
+  fa_init(&arena, ast.list, 1);
+  fa_add(ast.list, node);
+
+  Funs funs            = irgen_ast(&arena, ast, length);
+  {
+    C8* buffer           = arena_push(&arena, KB(1) * source_length);
+    Cstr result          = cstr_from_funs(funs, buffer);
+    test_at_source(result, expected, file_name, line, source);
+  }
   arena_free(&arena);
+
 }
 
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");

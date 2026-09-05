@@ -395,7 +395,6 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_gt: case Ast_Kind_ge:
     return 6;
   case Ast_Kind_join:
-  case Ast_Kind_range:
     return 8;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -413,6 +412,8 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 20;
+  case Ast_Kind_range:
+    return 22;
   default :
     return -1;
   }
@@ -429,7 +430,6 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_gt: case Ast_Kind_ge:
     return 5;
   case Ast_Kind_join:
-  case Ast_Kind_range:
     return 7;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -443,6 +443,8 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 19;
+  case Ast_Kind_range:
+    return 21;
   default :
     return -1;
   }

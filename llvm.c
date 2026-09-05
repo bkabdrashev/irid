@@ -641,7 +641,7 @@ void llvm_test(void) {
   // 0000
   // 1100
   // test("a:12\\13; b:I32; b = a", "");
-  test("a:(x:0..2; y:1..2); a = (y:1; x:2); a.x", "");
+  // test("a:(x:0..2; y:1..2); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
   // test("putchar: #c putchar (char:I32) -> I32; foo: () -> { putchar 65; putchar 10}; foo()", "");

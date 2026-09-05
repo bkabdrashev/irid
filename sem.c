@@ -218,8 +218,8 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
       }
       string_builder_push_cstr(&sb, "|");
 
-      for (I32 i = 0; i < block->irs->length; i++) {
-        Ir* ir = block->irs->base[i];
+      for (I32 i = 0; i < block->sem_irs->length; i++) {
+        Ir* ir = block->sem_irs->base[i];
         string_builder_push_cstr(&sb, "\n");
         string_builder_push_indent(&sb, 2);
         string_builder_push_ir(&sb, ir);
@@ -548,9 +548,9 @@ Type* type_ranges(Ranges* ranges) {
 
     I64 min = ranges_min(ranges);
     I64 max = ranges_max(ranges);
-    I32 bit_size = bits_needed(min, max);
-    new_type->bits_align = align_up(bit_size, 8);
-    new_type->bits_size  = bit_size;
+    I16 bits_size = bits_needed(min, max);
+    new_type->bits_align = align_up(bits_size, 8);
+    new_type->bits_size  = bits_size;
   }
 
   return new_type;
@@ -585,11 +585,12 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
 
 Type* sem_ranges_reflow(Block* block, Ir* old_ir, Ir* new_ir, Range range, Type_Pair types) {
   Type* result = sem.type_none;
-  I16 bit_size = bits_needed(range.lo, range.hi);
+  I16 bits_size = bits_needed(range.lo, range.hi);
   I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
   if (types.one->size_defined || types.two->size_defined) {
     if (!types.two->size_defined) {
-      if (types.one->bits_size > types.two->bits_size) {
+      if (types.one->bits_size >= types.two->bits_size) {
+        // FIX: old_ir->binary.two is wrong. In fact every operand of a Ir is wrong
         new_ir->binary.two = sem_push_int_extend(block, old_ir->binary.two, types.one->bits_size);
       }
       else {
@@ -597,7 +598,7 @@ Type* sem_ranges_reflow(Block* block, Ir* old_ir, Ir* new_ir, Range range, Type_
       }
     }
     if (!types.one->size_defined) {
-      if (types.two->bits_size > types.one->bits_size) {
+      if (types.two->bits_size >= types.one->bits_size) {
         new_ir->binary.one = sem_push_int_extend(block, old_ir->binary.one, types.two->bits_size);
       }
       else {
@@ -606,13 +607,16 @@ Type* sem_ranges_reflow(Block* block, Ir* old_ir, Ir* new_ir, Range range, Type_
     }
     Ranges* ranges = ranges_reflow(range, res_bits_size);
     result = type_ranges(ranges);
+    result->size_defined = true;
+    result->bits_size = res_bits_size;
+    result->bits_align = align_up(res_bits_size, 8);
   }
   else {
-    if (bit_size > types.one->bits_size) {
-      new_ir->binary.one = sem_push_int_extend(block, old_ir->binary.one, bit_size);
+    if (bits_size > types.one->bits_size) {
+      new_ir->binary.one = sem_push_int_extend(block, old_ir->binary.one, bits_size);
     }
-    if (bit_size > types.two->bits_size) {
-      new_ir->binary.two = sem_push_int_extend(block, old_ir->binary.two, bit_size);
+    if (bits_size > types.two->bits_size) {
+      new_ir->binary.two = sem_push_int_extend(block, old_ir->binary.two, bits_size);
     }
     result = type_range(range.lo, range.hi);
   }
@@ -1401,10 +1405,10 @@ void sem_record_declare_fields(Var* var, Type* type) {
   }
   type->bits_size = align_up(type->bits_size, type->bits_align);
   type->record->offsets_all_equal = true;
-  I16 last_field_bit_size = type->bits_size - type->record->offsets[type->record->length-1];
+  I16 last_field_bits_size = type->bits_size - type->record->offsets[type->record->length-1];
   for (I32 i = 0; i+2 < type->record->length; i++) {
-    I16 field_bit_size = type->record->offsets[i+1] - type->record->offsets[i];
-    if (last_field_bit_size != field_bit_size) {
+    I16 field_bits_size = type->record->offsets[i+1] - type->record->offsets[i];
+    if (last_field_bits_size != field_bits_size) {
       type->record->offsets_all_equal = false;
     }
   }
@@ -1841,6 +1845,7 @@ void sem_ir(Block* block, Ir* ir) {
   }
   Ir* sem_ir = sem_push_ir(block, new_ir);
   type_of_ir_put(sem_ir, result);
+  type_of_ir_put(ir, result);
 }
 
 void sem_block(Block* block) {
@@ -2096,7 +2101,7 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.sccid = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
-  sem.type_of_irs = hash_map_init(arena, irgen.irs.length);
+  sem.type_of_irs = hash_map_init(arena, irgen.irs.length*3);
   sem.types.base = arena_push(arena, irgen.irs.length * sizeof(Type));
   sem.types.length = 0;
 
@@ -2154,6 +2159,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
+  test("a: 8'bits 0..100 = 100; a+10", "");
   // test("a: I32 = 3; a+a", "");
   // test("foo:#c foo () -> 1", "");
   // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
