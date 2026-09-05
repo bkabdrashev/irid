@@ -92,7 +92,7 @@ Field type_record_get_by_name(Block* block, Record* record, Str* name);
 Field type_record_get_by_position(Block* block, Record* record, I32 pos);
 Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
-Type* type_join(Type* one, Type* two);
+Type* type_join(Block* block, Type* one, Type* two);
 Type* type_meet(Type* one, Type* two);
 Type* type_pointer_declared(Pointer* pointer);
 Type* sem_ensure_declared(Var* var);
@@ -842,7 +842,7 @@ Type* type_meet(Type* one, Type* two) {
   return result;
 }
 
-Type* type_join(Type* one, Type* two) {
+Type* type_join(Block* block, Type* one, Type* two) {
   Type* result = 0;
   if (one->kind == Type_Kind_none) {
     result = two;
@@ -857,9 +857,16 @@ Type* type_join(Type* one, Type* two) {
     result = one;
   }
   else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
-    Type*    declared = type_join(one->pointer->declared, two->pointer->declared);
-    Hash_Set stack    = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
-    result = type_ptr(declared, stack);
+    Type* one_declared = type_pointer_declared(one->pointer);
+    Type* two_declared = type_pointer_declared(two->pointer);
+    if (type_is_same(block, one_declared, two_declared)) {
+      Type*    declared = type_join(block, one_declared, two_declared);
+      Hash_Set stack    = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
+      result = type_ptr(declared, stack);
+    }
+    else {
+      assert(0);
+    }
   }
   else {
     assert(0);
@@ -1377,7 +1384,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
           if (jump.to_block == block) {
             sem_narrow_nez(&tasks, pred);
             Type* pred_type = type_of_var_rec(pred, var);
-            type = type_join(type, pred_type);
+            type = type_join(block, type, pred_type);
             sem_unnarrow(tasks);
             tasks.length = 0;
           }
@@ -1387,7 +1394,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
           if (jump.to_block == block) {
             sem_narrow_eqz(&tasks, pred);
             Type* pred_type = type_of_var_rec(pred, var);
-            type = type_join(type, pred_type);
+            type = type_join(pred, type, pred_type);
             sem_unnarrow(tasks);
             tasks.length = 0;
           }
@@ -1395,7 +1402,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
       }
       else if (pred->kind == Block_Kind_jump) {
         Type* pred_type = type_of_var_rec(pred, var);
-        type = type_join(type, pred_type);
+        type = type_join(pred, type, pred_type);
       }
     }
   }
@@ -1413,13 +1420,13 @@ Type* type_of_var(Block* block, Var* var) {
   return type;
 }
 
-void type_of_var_put(Block* block, Var* var, Type* type) {
+void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
   if (var->kind == Var_Kind_constant) {
     printf("cannot assign a constant '%s'\n", var->name->base);
     assert(0);
   }
   if (!var->declared) {
-    var->declared = type_join(var->declared, type);
+    var->declared = type_join(block, var->declared, type);
     var->block_types[block->id] = type;
   }
   else {
@@ -1428,13 +1435,14 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
         for (I32 i = 0; i < type->record->length; i++) {
           Field field = type_record_get_by_position(block, type->record, i);
           Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
-          type_of_var_put(block, var_field.var, field.assigned_type);
+          type_of_var_put(block, store, var_field.var, field.assigned_type);
         }
       }
-      else {
-        type->size_defined = var->declared->size_defined;
-        type->bits_size = var->declared->bits_size;
-        type->bits_align = var->declared->bits_align;
+      else if (type->kind == Type_Kind_int) {
+        if (type->bits_size != var->declared->bits_size) {
+          store->binary.two = sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
+          type = type_of_ir(store->binary.two);
+        }
         var->block_types[block->id] = type;
       }
     }
@@ -1550,7 +1558,7 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_join: {
     Type_Pair pair = type_of_ir_binary(ir);
-    result = type_join(pair.one, pair.two);
+    result = type_join(block, pair.one, pair.two);
   } break;
   case Ir_Kind_add: {
     Type_Pair types = type_of_ir_binary(ir);
@@ -1790,7 +1798,7 @@ void sem_ir(Block* block, Ir* ir) {
       result = type_of_var(block, stack.list[0]);
       for (I32 i = 1; i < stack.len; i++) {
         Type* type = type_of_var(block, stack.list[i]);
-        result = type_join(result, type);
+        result = type_join(block, result, type);
       }
     }
     else {
@@ -1806,14 +1814,14 @@ void sem_ir(Block* block, Ir* ir) {
       assert(stack.len >= 1);
       if (stack.len == 1) {
         Var* var = stack.list[0];
-        type_of_var_put(block, var, rhs);
+        type_of_var_put(block, ir, var, rhs);
       }
       else {
         for (I32 i = 0; i < stack.len; i++) {
           Var* var = stack.list[i];
           Type* old_type = type_of_var(block, var);
-          Type* new_type = type_join(old_type, rhs);
-          type_of_var_put(block, var, new_type);
+          Type* new_type = type_join(block, old_type, rhs);
+          type_of_var_put(block, ir, var, new_type);
         }
       }
     }
@@ -2238,9 +2246,11 @@ void sem_test(void) {
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
   // test("a:[2]I32; a[0] = 1; a[0] + a[1]", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
+  // test("a:I32 = 70; c:@a\\@a; a + c@", "");
+  // test("a:I32 = 70; b:I32 = 50; a+b; c:@a\\@b; c@ = 30; a+b", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
-  test("a:(x:I32; y:I32); a.x = 1; a.x + a.x", "");
+  // test("a:(x:I32; y:I32); a.x = 1; a.x + a.x", "");
   // test("a: (x:I32; y:I32); b:(x:I32; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
   // test("a: (x:1\\2; y:I32); b:(x:2\\3; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x = 2", "");
   // test("a: (x:I32; y:I32); b:(y:I32; x:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
@@ -2263,7 +2273,7 @@ void sem_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
-  // test("a:I32; b: I32; a = b; a", "");
+  // test("a:I32; b: B8; a = b; a", "");
   // test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
   // test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
   // test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
