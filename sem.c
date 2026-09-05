@@ -99,12 +99,14 @@ Type* sem_ensure_declared(Var* var);
 
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
-  if (type->size_defined) {
-    string_builder_push_cstr(sb, "*");
-  }
-  string_builder_push_cstr(sb, "bits(");
   string_builder_push_i64(sb, type->bits_size);
-  string_builder_push_cstr(sb, ", ");
+  if (type->size_defined) {
+    string_builder_push_cstr(sb, "'");
+  }
+  else {
+    string_builder_push_cstr(sb, " ");
+  }
+  string_builder_push_cstr(sb, "bits ");
   switch (type->kind) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "none");
@@ -187,7 +189,6 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, ")");
   } break;
   }
-  string_builder_push_cstr(sb, ")");
 }
 
 Cstr cstr_from_sem(Funs funs, C8* buffer) {
@@ -523,6 +524,81 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
   Subtype_Visited visited = {0};
   visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
   B8 result = type_is_subtype_rec(block, one, two, &visited);
+  arena_release_mark(sem.temp_arena, visited.base);
+  return result;
+}
+
+B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
+  if (one->kind != two->kind) {
+    return false;
+  }
+  switch (one->kind) {
+  case Type_Kind_none: {
+    return true;
+  } break;
+  case Type_Kind_int: {
+    B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
+    return size_equal;
+  } break;
+  case Type_Kind_record: {
+    if (one->record->length != two->record->length) {
+      assert(0);
+      return false;
+    }
+    for (I32 i = 0; i < one->record->length; i++) {
+      Field field_one = type_record_get_by_position(block, one->record, i);
+      Field field_two;
+      if (field_one.name) {
+        field_two = type_record_get_by_name(block, two->record, field_one.name);
+      }
+      else {
+        field_two = type_record_get_by_position(block, two->record, i);
+      }
+      if (!type_is_same_rec(block, field_one.assigned_type, field_two.declared_type, visited)) {
+        assert(0);
+        return false;
+      }
+    }
+    return true;
+  } break;
+  case Type_Kind_ptr: {
+    if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
+      return true;
+    }
+    subtype_visited_push(visited, one->pointer, two->pointer);
+    // TODO: need to check whether pointer is global/stack/
+    if (two->pointer->stack.len > 0) {
+      for (I32 i = 0; i < one->pointer->stack.len; i++) {
+        Var* var = one->pointer->stack.list[i];
+        if (!hash_set_exists(&two->pointer->stack, var)) {
+          assert(0);
+          return false;
+        }
+      }
+    }
+    Type* one_declared = type_pointer_declared(one->pointer);
+    Type* two_declared = type_pointer_declared(two->pointer);
+    if (one_declared && two_declared) {
+      if (!type_is_same_rec(block, one_declared, two_declared, visited)) {
+        assert(0);
+        return false;
+      }
+    }
+    return true;
+  } break;
+  case Type_Kind_fun: {
+    assert(0);
+    return false;
+  } break;
+  }
+  assert(0);
+  return false;
+}
+
+B8 type_is_same(Block* block, Type* one, Type* two) {
+  Subtype_Visited visited = {0};
+  visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
+  B8 result = type_is_same_rec(block, one, two, &visited);
   arena_release_mark(sem.temp_arena, visited.base);
   return result;
 }
@@ -1342,7 +1418,7 @@ void type_of_var_put(Block* block, Var* var, Type* type) {
     printf("cannot assign a constant '%s'\n", var->name->base);
     assert(0);
   }
-  if (!var->declared_ir) {
+  if (!var->declared) {
     var->declared = type_join(var->declared, type);
     var->block_types[block->id] = type;
   }
@@ -2155,7 +2231,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
-  test("a: 8'bits 0..100 = 100; a+10", "");
+  // test("a: 8'bits 0..100 = 100; a+10", "");
   // test("a: I32 = 3; a+a", "");
   // test("foo:#c foo () -> 1", "");
   // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
@@ -2164,7 +2240,7 @@ void sem_test(void) {
   // test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
-  // test("a:(x:I32; y:I32); a.x = 1; a.x", "");
+  test("a:(x:I32; y:I32); a.x = 1; a.x + a.x", "");
   // test("a: (x:I32; y:I32); b:(x:I32; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
   // test("a: (x:1\\2; y:I32); b:(x:2\\3; y:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x = 2", "");
   // test("a: (x:I32; y:I32); b:(y:I32; x:I32); c:@a\\@b; a = (x:1; y:2); b = (x:3; y:4); c@.x", "");
