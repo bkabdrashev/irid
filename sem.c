@@ -1461,6 +1461,7 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
     var->block_types[block->id] = type;
   }
   else {
+    // TODO: refactor this crap
     if (type_is_subtype(block, type, var->declared)) {
       if (type->kind == Type_Kind_record) {
         if (type_is_same(block, type, var->declared)) {
