@@ -74,7 +74,8 @@ struct Record {
   I32      length;
   B8       offsets_all_equal;
   B8       is_array;
-  Ir**     declared;
+  Ir**     irs;
+  Type**   types;
   I32*     offsets;
   Str**    names;
   Var**    vars;
@@ -294,8 +295,8 @@ Field record_get_by_position(Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
   field.position = position;
-  field.declared = record->declared[position];
-  return field;
+  field.declared = record->irs[position];
+  return types;
 }
 
 Field record_get_by_name(Record* record, Str* name) {
@@ -642,14 +643,14 @@ Record* record_new(I32 length) {
   Record* new_record = &new(irgen.records);
   new_record->length   = length;
   new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
-  new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
+  new_record->irs = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
+  new_record->offsets  typesarena_push_zero(irgen.perm_arena, length*sizeof(Type*));
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
   return new_record;
 }
 
 void record_push_declare_position(Record* record, I32 position, Ir* value) {
-  record->declared[position] = value;
+  record->declared_irs[position] = valuetypes
 }
 void record_push_declare_name(Record* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);

@@ -169,7 +169,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
         field.assigned_type = type_of_var(block, var);
       }
       else {
-        field.assigned_type = type_of_ir(record->declared[pos]);
+        field.assigned_type = type_of_ir(record->irs[pos]);
       }
 
       if (field.name) {
@@ -498,7 +498,7 @@ B8 type_is_const(Type* type) {
   } break;
   case Type_Kind_record: {
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_declared = type_of_ir(type->record->declared[i]);
+      Type* field_declared = type_of_ir(type->record->irs[i]);
       if (field_declared) {
         if (!type_is_const(field_declared)) {
           return false;
@@ -766,16 +766,21 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
 Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   Field field = {};
   field.name     = record->names[position];
-  field.declared = record->declared[position];
+  field.declared = record->irs[position];
   if (record->vars) {
     field.var      = record->vars[position];
     field.declared_type = field.var->declared;
     field.assigned_type = type_of_var(block, field.var);
   }
-  else {
+  else if (record->irs) {
     field.var = 0;
     field.declared_type = type_of_ir(field.declared);
     field.assigned_type = type_of_ir(field.declared);
+  }
+  else {
+    field.var = 0;
+    field.declared_type = type_of_ir(field.declared);
+    field.assigned_type = record->types[position];
   }
   field.offset   = record->offsets[position];
   field.position = position;
@@ -809,6 +814,23 @@ Type* type_record(Record* record) {
     new_type->kind = Type_Kind_none;
   }
   else {
+    for (I32 i = 0; i < record->length; i++) {
+      Type* field_type = type_of_ir(record->irs[i]);
+      new_type->bits_align = max(new_type->bits_align, field_type->bits_align);
+      new_type->bits_size = align_up(new_type->bits_size, field_type->bits_align);
+      new_type->record->types[i] = field_type;
+      new_type->record->offsets[i] = new_type->bits_size;
+      new_type->bits_size += field_type->bits_size;
+    }
+    new_type->bits_size = align_up(new_type->bits_size, new_type->bits_align);
+    new_type->record->offsets_all_equal = true;
+    I16 last_field_bits_size = new_type->bits_size - new_type->record->offsets[new_type->record->length-1];
+    for (I32 i = 0; i+2 < new_type->record->length; i++) {
+      I16 field_bits_size = new_type->record->offsets[i+1] - new_type->record->offsets[i];
+      if (last_field_bits_size != field_bits_size) {
+        new_type->record->offsets_all_equal = false;
+      }
+    }
     new_type->kind = Type_Kind_record;
     new_type->record = record;
   }
@@ -1420,6 +1442,14 @@ Type* type_of_var(Block* block, Var* var) {
   return type;
 }
 
+void type_auto_cast(Type* one, Type* two) {
+  assert(one->kind == two->kind);
+  switch (one->kind) {
+  case Type_Kind_int: {
+  } break;
+  }
+}
+
 void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
   if (var->kind == Var_Kind_constant) {
     printf("cannot assign a constant '%s'\n", var->name->base);
@@ -1432,22 +1462,37 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
   else {
     if (type_is_subtype(block, type, var->declared)) {
       if (type->kind == Type_Kind_record) {
-        // FIX: think
-        for (I32 i = 0; i < type->record->length; i++) {
-          Field field = type_record_get_by_position(block, type->record, i);
-          Ir* int_ir = irgen_push_int(i);
-          Ir* offset = irgen_push_position_offset(store->binary.one, int_ir);
-          Ir* at = irgen_push_unary(Ir_Kind_load, offset);
-          sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
+        if (type_is_same(block, type, var->declared)) {
+          for (I32 i = 0; i < type->record->length; i++) {
+            Field field = type_record_get_by_position(block, type->record, i);
+            Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
+            type_of_var_put(block, 0, var_field.var, field.assigned_type);
+          }
         }
-        for (I32 i = 0; i < type->record->length; i++) {
-          Field field = type_record_get_by_position(block, type->record, i);
-          Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
-          type_of_var_put(block, store, var_field.var, field.assigned_type);
+        else {
+          I32 length = type->record->length;
+          Record* new_record = &new(irgen.records);
+          new_record->length   = length;
+          new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+          new_record->irs      = 0;
+          new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+          new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+          new_record->position_from_name = hash_map_init(sem.perm_arena, length);
+          for (I32 i = 0; i < length; i++) {
+            Field field = type_record_get_by_position(block, type->record, i);
+            Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
+            if (type_is_same(block, field.assigned_type, var_field.var->declared)) {
+              new_record->types[i] = field.assigned_type;
+            }
+            else {
+              new_record->types[i] = type_auto_cast(field.assigned_type, var_field.var->declared);
+            }
+            // new_record->declared_ir[i] = ir->binary.two;
+          }
         }
       }
       else if (type->kind == Type_Kind_int) {
-        if (type->bits_size != var->declared->bits_size) {
+        if (type_is_same(block, type, var->declared)) {
           store->binary.two = sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
           type = type_of_ir(store->binary.two);
           type->size_defined = var->declared->size_defined;
@@ -1478,7 +1523,8 @@ void sem_record_declare_fields(Var* var, Type* type) {
     type->record->vars[i] = field_var;
     field_var->name = type->record->names[i];
     field_var->parent = var;
-    Type* field_type = type_of_ir(type->record->declared[i]);
+    Type* field_type = type_of_ir(type->record->irs[i]);
+    type->record->types[i] = field_type;
     field_var->declared = field_type;
     field_var->state = Var_State_resolved;
     sem_record_declare_fields(field_var, field_type);
@@ -1505,7 +1551,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
   }
 
   for (I32 i = 0; i < type->record->length; i++) {
-    type->record->vars[i]->block_types = arena_push_zero(irgen.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    type->record->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
   }
 }
 
@@ -1688,12 +1734,12 @@ void sem_ir(Block* block, Ir* ir) {
         Record* new_record = &new(irgen.records);
         new_record->is_array = true;
         new_record->length   = length;
-        new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
-        new_record->declared = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
-        new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
-        new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
+        new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+        new_record->irs      = arena_push_zero(sem.perm_arena, length*sizeof(Ir*));
+        new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+        new_record->position_from_name = hash_map_init(sem.perm_arena, length);
         for (I32 i = 0; i < length; i++) {
-          new_record->declared[i] = ir->binary.two;
+          new_record->irs[i] = ir->binary.two;
         }
         result = type_record(new_record);
       }
@@ -1720,7 +1766,7 @@ void sem_ir(Block* block, Ir* ir) {
           hash_set_put(&stack, var->declared->record->vars[0]);
         }
         Var* var = of_type->pointer->stack.list[0];
-        Type* declared = type_of_ir(var->declared->record->declared[0]);
+        Type* declared = type_of_ir(var->declared->record->irs[0]);
         result = type_ptr(declared, stack);
       }
       else {
