@@ -542,7 +542,6 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
   } break;
   case Type_Kind_record: {
     if (one->record->length != two->record->length) {
-      assert(0);
       return false;
     }
     for (I32 i = 0; i < one->record->length; i++) {
@@ -555,7 +554,6 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
         field_two = type_record_get_by_position(block, two->record, i);
       }
       if (!type_is_same_rec(block, field_one.assigned_type, field_two.declared_type, visited)) {
-        assert(0);
         return false;
       }
     }
@@ -571,7 +569,6 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
       for (I32 i = 0; i < one->pointer->stack.len; i++) {
         Var* var = one->pointer->stack.list[i];
         if (!hash_set_exists(&two->pointer->stack, var)) {
-          assert(0);
           return false;
         }
       }
@@ -580,18 +577,15 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
     Type* two_declared = type_pointer_declared(two->pointer);
     if (one_declared && two_declared) {
       if (!type_is_same_rec(block, one_declared, two_declared, visited)) {
-        assert(0);
         return false;
       }
     }
     return true;
   } break;
   case Type_Kind_fun: {
-    assert(0);
     return false;
   } break;
   }
-  assert(0);
   return false;
 }
 
@@ -814,6 +808,8 @@ Type* type_record(Record* record) {
     new_type->kind = Type_Kind_none;
   }
   else {
+    new_type->kind = Type_Kind_record;
+    new_type->record = record;
     for (I32 i = 0; i < record->length; i++) {
       Type* field_type = type_of_ir(record->irs[i]);
       new_type->bits_align = max(new_type->bits_align, field_type->bits_align);
@@ -831,8 +827,6 @@ Type* type_record(Record* record) {
         new_type->record->offsets_all_equal = false;
       }
     }
-    new_type->kind = Type_Kind_record;
-    new_type->record = record;
   }
   return new_type;
 }
@@ -1442,12 +1436,19 @@ Type* type_of_var(Block* block, Var* var) {
   return type;
 }
 
-void type_auto_cast(Type* one, Type* two) {
-  assert(one->kind == two->kind);
-  switch (one->kind) {
+Type* type_auto_cast(Type* from, Type* to) {
+  assert(from->kind == to->kind);
+  Type* new_type = &new(sem.types);
+  switch (from->kind) {
   case Type_Kind_int: {
+    *new_type = *from;
+    new_type->size_defined = to->size_defined;
+    new_type->bits_size = to->bits_size;
+    new_type->bits_align = align_up(to->bits_size, 8);
   } break;
+  default: assert(0);
   }
+  return new_type;
 }
 
 void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
@@ -1487,12 +1488,12 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
             else {
               new_record->types[i] = type_auto_cast(field.assigned_type, var_field.var->declared);
             }
-            // new_record->declared_ir[i] = ir->binary.two;
+            type_of_var_put(block, 0, var_field.var, new_record->types[i]);
           }
         }
       }
       else if (type->kind == Type_Kind_int) {
-        if (type_is_same(block, type, var->declared)) {
+        if (!type_is_same(block, type, var->declared)) {
           store->binary.two = sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
           type = type_of_ir(store->binary.two);
           type->size_defined = var->declared->size_defined;
@@ -2294,7 +2295,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x", "");
-  test("a:(x:I32; y:I32); a = (1; 2); a.x", "");
+  test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
   // test("a: 8'bits 0..100 = 100; a+10", "");
