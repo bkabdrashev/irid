@@ -45,6 +45,7 @@ typedef enum Ir_Kind {
   Ir_Kind_arg  = 137,
 
   Ir_Kind_int_extend = 140,
+  Ir_Kind_auto_cast  = 141,
 
 
 } Ir_Kind;
@@ -68,6 +69,9 @@ struct Position_Offset { Ir* of; Ir* at; };
 
 typedef struct Int_Extend Int_Extend;
 struct Int_Extend { Ir* value; I16 bits; };
+
+typedef struct Auto_Cast Auto_Cast;
+struct Auto_Cast { Ir* value; };
 
 typedef struct Record Record;
 struct Record {
@@ -126,6 +130,7 @@ struct Ir {
     Name_Offset     name_offset;
     Declare         declare;
     Int_Extend      int_extend;
+    Auto_Cast       auto_cast;
   };
 };
 
@@ -400,6 +405,10 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_irid(sb, ir->int_extend.value);
     string_builder_push_cstr(sb, " to ");
     string_builder_push_i64(sb, ir->int_extend.bits);
+  break;
+  case Ir_Kind_auto_cast:
+    string_builder_push_cstr(sb, "auto cast ");
+    string_builder_push_irid(sb, ir->auto_cast.value);
   break;
   case Ir_Kind_record:    string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < ir->record->length; i++) {

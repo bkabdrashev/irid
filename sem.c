@@ -168,8 +168,11 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
         Var* var = record->vars[pos];
         field.assigned_type = type_of_var(block, var);
       }
-      else {
+      else if (record->irs) {
         field.assigned_type = type_of_ir(record->irs[pos]);
+      }
+      else {
+        field.assigned_type = record->types[pos];
       }
 
       if (field.name) {
@@ -537,7 +540,7 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
     return true;
   } break;
   case Type_Kind_int: {
-    B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
+    B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align && one->size_defined && two->size_defined;
     return size_equal;
   } break;
   case Type_Kind_record: {
@@ -652,6 +655,15 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
   return sem_ir;
 }
 
+Ir* sem_push_auto_cast(Block* block, Ir* value, Type* type) {
+  Ir new_ir = { Ir_Kind_auto_cast, .auto_cast = { .value=value } };
+  Ir* sem_ir = &new(irgen.irs);
+  *sem_ir = new_ir;
+  sem_push_ir(block, sem_ir);
+  type_of_ir_put(sem_ir, type);
+  return sem_ir;
+}
+
 Type* sem_ranges_reflow(Block* block, Ir* ir, Range range, Type_Pair types) {
   Type* result = sem.type_none;
   I16 bits_size = bits_needed(range.lo, range.hi);
@@ -759,19 +771,21 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
 
 Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   Field field = {};
-  field.name     = record->names[position];
-  field.declared = record->irs[position];
+  field.name  = record->names[position];
   if (record->vars) {
-    field.var      = record->vars[position];
+    field.declared = record->irs[position];
+    field.var = record->vars[position];
     field.declared_type = field.var->declared;
     field.assigned_type = type_of_var(block, field.var);
   }
   else if (record->irs) {
+    field.declared = record->irs[position];
     field.var = 0;
     field.declared_type = type_of_ir(field.declared);
     field.assigned_type = type_of_ir(field.declared);
   }
   else {
+    field.declared = irgen.ir_none;
     field.var = 0;
     field.declared_type = type_of_ir(field.declared);
     field.assigned_type = record->types[position];
@@ -810,11 +824,16 @@ Type* type_record(Record* record) {
   else {
     new_type->kind = Type_Kind_record;
     new_type->record = record;
+    if (record->irs) {
+      for (I32 i = 0; i < record->length; i++) {
+        Type* field_type = type_of_ir(record->irs[i]);
+        new_type->record->types[i] = field_type;
+      }
+    }
     for (I32 i = 0; i < record->length; i++) {
-      Type* field_type = type_of_ir(record->irs[i]);
+      Type* field_type = new_type->record->types[i];
       new_type->bits_align = max(new_type->bits_align, field_type->bits_align);
       new_type->bits_size = align_up(new_type->bits_size, field_type->bits_align);
-      new_type->record->types[i] = field_type;
       new_type->record->offsets[i] = new_type->bits_size;
       new_type->bits_size += field_type->bits_size;
     }
@@ -1436,8 +1455,11 @@ Type* type_of_var(Block* block, Var* var) {
   return type;
 }
 
-Type* type_auto_cast(Type* from, Type* to) {
+Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
   assert(from->kind == to->kind);
+  if (type_is_same(block, from, to)) {
+    return from;
+  }
   Type* new_type = &new(sem.types);
   switch (from->kind) {
   case Type_Kind_int: {
@@ -1445,6 +1467,41 @@ Type* type_auto_cast(Type* from, Type* to) {
     new_type->size_defined = to->size_defined;
     new_type->bits_size = to->bits_size;
     new_type->bits_align = align_up(to->bits_size, 8);
+
+    if (store) {
+      store->binary.two = sem_push_int_extend(block, store->binary.two, to->bits_size);
+    }
+  } break;
+  case Type_Kind_record: {
+    I32 length = from->record->length;
+    Record* new_record = &new(irgen.records);
+    new_record->length   = length;
+    new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+    new_record->irs      = 0;
+    new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+    new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+    new_record->position_from_name = hash_map_init(sem.perm_arena, length);
+    for (I32 i = 0; i < length; i++) {
+      Field field = type_record_get_by_position(block, from->record, i);
+      Field var_field;
+      if (field.name) {
+        var_field = type_record_get_by_name(block, to->record, field.name);
+        new_record->names[i] = var_field.name;
+        hash_map_put_i32(&new_record->position_from_name, var_field.name, i);
+      }
+      else {
+        var_field = type_record_get_by_position(block, to->record, i);
+      }
+      if (type_is_same(block, field.assigned_type, var_field.var->declared)) {
+        new_record->types[i] = field.assigned_type;
+      }
+      else {
+        new_record->types[i] = type_auto_cast(block, 0, field.assigned_type, var_field.var->declared);
+      }
+    }
+    new_type = type_record(new_record);
+
+    store->binary.two = sem_push_auto_cast(block, store->binary.two, new_type);
   } break;
   default: assert(0);
   }
@@ -1461,46 +1518,24 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
     var->block_types[block->id] = type;
   }
   else {
-    // TODO: refactor this crap
     if (type_is_subtype(block, type, var->declared)) {
+      type = type_auto_cast(block, store, type, var->declared);
+
       if (type->kind == Type_Kind_record) {
-        if (type_is_same(block, type, var->declared)) {
-          for (I32 i = 0; i < type->record->length; i++) {
-            Field field = type_record_get_by_position(block, type->record, i);
-            Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
-            type_of_var_put(block, 0, var_field.var, field.assigned_type);
+        for (I32 i = 0; i < type->record->length; i++) {
+          Field field = type_record_get_by_position(block, type->record, i);
+          Field var_field;
+          if (field.name) {
+            var_field = type_record_get_by_name(block, var->declared->record, field.name);
           }
-        }
-        else {
-          I32 length = type->record->length;
-          Record* new_record = &new(irgen.records);
-          new_record->length   = length;
-          new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-          new_record->irs      = 0;
-          new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-          new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-          new_record->position_from_name = hash_map_init(sem.perm_arena, length);
-          for (I32 i = 0; i < length; i++) {
-            Field field = type_record_get_by_position(block, type->record, i);
-            Field var_field = type_record_get_by_name(block, var->declared->record, field.name);
-            if (type_is_same(block, field.assigned_type, var_field.var->declared)) {
-              new_record->types[i] = field.assigned_type;
-            }
-            else {
-              new_record->types[i] = type_auto_cast(field.assigned_type, var_field.var->declared);
-            }
-            type_of_var_put(block, 0, var_field.var, new_record->types[i]);
+          else {
+            var_field = type_record_get_by_position(block, var->declared->record, i);
           }
+          type_of_var_put(block, 0, var_field.var, field.assigned_type);
         }
       }
-      else if (type->kind == Type_Kind_int) {
-        if (!type_is_same(block, type, var->declared)) {
-          store->binary.two = sem_push_int_extend(block, store->binary.two, var->declared->bits_size);
-          type = type_of_ir(store->binary.two);
-          type->size_defined = var->declared->size_defined;
-        }
-        var->block_types[block->id] = type;
-      }
+
+      var->block_types[block->id] = type;
     }
     else {
       printf("not subtype\n");
@@ -2295,12 +2330,12 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x", "");
-  test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y", "");
+  // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x + a.y", "");
+  test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
-  // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
-  // test("a: 8'bits 0..100 = 100; a+10", "");
+  // test("a: 8'bits 0..100 = 30; a+10", "");
   // test("a: I32 = 3; a+a", "");
+  // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
   // test("foo:#c foo () -> 1", "");
   // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
   // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
