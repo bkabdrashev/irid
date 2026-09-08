@@ -53,7 +53,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
   case Type_Kind_record: {
     LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_type = type_of_ir(type->record->irs[i]);
+      Type* field_type = type_of_field_at(type->record, i);
       if (type_is_const(field_type)) {
         field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
       }
@@ -188,7 +188,7 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   case Type_Kind_record: {
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMValueRef));
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_type = type_of_ir(type->record->irs[i]);
+      Type* field_type = type_of_field_at(type->record, i);
       if (type_is_const(field_type)) {
         LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
         values[i] = LLVMConstInt(llvm_zero_type, 0, false);
@@ -439,6 +439,30 @@ void llvm_ir(Ir* ir) {
     LLVMTypeRef llvm_to = llvm_of_type(type);
     result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
   } break;
+  case Ir_Kind_auto_cast: {
+    Type* type = type_of_ir(ir);
+    assert(type->kind == Type_Kind_record);
+    assert(!type->record->is_array);
+
+    LLVMTypeRef llvm_type = llvm_of_type(type);
+    LLVMValueRef llvm_val = llvm_of_ir(ir->auto_cast.value);
+    Type* from_type = type_of_ir(ir->auto_cast.value);
+    assert(from_type->kind == Type_Kind_record);
+    assert(!from_type->record->is_array);
+
+    result = LLVMGetUndef(llvm_type);
+    for (I32 i = 0; i < type->record->length; i++) {
+      Str* field_name = type->record->names[i];
+      I32 position = hash_map_get_i32(&from_type->record->position_from_name, field_name);
+      LLVMValueRef field_val = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, position, "");
+      Type* field_from_type = type_of_field_at(from_type->record, position);
+      Type* field_type = type_of_field_at(type->record, i);
+      if (field_from_type != field_type) {
+        field_val = llvm_conversion(field_val, field_from_type, field_type);
+      }
+      result = LLVMBuildInsertValue(llvm_gen.builder, result, field_val, i, "");
+    }
+  } break;
   case Ir_Kind_record: {
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->record->length * sizeof(LLVMValueRef));
     for (I32 i = 0; i < ir->record->length; i++) {
@@ -467,8 +491,8 @@ void llvm_block(Block* block) {
   LLVMBasicBlockRef llvm_block = llvm_of_block(block);
   LLVMPositionBuilderAtEnd(llvm_gen.builder, llvm_block);
 
-  for (I32 i = 0; i < block->irs->length; i++) {
-    Ir* ir = fa_get(block->irs, i);
+  for (I32 i = 0; i < block->sem_irs->length; i++) {
+    Ir* ir = fa_get(block->sem_irs, i);
     llvm_ir(ir);
   }
   switch (block->kind) {
@@ -642,6 +666,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
   // 0000

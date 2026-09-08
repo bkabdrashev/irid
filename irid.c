@@ -21,6 +21,11 @@ void irid_run_path(Cstr path) {
   fa_add(ast.list, node);
 
   Funs funs            = irgen_ast(&arena, ast, length);
+  {
+    C8* buffer           = arena_push(&arena, 64 * length);
+    Cstr result          = cstr_from_funs(funs, buffer);
+    printf("\n%s", result);
+  }
                          sem_funs(&arena, funs);
   {
     C8* buffer           = arena_push(&arena, 64 * length);

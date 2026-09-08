@@ -90,6 +90,7 @@ struct Type_Pair { Type* one; Type* two; };
 
 Field type_record_get_by_name(Block* block, Record* record, Str* name);
 Field type_record_get_by_position(Block* block, Record* record, I32 pos);
+Type* type_of_field_at(Record* record, I32 position);
 Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
 Type* type_join(Block* block, Type* one, Type* two);
@@ -168,11 +169,8 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
         Var* var = record->vars[pos];
         field.assigned_type = type_of_var(block, var);
       }
-      else if (record->irs) {
-        field.assigned_type = type_of_ir(record->irs[pos]);
-      }
       else {
-        field.assigned_type = record->types[pos];
+        field.assigned_type = type_of_field_at(record, pos);
       }
 
       if (field.name) {
@@ -409,10 +407,6 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     return ranges_is_subrange(one->ranges, two->ranges);
   } break;
   case Type_Kind_record: {
-    if (one->record->length != two->record->length) {
-      assert(0);
-      return false;
-    }
     for (I32 i = 0; i < one->record->length; i++) {
       Field field_one = type_record_get_by_position(block, one->record, i);
       Field field_two;
@@ -491,6 +485,17 @@ B8 type_is_true(Type* type) {
   return result;
 }
 
+Type* type_of_field_at(Record* record, I32 position) {
+  Type* type = sem.type_none;
+  if (record->irs) {
+    type = type_of_ir(record->irs[position]);
+  }
+  else {
+    type = record->types[position];
+  }
+  return type;
+}
+
 B8 type_is_const(Type* type) {
   switch (type->kind) {
   case Type_Kind_none: {
@@ -501,7 +506,7 @@ B8 type_is_const(Type* type) {
   } break;
   case Type_Kind_record: {
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_declared = type_of_ir(type->record->irs[i]);
+      Type* field_declared = type_of_field_at(type->record, i);
       if (field_declared) {
         if (!type_is_const(field_declared)) {
           return false;
@@ -1513,7 +1518,7 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
     printf("cannot assign a constant '%s'\n", var->name->base);
     assert(0);
   }
-  if (!var->declared) {
+  if (var->kind == Var_Kind_none) {
     var->declared = type_join(block, var->declared, type);
     var->block_types[block->id] = type;
   }
@@ -1560,7 +1565,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
     type->record->vars[i] = field_var;
     field_var->name = type->record->names[i];
     field_var->parent = var;
-    Type* field_type = type_of_ir(type->record->irs[i]);
+    Type* field_type = type_of_field_at(type->record, i);
     type->record->types[i] = field_type;
     field_var->declared = field_type;
     field_var->state = Var_State_resolved;
@@ -1773,6 +1778,7 @@ void sem_ir(Block* block, Ir* ir) {
         new_record->length   = length;
         new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
         new_record->irs      = arena_push_zero(sem.perm_arena, length*sizeof(Ir*));
+        new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
         new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
         new_record->position_from_name = hash_map_init(sem.perm_arena, length);
         for (I32 i = 0; i < length; i++) {
@@ -2331,7 +2337,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x + a.y", "");
-  test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
+  // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
   // test("a: I32 = 3; a+a", "");

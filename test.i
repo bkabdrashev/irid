@@ -34,8 +34,9 @@ print_i32:(n:I32) -> {
 
 putchar: #c putchar (char:I32) -> I32
 
-Opa : type 32'bits (test:0\1)
+Vec : (x: I32; y: I32; z: 100)
+v:Vec = (123; 1)
 
-print_i32(Opa.test)
+print_i32(v.x + v.y + v.z)
 
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
