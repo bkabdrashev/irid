@@ -33,10 +33,11 @@ print_i32:(n:I32) -> {
 }
 
 print_str:(str: Str) -> {
+  // TODO: figure out semantic logic for Str
   i:I32 = 0
   while i < str.length do {
     putchar str[i]
-    i++
+    i = i + 1
   }
   putchar 10
 }
@@ -51,9 +52,13 @@ print_i32(v.x + v.y + v.z)
 Window : type 64'bits (opaque:"SDL_Window")
 window: Window
 
-print_i32(window.opaque)
+print_str(window.opaque)
 
 // CreateWindow : #c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
 // import sdl
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
 // window := sdl.CreateWindow("Shy SDL3 Snake", WINDOW_WIDTH, WINDOW_HEIGHT, 0)
+//
+// Renderer : type 64'bits (opaque:"SDL_Renderer")
+// CreateRenderer : #c SDL_CreateRenderer (window: @Window; name: Cstr) -> @Renderer
+// GetTicks : #c SDL_GetTicks () -> U64

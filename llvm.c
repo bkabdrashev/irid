@@ -46,6 +46,9 @@ LLVMTypeRef llvm_of_type(Type* type) {
   case Type_Kind_int: {
     result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
   } break;
+  case Type_Kind_str: {
+    assert(0);
+  } break;
   case Type_Kind_ptr: {
     LLVMTypeRef pointer_to = llvm_of_type(type->pointer->declared);
     result = LLVMPointerType(pointer_to, 0);

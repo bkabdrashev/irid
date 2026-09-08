@@ -13,14 +13,14 @@ a = ((U32, U32), U64) // implicit [2]([2]\U32\U64)
 - [ ] Flexible arrays
 ```irid
 arr = [2]I32(2, 3) // stores (len:2) and @(2, 3)
-fo i in arr.len do
+for i in arr.len do
   arr[i] = 1
 ```
 
 - [ ] Custom header
 ```irid
-arr = (cap: 4; len=2) and @(I32, I32, I32, I32)
-fo i in arr.len do
+arr = (cap: 4; len:I32 = 2) and @(I32, I32, I32, I32)
+for i in arr.len do
   arr[i] = i
 arr[arr.len++] = 0
 ```
@@ -149,7 +149,7 @@ vec = { x, y } // (x = x; y = y)
 ```irid
 outer = {
   inner = {
-    br outer = 10
+    break outer = 10
   }
 }
 outer + outer
@@ -159,29 +159,29 @@ outer + outer
 ```irid
 one = {
   two = {
-    if 1 do ptr = @one el ptr = @two
-    br ptr@
+    if 1 do ptr = @one else ptr = @two
+    break ptr@
   }
   print "after two"
 }
 print "after two"
 ```
 
-- [ ] br with if/el/wh
+- [ ] break with if/else/while
 ```irid
-wh 1 {
+while 1 {
   a = if 2 do {
-    br // breaks if
+    break // breaks if
   }
 }
-wh 1 {
+while 1 {
   if 2 do {
-    br // breaks wh
+    break // breaks wh
   }
 }
-a = wh 1 {
-  wh 2 do {
-    br // breaks inner wh
+a = while 1 {
+  while 2 do {
+    break // breaks inner wh
   }
 }
 ```
@@ -205,20 +205,20 @@ c = b'a'dot // 1*3 + 2*4
 - [ ] function return value type checking
 ```irid
 foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
-  if () re 1
-  el    re 2.0
+  if () return 1
+  else  return 2.0
 }
 bar : () -> I32 { // not error since both values are converted via the same I32
-  if () re 1.0
-  el    re 2.0
+  if () return 1.0
+  else  return 2.0
 }
 baz : () -> (x:I32; y:I32) { // not error
-  if () re (1, 2)
-  el    re (x=3, y=4)
+  if () return (1, 2)
+  else  return (x:3, y:4)
 }
 zap : () -> (x:I32; y:I32) { // error since the second returned value have to swap 3 and 4
-  if () re (1, 2)
-  el    re (y=3, x=4)
+  if () return (1, 2)
+  else  return (y:3, x:4)
 }
 ```
 
@@ -342,8 +342,8 @@ foo:F32->F32
 - [x] Optional do
 ```irid
 if 1 do 2
-if 3 do br 4
-if 5 br 6
+if 3 do break 4
+if 5 break 6
 ```
 
 - [x] Narrow a name for that scope

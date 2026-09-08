@@ -29,6 +29,7 @@ typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_int,
   Type_Kind_ptr,
+  Type_Kind_str,
   Type_Kind_record,
   Type_Kind_fun,
 } Type_Kind;
@@ -43,6 +44,7 @@ struct Type {
     Pointer*  pointer;
     Record*   record;
     Function* function;
+    Hash_Set* strings;
   };
 };
 
@@ -141,6 +143,17 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     }
     if (type->ranges->length > 1) {
       string_builder_push_cstr(sb, ")");
+    }
+  } break;
+  case Type_Kind_str: {
+    for (I32 i = 0; i < type->strings->len; i++) {
+      Str* str = type->strings->list[i];
+      string_builder_push_cstr(sb, "\"");
+      string_builder_push_str(sb, str);
+      string_builder_push_cstr(sb, "\"");
+      if (i+1 < type->strings->len) {
+        string_builder_push_cstr(sb, "\\");
+      }
     }
   } break;
   case Type_Kind_ptr: {
@@ -406,6 +419,9 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   case Type_Kind_none: {
     return true;
   } break;
+  case Type_Kind_str: {
+    return true;
+  } break;
   case Type_Kind_int: {
     return ranges_is_subrange(one->ranges, two->ranges);
   } break;
@@ -504,6 +520,9 @@ B8 type_is_const(Type* type) {
   case Type_Kind_none: {
     return true;
   } break;
+  case Type_Kind_str: {
+    return false;
+  } break;
   case Type_Kind_int: {
     return ranges_is_single(type->ranges);
   } break;
@@ -545,6 +564,9 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
   }
   switch (one->kind) {
   case Type_Kind_none: {
+    return true;
+  } break;
+  case Type_Kind_str: {
     return true;
   } break;
   case Type_Kind_int: {
@@ -715,6 +737,23 @@ Type* type_int(I64 i64) {
   return type_range(i64, i64);
 }
 
+Type* type_cstrs(Hash_Set strings) {
+  Type* new_type = &new(sem.types);
+  new_type->kind = Type_Kind_str;
+  new_type->strings = arena_push(sem.perm_arena, 1*sizeof(Hash_Set*));
+  *new_type->strings = strings;
+  new_type->size_defined = true;
+  new_type->bits_size  = 64;
+  new_type->bits_align = 64;
+  return new_type;
+}
+
+Type* type_cstr(Str* str) {
+  Hash_Set strings = hash_set_init(sem.perm_arena, 1);
+  hash_set_put(&strings, str);
+  return type_cstrs(strings);
+}
+
 Type* type_ranges_offset(Ranges* ranges, I64 offset) {
   Ranges* new_ranges = sem_ranges_init(ranges->length);
   new_ranges->length = ranges->length;
@@ -870,6 +909,9 @@ Type* type_meet(Type* one, Type* two) {
   case Type_Kind_int: {
     result = type_ranges_meet(one->ranges, two->ranges);
   } break;
+  case Type_Kind_str: {
+    result = sem.type_none;
+  } break;
   case Type_Kind_ptr: {
     Hash_Set stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
     Type* declared  = type_meet(one->pointer->declared, two->pointer->declared);
@@ -910,6 +952,10 @@ Type* type_join(Block* block, Type* one, Type* two) {
     else {
       assert(0);
     }
+  }
+  else if (one->kind == Type_Kind_str && two->kind == Type_Kind_str) {
+    Hash_Set strings = hash_set_join(sem.perm_arena, one->strings, two->strings);
+    result = type_cstrs(strings);
   }
   else {
     assert(0);
@@ -1644,7 +1690,21 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_str: {
-    assert(0);
+    Str* str = ir->str;
+    I32 length = str->length;
+    Record* new_record = &new(irgen.records);
+    new_record->is_array = true;
+    new_record->length   = length;
+    new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+    new_record->irs      = 0;
+    new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+    new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+    new_record->position_from_name = hash_map_init(sem.perm_arena, length);
+    Type* bytes_range = type_range(-128, 127);
+    for (I32 i = 0; i < str->length; i++) {
+      new_record->types[i] = bytes_range;
+    }
+    result = type_record(new_record);
   } break;
   case Ir_Kind_declare: {
     result = sem_ensure_declared(ir->declare.var);
@@ -1776,16 +1836,16 @@ void sem_ir(Block* block, Ir* ir) {
     I32 length = 2;
     new_record->length   = length;
     new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-    new_record->irs      = arena_push_zero(sem.perm_arena, length*sizeof(Ir*));
+    new_record->irs      = 0;
     new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
     new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
     new_record->position_from_name = hash_map_init(sem.perm_arena, length);
 
+    Type* ptr_to_type = type_of_ir(ir->unary);
     new_record->names[0] = sem.str_len;
     new_record->names[1] = sem.str_ptr;
-    new_record->irs[0] = // TODO: I64;
-    new_record->irs[1] = // Pointer to ir->unary;
-    // type_ptr_to();
+    new_record->types[0] = type_range(0, I64_MAX);
+    new_record->types[1] = type_ptr_to(ptr_to_type);
     hash_map_put_i32(&new_record->position_from_name, sem.str_len, 0);
     hash_map_put_i32(&new_record->position_from_name, sem.str_ptr, 1);
 
@@ -1987,17 +2047,6 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else if (fun_type->kind == Type_Kind_fun) {
       Function* fun = fun_type->function;
-      // if (fun->arg->kind == Type_Kind_record && fun->arg->record->length == 1 && arg->kind != Type_Kind_record) {
-      //   Field field_two = type_record_get_by_position(block, fun->arg->record, 0);
-      //   if (type_is_subtype(block, arg, field_two.declared_type)) {
-      //     result = call->fun->ret;
-      //   }
-      //   else {
-      //     printf("call not subtype\n");
-      //     assert(0);
-      //   }
-      // }
-      // else
       if (type_is_subtype(block, arg_type, fun->arg)) {
         result = fun->ret;
       }
@@ -2006,8 +2055,11 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
     }
+    else if (fun_type->kind == Type_Kind_record) {
+      assert(0); // TODO
+    }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->size_defined) {
+      if (fun_type->size_defined) { // NOTE: bits function
         result = type_define_size(fun_type->bits_size, arg_type);
       }
       else {
@@ -2361,7 +2413,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a: []2; a.length", "");
+  // test("a: []2; a.length", ""); // TODO: flexible array
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
