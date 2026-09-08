@@ -32,6 +32,15 @@ print_i32:(n:I32) -> {
   putchar 10
 }
 
+print_str:(str: Str) -> {
+  i:I32 = 0
+  while i < str.length do {
+    putchar str[i]
+    i++
+  }
+  putchar 10
+}
+
 putchar: #c putchar (char:I32) -> I32
 
 Vec : (x: I32; y: I32; z: 100)
@@ -39,4 +48,12 @@ v:Vec = (123;)
 
 print_i32(v.x + v.y + v.z)
 
+Window : type 64'bits (opaque:"SDL_Window")
+window: Window
+
+print_i32(window.opaque)
+
+// CreateWindow : #c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
+// import sdl
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
+// window := sdl.CreateWindow("Shy SDL3 Snake", WINDOW_WIDTH, WINDOW_HEIGHT, 0)

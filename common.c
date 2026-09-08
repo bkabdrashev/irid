@@ -98,6 +98,9 @@ I16 bits_needed(I64 min, I64 max) {
     return bit_width((U64)max) + 1;
   }
 
+  if (min == I64_MIN) {
+    return 64;
+  }
   if (max <= 0) {
     U64 x = (U64)(-min);
     return bit_width(x - 1) + 1;
@@ -520,11 +523,11 @@ B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
 
 Umi file_size(Cstr path) {
   I32 fd = open(path, O_RDONLY);
-  if (fd < 0) return NULL;
+  if (fd < 0) return 0;
   struct stat st;
   if (fstat(fd, &st) < 0) {
     close(fd);
-    return NULL;
+    return 0;
   }
   Umi size = st.st_size;
   return size;

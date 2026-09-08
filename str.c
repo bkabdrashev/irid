@@ -149,7 +149,7 @@ void string_builder_push_indent(String_Builder* sb, I32 indent) {
 }
 
 void string_builder_push_i64(String_Builder* sb, I64 val) {
-  C8 line_str[20];
+  C8 line_str[21];
   sprintf(line_str, "%li", val);
   string_builder_push_cstr(sb, line_str);
 }

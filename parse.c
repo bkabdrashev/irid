@@ -52,6 +52,7 @@ typedef enum Ast_Kind {
   Ast_Kind_type        = Token_Kind_type+1,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
+  Ast_Kind_span,
 } Ast_Kind;
 
 typedef struct Scope_Stack Scope_Stack;
@@ -327,6 +328,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, "]");
     string_builder_push_ast_node(sb, node->binary.rhs);
   } break;
+  case Ast_Kind_span: {
+    string_builder_push_cstr(sb, "[]");
+    string_builder_push_ast_node(sb, node->unary);
+  } break;
   case Ast_Kind_subscript: {
     string_builder_push_ast_node(sb, node->binary.lhs);
     string_builder_push_cstr(sb, "[");
@@ -395,6 +400,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_gt: case Ast_Kind_ge:
     return 6;
   case Ast_Kind_join:
+  case Ast_Kind_range:
     return 8;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -406,14 +412,13 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_neg:
   case Ast_Kind_pos:
   case Ast_Kind_array:
+  case Ast_Kind_span:
     return 16;
   case Ast_Kind_load:
     return 18;
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 20;
-  case Ast_Kind_range:
-    return 22;
   default :
     return -1;
   }
@@ -430,6 +435,7 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_gt: case Ast_Kind_ge:
     return 5;
   case Ast_Kind_join:
+  case Ast_Kind_range:
     return 7;
   case Ast_Kind_sub:
   case Ast_Kind_add:
@@ -443,8 +449,6 @@ I32 parse_left_precedence(Ast_Kind kind) {
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 19;
-  case Ast_Kind_range:
-    return 21;
   default :
     return -1;
   }
@@ -772,9 +776,15 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     parse_expect_token(parser, Token_Kind_brace_close);
     I32 right_precedence = parse_right_precedence(kind);
     Ast_Node* rhs = parse_new_expression(parser, right_precedence);
-    node = ast_new_node(parser->perm_arena, kind);
-    node->binary.lhs = lhs;
-    node->binary.rhs = rhs;
+    if (lhs) {
+      node = ast_new_node(parser->perm_arena, kind);
+      node->binary.lhs = lhs;
+      node->binary.rhs = rhs;
+    }
+    else {
+      node = ast_new_node(parser->perm_arena, Ast_Kind_span);
+      node->unary = rhs;
+    }
   } break;
   case Token_Kind_foreign_c: {
     Ast_Kind kind = Ast_Kind_foreign_c;
@@ -953,6 +963,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("[]1",     "(bits 32)");
   return;
   test("bits 32",     "(bits 32)");
   test("bits 32 (0..9)",     "(bits 32)");

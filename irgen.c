@@ -22,9 +22,11 @@ typedef enum Ir_Kind {
   Ir_Kind_ge  = Ast_Kind_ge | Ir_Flag_binary,
   Ir_Kind_call = Ast_Kind_call | Ir_Flag_binary,
 
-  Ir_Kind_array = Ast_Kind_array | Ir_Flag_binary,
+  Ir_Kind_array     = Ast_Kind_array     | Ir_Flag_binary,
   Ir_Kind_subscript = Ast_Kind_subscript | Ir_Flag_binary,
-  Ir_Kind_join = Ast_Kind_join | Ir_Flag_binary,
+  Ir_Kind_span      = Ast_Kind_span      | Ir_Flag_unary,
+
+  Ir_Kind_join  = Ast_Kind_join  | Ir_Flag_binary,
   Ir_Kind_range = Ast_Kind_range | Ir_Flag_binary,
 
   Ir_Kind_neg = Ast_Kind_neg | Ir_Flag_unary,
@@ -46,7 +48,6 @@ typedef enum Ir_Kind {
 
   Ir_Kind_int_extend = 140,
   Ir_Kind_auto_cast  = 141,
-
 
 } Ir_Kind;
 
@@ -289,7 +290,6 @@ struct Irgen {
   Str*        str_nil;
 
   Fun_Stack   fun_stack;
-  Hash_Map*   builtins;
   Blocks*     unresolved_breaks;
   Scope_Stack scope_stack;
 };
@@ -446,6 +446,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_call: string_builder_push_cstr(sb, "call "); break;
   case Ir_Kind_range: string_builder_push_cstr(sb, "range "); break;
   case Ir_Kind_array: string_builder_push_cstr(sb, "array "); break;
+  case Ir_Kind_span:  string_builder_push_cstr(sb, "span "); break;
   case Ir_Kind_subscript: string_builder_push_cstr(sb, "subscript "); break;
   default: {
     assert(0);
@@ -1047,6 +1048,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       result = irgen_push_unary(Ir_Kind_ptr, unary);
     }
   } break;
+  case Ast_Kind_span:
   case Ast_Kind_load: case Ast_Kind_type:
   case Ast_Kind_pos: case Ast_Kind_neg: {
     Ir* unary = irgen_ast_node(node->unary);
@@ -1202,7 +1204,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.records.length = 0;
   irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
-  irgen.scope_stack.base      = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Hash_Map*));
+  irgen.scope_stack.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
   irgen.irid_nil = 0;
   irgen.str_nil = str_from_cstr("");
@@ -1210,25 +1212,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   add(irgen.irs, ir_nil);
 
   {
-    irgen.builtins = arena_push(irgen.perm_arena, sizeof(Hash_Map));
-    *irgen.builtins = hash_map_init(irgen.perm_arena, 1);
     Fun* fun = irgen_fun_enter();
     fun->name = str_from_cstr("main");
-    // {
-    //   Str* i32_str = str_from_cstr("I32");
-    //   Symbol* i32_sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-    //   i32_sym->kind = Symbol_Kind_constant;
-    //   Ir* i32_min = irgen_push_int(I32_MIN);
-    //   Ir* i32_max = irgen_push_int(I32_MAX);
-    //   Ir* i32_range = irgen_push_binary(Ir_Kind_range, i32_min, i32_max);
-    //   Ir* bits_fun  = irgen_push_bits();
-    //   Ir* i32_bits  = irgen_push_int(32);
-    //   Ir* bits_call = irgen_push_binary(Ir_Kind_call, bits_fun, i32_bits);
-    //   i32_sym->ir = irgen_push_binary(Ir_Kind_call, bits_call, i32_range);
-
-    //   hash_map_put(irgen.builtins, i32_str, i32_sym);
-    //   add(irgen.scope_stack, irgen.builtins);
-    // }
 
     Var* arg_var = irgen_var_new();
     arg_var->name = str_from_cstr("__arg");
@@ -1247,8 +1232,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen_ast_node(ast.list->base[i]);
   }
   irgen_fun_leave();
-  irgen_scope_leave();
-  del(irgen.scope_stack);
+  // irgen_scope_leave();
+  // del(irgen.scope_stack);
 
   arena_free(irgen.temp_block_arena);
   arena_free(irgen.temp_var_arena);
@@ -1290,6 +1275,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("a: []2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");

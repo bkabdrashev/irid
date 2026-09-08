@@ -77,6 +77,9 @@ struct Sem {
   Type* type_none;
   Type* bits_fun;
 
+  Str*  str_len;
+  Str*  str_ptr;
+
   I32 sccid;
   Blocks* scc_stack;
 
@@ -1768,6 +1771,26 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_record: {
     result = type_record(ir->record);
   } break;
+  case Ir_Kind_span: {
+    Record* new_record = &new(irgen.records);
+    I32 length = 2;
+    new_record->length   = length;
+    new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+    new_record->irs      = arena_push_zero(sem.perm_arena, length*sizeof(Ir*));
+    new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+    new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+    new_record->position_from_name = hash_map_init(sem.perm_arena, length);
+
+    new_record->names[0] = sem.str_len;
+    new_record->names[1] = sem.str_ptr;
+    new_record->irs[0] = // TODO: I64;
+    new_record->irs[1] = // Pointer to ir->unary;
+    // type_ptr_to();
+    hash_map_put_i32(&new_record->position_from_name, sem.str_len, 0);
+    hash_map_put_i32(&new_record->position_from_name, sem.str_ptr, 1);
+
+    result = type_record(new_record);
+  } break;
   case Ir_Kind_array: {
     Type* one_type = type_of_ir(ir->binary.one);
     if (one_type->kind == Type_Kind_int) {
@@ -2289,6 +2312,8 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.bits_fun = &new(sem.types);
   sem.bits_fun->kind = Type_Kind_none;
 
+  sem.str_len = str_from_cstr("len");
+  sem.str_ptr = str_from_cstr("ptr");
   // for (I32 i = 0; i < irgen.builtins->len; i++) {
   //   Str* str = irgen.builtins->list[i];
   //   Symbol* sym = hash_map_get(irgen.builtins, str);
@@ -2336,7 +2361,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a:(x:1\\2; y:3\\4); a = (y:3; x:1); a.x + a.y", "");
+  test("a: []2; a.length", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
