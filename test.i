@@ -35,7 +35,7 @@ print_i32:(n:I32) -> {
 putchar: #c putchar (char:I32) -> I32
 
 Vec : (x: I32; y: I32; z: 100)
-v:Vec = (123; 1)
+v:Vec = (123;)
 
 print_i32(v.x + v.y + v.z)
 

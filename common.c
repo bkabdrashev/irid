@@ -518,6 +518,18 @@ B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
   return true;
 }
 
+Umi file_size(Cstr path) {
+  I32 fd = open(path, O_RDONLY);
+  if (fd < 0) return NULL;
+  struct stat st;
+  if (fstat(fd, &st) < 0) {
+    close(fd);
+    return NULL;
+  }
+  Umi size = st.st_size;
+  return size;
+}
+
 Cstr file_read(Cstr path) {
   I32 fd = open(path, O_RDONLY);
   if (fd < 0) return NULL;
