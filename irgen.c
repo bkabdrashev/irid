@@ -49,6 +49,7 @@ typedef enum Ir_Kind {
   Ir_Kind_int_extend = 140,
   Ir_Kind_auto_cast  = 141,
 
+  Ir_Kind_and_list        = 144,
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -410,7 +411,8 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "auto cast ");
     string_builder_push_irid(sb, ir->auto_cast.value);
   break;
-  case Ir_Kind_record:    string_builder_push_cstr(sb, "record");
+  case Ir_Kind_record:
+    string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < ir->record->length; i++) {
       Field field = record_get_by_position(ir->record, i);
       if (field.name) {
@@ -425,6 +427,15 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
         string_builder_push_cstr(sb, " ");
         string_builder_push_irid(sb, field.declared);
       }
+    }
+  break;
+  case Ir_Kind_and_list:
+    string_builder_push_cstr(sb, "and list");
+    for (I32 i = 0; i < ir->record->length; i++) {
+      Field field = record_get_by_position(ir->record, i);
+      assert(!field.name);
+      string_builder_push_cstr(sb, " ");
+      string_builder_push_irid(sb, field.declared);
     }
   break;
   case Ir_Kind_add:  string_builder_push_cstr(sb, "add "); break;
@@ -447,6 +458,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_range: string_builder_push_cstr(sb, "range "); break;
   case Ir_Kind_array: string_builder_push_cstr(sb, "array "); break;
   case Ir_Kind_span:  string_builder_push_cstr(sb, "span "); break;
+  case Ir_Kind_type:  string_builder_push_cstr(sb, "type "); break;
   case Ir_Kind_subscript: string_builder_push_cstr(sb, "subscript "); break;
   default: {
     assert(0);
@@ -636,6 +648,11 @@ Ir* irgen_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
 
 Ir* irgen_push_record(Record* record) {
   Ir ir = { Ir_Kind_record, .record = record };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_and_list(Record* record) {
+  Ir ir = { Ir_Kind_and_list, .record = record };
   return irgen_push(ir);
 }
 
@@ -885,7 +902,7 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       irgen_assign(node, at);
     }
   } break;
-  case Ast_Kind_tuple: {
+  case Ast_Kind_and_list: {
     if (rhs->kind == Ir_Kind_load) {
       rhs = rhs->unary;
     }
@@ -967,13 +984,13 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_assign(node->binary.lhs, rhs);
   } break;
-  case Ast_Kind_tuple: {
+  case Ast_Kind_and_list: {
     Record* record = record_new(node->list->length);
     for (I32 i = 0; i < node->list->length; i++) {
       Ir* ir = irgen_ast_node(node->list->base[i]);
       record_push_declare_position(record, i, ir);
     }
-    result = irgen_push_record(record);
+    result = irgen_push_and_list(record);
   } break;
   case Ast_Kind_record: {
     Record* record = record_new(node->list->length);
@@ -1275,7 +1292,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a: []2;", "");
+  test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");

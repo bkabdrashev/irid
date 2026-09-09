@@ -35,7 +35,7 @@ typedef enum Ast_Kind {
   Ast_Kind_declare   = Token_Kind_colon,
   Ast_Kind_block       = (Token_Kind_curly_open & 0xff),
   Ast_Kind_block_value = (Token_Kind_curly_open & 0xff) + 1,
-  Ast_Kind_tuple       = Token_Kind_comma,
+  Ast_Kind_and_list    = Token_Kind_comma,
   Ast_Kind_fun         = Token_Kind_arrow,
   Ast_Kind_if          = Token_Kind_if & 0xff,
   Ast_Kind_if_value    = (Token_Kind_if & 0xff) | Ast_Flag_value,
@@ -160,7 +160,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_declare:      result = ":"; break;
   case Ast_Kind_block:        result = "block"; break;
   case Ast_Kind_block_value:  result = "block_value"; break;
-  case Ast_Kind_tuple:        result = "tuple"; break;
+  case Ast_Kind_and_list:        result = "tuple"; break;
   case Ast_Kind_fun:          result = "->"; break;
   case Ast_Kind_if:           result = "if"; break;
   case Ast_Kind_if_value:     result = "if_value"; break;
@@ -193,7 +193,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_str(sb, node->str);
     string_builder_push_cstr(sb, "\"");
   break;
-  case Ast_Kind_tuple:
+  case Ast_Kind_and_list:
     string_builder_push_cstr(sb, "(");
     for (I32 i = 0; i < node->list->length; i++) {
       string_builder_push_ast_node(sb, node->list->base[i]);
@@ -393,7 +393,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_fun:
     return 1;
-  case Ast_Kind_tuple:
+  case Ast_Kind_and_list:
     return 3;
   case Ast_Kind_ne: case Ast_Kind_eq:
   case Ast_Kind_lt: case Ast_Kind_le:
@@ -428,7 +428,7 @@ I32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_fun:
     return 1;
-  case Ast_Kind_tuple:
+  case Ast_Kind_and_list:
     return 3;
   case Ast_Kind_ne: case Ast_Kind_eq:
   case Ast_Kind_lt: case Ast_Kind_le:
@@ -541,7 +541,7 @@ Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
   return node;
 }
 
-Ast_Node* parse_tuple_or_exp(Parser* parser) {
+Ast_Node* parse_and_list_or_exp(Parser* parser) {
   Ast_Node* node;
   Ast_List* temp; fa_temp(parser->list_arena, temp);
   do {
@@ -553,16 +553,16 @@ Ast_Node* parse_tuple_or_exp(Parser* parser) {
     parse_list_end(parser, temp);
   }
   else {
-    node = ast_new_node(parser->perm_arena, Ast_Kind_tuple);
+    node = ast_new_node(parser->perm_arena, Ast_Kind_and_list);
     node->list = parse_list_perm(parser, temp);
   }
   return node;
 }
 
 Ast_Node* parse_fun_tuple_or_exp(Parser* parser) {
-  Ast_Node* lhs = parse_tuple_or_exp(parser);
+  Ast_Node* lhs = parse_and_list_or_exp(parser);
   if (parse_match_token(parser, Token_Kind_arrow)) {
-    Ast_Node* rhs = parse_tuple_or_exp(parser);
+    Ast_Node* rhs = parse_and_list_or_exp(parser);
     Ast_Node* fun = ast_new_node(parser->perm_arena, Ast_Kind_fun);
     fun->binary.lhs = lhs;
     fun->binary.rhs = rhs;

@@ -19,7 +19,7 @@ for i in arr.len do
 
 - [ ] Custom header
 ```irid
-arr = (cap: 4; len:I32 = 2) and @(I32, I32, I32, I32)
+arr: (cap: 4; len:I32 = 2), @(I32, I32, I32, I32)
 for i in arr.len do
   arr[i] = i
 arr[arr.len++] = 0
@@ -52,7 +52,7 @@ char : (str : string) -> {
 
 - [ ] Foreigh functions should be metaprogram instead of #c syntax:
 ```irid
-Init : (foreign:c : "SDL_Init") and (flags = InitFlags) -> b8
+Init : (foreign:c : "SDL_Init"), (flags = InitFlags) -> b8
 ```
 
 - [ ] Pointer types can incorporate pointer location:
