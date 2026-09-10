@@ -227,7 +227,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     Hash_Set records = type->compose->records;
     for (I32 i = 0; i < records.len; i++) {
       // Record* record = records.list[i];
-      string_builder_push_cstr(sb, "rec");
+      string_builder_push_cstr(sb, " rec");
       if (i+1 < records.len) {
         string_builder_push_cstr(sb, " ");
       }
@@ -1021,6 +1021,12 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
   Type* result = &new(sem.types);
   result->kind = Type_Kind_compose;
   result->compose = arena_push(sem.perm_arena, sizeof(Compose));
+  result->bits_size += int_type->bits_size;
+  result->bits_size += ptr_type->bits_size;
+  for (I32 i = 0; i < records.len; i++) {
+    Type* record = records.list[i];
+    result->bits_size += record->bits_size;
+  }
   result->compose->int_type = int_type;
   result->compose->ptr_type = ptr_type;
   result->compose->records  = records;
@@ -1030,76 +1036,89 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
 Type* type_meet(Type* one, Type* two) {
   Type* result = sem.type_none;
 
-  if (one->kind < two->kind) {
-    result = type_meet(one, two);
-  }
   if (one->kind == Type_Kind_none) {
     result = two;
-    return result;
   }
-  if (two->kind == Type_Kind_none) {
+  else if (two->kind == Type_Kind_none) {
     result = one;
-    return result;
   }
-
-  if (one->kind != two->kind) {
-    Type* int_type = sem.type_none;
-    Type* ptr_type = sem.type_none;
-    Hash_Set records = {0};
-    if (one->kind == Type_Kind_record) {
-      records = hash_set_init(sem.perm_arena, 1);
-      hash_set_put(&records, one->record);
-      if (two->kind == Type_Kind_int) {
-        int_type = two;
-      }
-      else if (two->kind == Type_Kind_ptr) {
-        ptr_type = two;
-      }
-      else {
-        assert(0);
-      }
+  else if (one->kind != two->kind) {
+    Type* one_int_type = sem.type_none;
+    Type* one_ptr_type = sem.type_none;
+    Hash_Set one_records = {0};
+    Type* two_int_type = sem.type_none;
+    Type* two_ptr_type = sem.type_none;
+    Hash_Set two_records = {0};
+    if (one->kind == Type_Kind_compose) {
+      one_int_type = one->compose->int_type;
+      one_ptr_type = one->compose->ptr_type;
+      one_records = one->compose->records;
+    }
+    else if (one->kind == Type_Kind_record) {
+      one_records = hash_set_init(sem.perm_arena, 1);
+      hash_set_put(&one_records, one);
     }
     else if (one->kind == Type_Kind_ptr) {
-      records = hash_set_init(sem.perm_arena, 1); // empty record
-      ptr_type = one;
-      if (two->kind == Type_Kind_int) {
-        int_type = two;
-      }
-      else {
-        assert(0);
-      }
+      one_ptr_type = one;
+    }
+    else if (one->kind == Type_Kind_int) {
+      one_int_type = one;
     }
     else {
       assert(0);
     }
+
+    if (two->kind == Type_Kind_compose) {
+      two_int_type = two->compose->int_type;
+      two_ptr_type = two->compose->ptr_type;
+      two_records = two->compose->records;
+    }
+    else if (two->kind == Type_Kind_record) {
+      two_records = hash_set_init(sem.perm_arena, 1);
+      hash_set_put(&two_records, two);
+    }
+    else if (two->kind == Type_Kind_int) {
+      two_int_type = two;
+    }
+    else if (two->kind == Type_Kind_ptr) {
+      two_ptr_type = two;
+    }
+    else {
+      assert(0);
+    }
+
+    Type* int_type = type_meet(one_int_type, two_int_type);
+    Type* ptr_type = type_meet(one_ptr_type, two_ptr_type);
+    Hash_Set records = hash_set_meet(sem.perm_arena, &one_records, &two_records);
     result = type_compose(int_type, ptr_type, records);
   }
-
-  switch (one->kind) {
-  case Type_Kind_none: break;
-  case Type_Kind_int: {
-    result = type_ranges_meet(one->ranges, two->ranges);
-  } break;
-  case Type_Kind_str: {
-    result = sem.type_none;
-  } break;
-  case Type_Kind_ptr: {
-    Hash_Set stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
-    Type* declared  = type_meet(one->pointer->declared, two->pointer->declared);
-    result = type_ptr(declared, stack);
-  } break;
-  case Type_Kind_record: {
-    result = sem.type_none;
-  } break;
-  case Type_Kind_fun: {
-    result = sem.type_none;
-  } break;
-  case Type_Kind_compose: {
-    Type* int_type = type_meet(one->compose->int_type, two->compose->int_type);
-    Type* ptr_type = type_meet(one->compose->ptr_type, two->compose->ptr_type);
-    Hash_Set records = hash_set_meet(sem.perm_arena, &one->compose->records, &two->compose->records);
-    result = type_compose(int_type, ptr_type, records);
-  } break;
+  else {
+    switch (one->kind) {
+    case Type_Kind_none: break;
+    case Type_Kind_int: {
+      result = type_ranges_meet(one->ranges, two->ranges);
+    } break;
+    case Type_Kind_str: {
+      result = sem.type_none;
+    } break;
+    case Type_Kind_ptr: {
+      Hash_Set stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
+      Type* declared  = type_meet(one->pointer->declared, two->pointer->declared);
+      result = type_ptr(declared, stack);
+    } break;
+    case Type_Kind_record: {
+      result = sem.type_none;
+    } break;
+    case Type_Kind_fun: {
+      result = sem.type_none;
+    } break;
+    case Type_Kind_compose: {
+      Type* int_type = type_meet(one->compose->int_type, two->compose->int_type);
+      Type* ptr_type = type_meet(one->compose->ptr_type, two->compose->ptr_type);
+      Hash_Set records = hash_set_meet(sem.perm_arena, &one->compose->records, &two->compose->records);
+      result = type_compose(int_type, ptr_type, records);
+    } break;
+    }
   }
 
   return result;
@@ -2272,6 +2291,9 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       assert(0);
     }
+  } break;
+  case Ir_Kind_type: {
+    result = type_of_ir(ir->unary);
   } break;
   case Ir_Kind_bits: {
     result = sem.bits_fun;
