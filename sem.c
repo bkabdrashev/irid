@@ -1704,56 +1704,71 @@ Type* type_of_var(Block* block, Var* var) {
 }
 
 Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
-  assert(from->kind == to->kind);
   if (type_is_same(block, from, to)) {
     return from;
   }
-  Type* new_type = &new(sem.types);
-  switch (from->kind) {
-  case Type_Kind_int: {
-    *new_type = *from;
-    new_type->size_defined = to->size_defined;
-    new_type->bits_size = to->bits_size;
-    new_type->bits_align = align_up(to->bits_size, 8);
-
-    if (store) {
-      store->binary.two = sem_push_int_extend(block, store->binary.two, to->bits_size);
+  Type* result = sem.type_none;
+  if (to->kind == Type_Kind_compose) {
+    if (from->kind == Type_Kind_int) {
+      result = type_auto_cast(block, store, from, to->compose->int_type);
     }
-  } break;
-  case Type_Kind_record: {
-    I32 length = from->record->length;
-    Record* new_record = &new(irgen.records);
-    new_record->length   = length;
-    new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-    new_record->irs      = 0;
-    new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-    new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-    new_record->position_from_name = hash_map_init(sem.perm_arena, length);
-    for (I32 i = 0; i < length; i++) {
-      Field field = type_record_get_by_position(block, from->record, i);
-      Field var_field;
-      if (field.name) {
-        var_field = type_record_get_by_name(block, to->record, field.name);
-        new_record->names[i] = var_field.name;
-        hash_map_put_i32(&new_record->position_from_name, var_field.name, i);
-      }
-      else {
-        var_field = type_record_get_by_position(block, to->record, i);
-      }
-      if (type_is_same(block, field.assigned_type, var_field.var->declared)) {
-        new_record->types[i] = field.assigned_type;
-      }
-      else {
-        new_record->types[i] = type_auto_cast(block, 0, field.assigned_type, var_field.var->declared);
-      }
+    else if (from->kind == Type_Kind_ptr) {
+      result = type_auto_cast(block, store, from, to->compose->ptr_type);
     }
-    new_type = type_record(new_record);
-
-    store->binary.two = sem_push_auto_cast(block, store->binary.two, new_type);
-  } break;
-  default: assert(0);
   }
-  return new_type;
+  else if (from->kind == to->kind) {
+    switch (from->kind) {
+    case Type_Kind_int: {
+      if (store) {
+        store->binary.two = sem_push_int_extend(block, store->binary.two, to->bits_size);
+        result = type_of_ir(store->binary.two);
+      }
+      else {
+        result = &new(sem.types);
+        *result = *from;
+        result->size_defined = to->size_defined;
+        result->bits_size    = to->bits_size;
+        result->bits_align   = align_up(to->bits_size, 8);
+      }
+    } break;
+    case Type_Kind_record: {
+      I32 length = from->record->length;
+      Record* new_record = &new(irgen.records);
+      new_record->length   = length;
+      new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+      new_record->irs      = 0;
+      new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+      new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+      new_record->position_from_name = hash_map_init(sem.perm_arena, length);
+      for (I32 i = 0; i < length; i++) {
+        Field field = type_record_get_by_position(block, from->record, i);
+        Field var_field;
+        if (field.name) {
+          var_field = type_record_get_by_name(block, to->record, field.name);
+          new_record->names[i] = var_field.name;
+          hash_map_put_i32(&new_record->position_from_name, var_field.name, i);
+        }
+        else {
+          var_field = type_record_get_by_position(block, to->record, i);
+        }
+        if (type_is_same(block, field.assigned_type, var_field.var->declared)) {
+          new_record->types[i] = field.assigned_type;
+        }
+        else {
+          new_record->types[i] = type_auto_cast(block, 0, field.assigned_type, var_field.var->declared);
+        }
+      }
+      result = type_record(new_record);
+
+      store->binary.two = sem_push_auto_cast(block, store->binary.two, result);
+    } break;
+    default: assert(0);
+    }
+  }
+  else {
+    assert(0);
+  }
+  return result;
 }
 
 void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
@@ -2616,7 +2631,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a: I32, (x:I32)", "");
+  test("a: I32, (x:I32); a = 1", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
