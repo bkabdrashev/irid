@@ -25,6 +25,13 @@ struct Pointer_Pair { Pointer* one; Pointer* two; };
 typedef struct Function Function;
 struct Function { Fun* fun; Type* arg; Type* ret; };
 
+typedef struct Compose Compose;
+struct Compose {
+  Type* int_type;
+  Type* ptr_type;
+  Hash_Set records;
+};
+
 typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_int,
@@ -32,6 +39,7 @@ typedef enum Type_Kind {
   Type_Kind_str,
   Type_Kind_record,
   Type_Kind_fun,
+  Type_Kind_compose,
 } Type_Kind;
 
 struct Type {
@@ -45,6 +53,7 @@ struct Type {
     Record*   record;
     Function* function;
     Hash_Set* strings;
+    Compose*  compose;
   };
 };
 
@@ -204,6 +213,25 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
       }
     }
     string_builder_push_cstr(sb, ")");
+  } break;
+  case Type_Kind_compose: {
+    string_builder_push_cstr(sb, "compose");
+    if (type->compose->int_type) {
+      string_builder_push_cstr(sb, " ");
+      string_builder_push_type(sb, block, type->compose->int_type);
+    }
+    if (type->compose->ptr_type) {
+      string_builder_push_cstr(sb, " ");
+      string_builder_push_type(sb, block, type->compose->ptr_type);
+    }
+    Hash_Set records = type->compose->records;
+    for (I32 i = 0; i < records.len; i++) {
+      // Record* record = records.list[i];
+      string_builder_push_cstr(sb, "rec");
+      if (i+1 < records.len) {
+        string_builder_push_cstr(sb, " ");
+      }
+    }
   } break;
   }
 }
@@ -411,6 +439,38 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   // (1..3) is subtype of 1 -- false
   // (1..2) is subtype of (1..3) -- true
 
+  if (two->kind == Type_Kind_compose) {
+    // a: I32, (x:I32; y:I32) = 1 (2 bits)
+    // a = (I32 1; I32 2)
+    Type* int_type = two->compose->int_type;
+    Type* ptr_type = two->compose->ptr_type;
+    Hash_Set records = two->compose->records;
+    switch (one->kind) {
+    case Type_Kind_int: {
+      return type_is_subtype_rec(block, one, int_type, visited);
+    } break;
+    case Type_Kind_ptr: {
+      return type_is_subtype_rec(block, one, ptr_type, visited);
+    } break;
+    case Type_Kind_compose: {
+      if (!type_is_subtype_rec(block, one->compose->int_type, int_type, visited)) {
+        return false;
+      }
+      if (!type_is_subtype_rec(block, one->compose->ptr_type, ptr_type, visited)) {
+        return false;
+      }
+      for (I32 i = 0; i < one->compose->records.len; i++) {
+        Record* record = one->compose->records.list[i];
+        if (!hash_set_exists(&records, record)) {
+          return false;
+        }
+      }
+      return true;
+    } break;
+    default: assert(0);
+    }
+  }
+
   if (one->kind != two->kind) {
     assert(0);
     return false;
@@ -424,23 +484,6 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   } break;
   case Type_Kind_int: {
     return ranges_is_subrange(one->ranges, two->ranges);
-  } break;
-  case Type_Kind_record: {
-    for (I32 i = 0; i < one->record->length; i++) {
-      Field field_one = type_record_get_by_position(block, one->record, i);
-      Field field_two;
-      if (field_one.name) {
-        field_two = type_record_get_by_name(block, two->record, field_one.name);
-      }
-      else {
-        field_two = type_record_get_by_position(block, two->record, i);
-      }
-      if (!type_is_subtype_rec(block, field_one.assigned_type, field_two.declared_type, visited)) {
-        assert(0);
-        return false;
-      }
-    }
-    return true;
   } break;
   case Type_Kind_ptr: {
     if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
@@ -467,10 +510,28 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     }
     return true;
   } break;
+  case Type_Kind_record: {
+    for (I32 i = 0; i < one->record->length; i++) {
+      Field field_one = type_record_get_by_position(block, one->record, i);
+      Field field_two;
+      if (field_one.name) {
+        field_two = type_record_get_by_name(block, two->record, field_one.name);
+      }
+      else {
+        field_two = type_record_get_by_position(block, two->record, i);
+      }
+      if (!type_is_subtype_rec(block, field_one.assigned_type, field_two.declared_type, visited)) {
+        assert(0);
+        return false;
+      }
+    }
+    return true;
+  } break;
   case Type_Kind_fun: {
     assert(0);
     return false;
   } break;
+  case Type_Kind_compose: assert(0); break;
   }
   assert(0);
   return false;
@@ -540,6 +601,29 @@ B8 type_is_const(Type* type) {
     }
     return false;
   } break;
+  case Type_Kind_compose: {
+    if (!type_is_const(type->compose->int_type)) {
+      return false;
+    }
+    if (!type_is_const(type->compose->ptr_type)) {
+      return false;
+    }
+    for (I32 r = 0; r < type->compose->records.len; r++) {
+      Record* record = type->compose->records.list[r];
+      for (I32 i = 0; i < record->length; i++) {
+        Type* field_declared = type_of_field_at(record, i);
+        if (field_declared) {
+          if (!type_is_const(field_declared)) {
+            return false;
+          }
+        }
+        else {
+          return false;
+        }
+      }
+    }
+    return true;
+  } break;
   case Type_Kind_ptr: {
     return type->pointer->stack.len == 1;
   } break;
@@ -559,6 +643,38 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
 }
 
 B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
+  if (two->kind == Type_Kind_compose) {
+    // a: I32, (x:I32; y:I32) = 1 (2 bits)
+    // a = (I32 1; I32 2)
+    Type* int_type = two->compose->int_type;
+    Type* ptr_type = two->compose->ptr_type;
+    Hash_Set records = two->compose->records;
+    switch (one->kind) {
+    case Type_Kind_int: {
+      return type_is_same_rec(block, one, int_type, visited);
+    } break;
+    case Type_Kind_ptr: {
+      return type_is_same_rec(block, one, ptr_type, visited);
+    } break;
+    case Type_Kind_compose: {
+      if (!type_is_same_rec(block, one->compose->int_type, int_type, visited)) {
+        return false;
+      }
+      if (!type_is_same_rec(block, one->compose->ptr_type, ptr_type, visited)) {
+        return false;
+      }
+      for (I32 i = 0; i < one->compose->records.len; i++) {
+        Record* record = one->compose->records.list[i];
+        if (!hash_set_exists(&records, record)) {
+          return false;
+        }
+      }
+      return true;
+    } break;
+    default: assert(0);
+    }
+  }
+
   if (one->kind != two->kind) {
     return false;
   }
@@ -618,6 +734,7 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
   case Type_Kind_fun: {
     return false;
   } break;
+  case Type_Kind_compose: assert(0); break;
   }
   return false;
 }
@@ -900,9 +1017,63 @@ Type* type_record(Record* record) {
 Type* type_ranges_meet(Ranges* one, Ranges* two);
 Type* type_ptr(Type* declared, Hash_Set stack);
 
+Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
+  Type* result = &new(sem.types);
+  result->kind = Type_Kind_compose;
+  result->compose = arena_push(sem.perm_arena, sizeof(Compose));
+  result->compose->int_type = int_type;
+  result->compose->ptr_type = ptr_type;
+  result->compose->records  = records;
+  return result;
+}
+
 Type* type_meet(Type* one, Type* two) {
   Type* result = sem.type_none;
-  if (one->kind != two->kind) return result;
+
+  if (one->kind < two->kind) {
+    result = type_meet(one, two);
+  }
+  if (one->kind == Type_Kind_none) {
+    result = two;
+    return result;
+  }
+  if (two->kind == Type_Kind_none) {
+    result = one;
+    return result;
+  }
+
+  if (one->kind != two->kind) {
+    Type* int_type = sem.type_none;
+    Type* ptr_type = sem.type_none;
+    Hash_Set records = {0};
+    if (one->kind == Type_Kind_record) {
+      records = hash_set_init(sem.perm_arena, 1);
+      hash_set_put(&records, one->record);
+      if (two->kind == Type_Kind_int) {
+        int_type = two;
+      }
+      else if (two->kind == Type_Kind_ptr) {
+        ptr_type = two;
+      }
+      else {
+        assert(0);
+      }
+    }
+    else if (one->kind == Type_Kind_ptr) {
+      records = hash_set_init(sem.perm_arena, 1); // empty record
+      ptr_type = one;
+      if (two->kind == Type_Kind_int) {
+        int_type = two;
+      }
+      else {
+        assert(0);
+      }
+    }
+    else {
+      assert(0);
+    }
+    result = type_compose(int_type, ptr_type, records);
+  }
 
   switch (one->kind) {
   case Type_Kind_none: break;
@@ -923,7 +1094,14 @@ Type* type_meet(Type* one, Type* two) {
   case Type_Kind_fun: {
     result = sem.type_none;
   } break;
+  case Type_Kind_compose: {
+    Type* int_type = type_meet(one->compose->int_type, two->compose->int_type);
+    Type* ptr_type = type_meet(one->compose->ptr_type, two->compose->ptr_type);
+    Hash_Set records = hash_set_meet(sem.perm_arena, &one->compose->records, &two->compose->records);
+    result = type_compose(int_type, ptr_type, records);
+  } break;
   }
+
   return result;
 }
 
@@ -937,9 +1115,6 @@ Type* type_join(Block* block, Type* one, Type* two) {
   }
   else if (one->kind == Type_Kind_int && two->kind == Type_Kind_int) {
     result = type_ranges_merge(one->ranges, two->ranges);
-  }
-  else if (one->kind == Type_Kind_record && two->kind == Type_Kind_record) {
-    result = one;
   }
   else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
     Type* one_declared = type_pointer_declared(one->pointer);
@@ -1831,6 +2006,12 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_record: {
     result = type_record(ir->record);
   } break;
+  case Ir_Kind_and_list: {
+    for (I32 i = 0; i < ir->record->length; i++) {
+      Type* type = type_of_ir(ir->record->irs[i]);
+      result = type_meet(result, type);
+    }
+  } break;
   case Ir_Kind_span: {
     Record* new_record = &new(irgen.records);
     I32 length = 2;
@@ -2413,7 +2594,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a: []2; a.length", ""); // TODO: flexible array
+  test("a: I32, (x:I32)", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
