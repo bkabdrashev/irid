@@ -215,23 +215,24 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, ")");
   } break;
   case Type_Kind_compose: {
-    string_builder_push_cstr(sb, "compose");
-    if (type->compose->int_type) {
-      string_builder_push_cstr(sb, " ");
+    string_builder_push_cstr(sb, "compose(");
+    if (type->compose->int_type != sem.type_none) {
       string_builder_push_type(sb, block, type->compose->int_type);
+      string_builder_push_cstr(sb, ", ");
     }
-    if (type->compose->ptr_type) {
-      string_builder_push_cstr(sb, " ");
+    if (type->compose->ptr_type != sem.type_none) {
       string_builder_push_type(sb, block, type->compose->ptr_type);
+      string_builder_push_cstr(sb, ", ");
     }
     Hash_Set records = type->compose->records;
     for (I32 i = 0; i < records.len; i++) {
-      // Record* record = records.list[i];
-      string_builder_push_cstr(sb, " rec");
+      Type* record = records.list[i];
+      string_builder_push_type(sb, block, record);
       if (i+1 < records.len) {
-        string_builder_push_cstr(sb, " ");
+        string_builder_push_cstr(sb, ", ");
       }
     }
+    string_builder_push_cstr(sb, ")");
   } break;
   }
 }
@@ -1021,12 +1022,21 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
   Type* result = &new(sem.types);
   result->kind = Type_Kind_compose;
   result->compose = arena_push(sem.perm_arena, sizeof(Compose));
-  result->bits_size += int_type->bits_size;
+
+  result->bits_size  = int_type->bits_size;
+  result->bits_size  = align_up(result->bits_size, int_type->bits_align);
+
   result->bits_size += ptr_type->bits_size;
+  result->bits_size  = align_up(result->bits_size, ptr_type->bits_align);
+
+  result->bits_align = max(int_type->bits_align, ptr_type->bits_align);
   for (I32 i = 0; i < records.len; i++) {
     Type* record = records.list[i];
-    result->bits_size += record->bits_size;
+    result->bits_align = max(result->bits_align, record->bits_align);
+    result->bits_size  = align_up(result->bits_size, record->bits_align);
+    result->bits_size += records.list[i]->bits_size;
   }
+  result->bits_align = aling_up(result->bits_size, result->bits_align);
   result->compose->int_type = int_type;
   result->compose->ptr_type = ptr_type;
   result->compose->records  = records;
@@ -1089,7 +1099,7 @@ Type* type_meet(Type* one, Type* two) {
 
     Type* int_type = type_meet(one_int_type, two_int_type);
     Type* ptr_type = type_meet(one_ptr_type, two_ptr_type);
-    Hash_Set records = hash_set_meet(sem.perm_arena, &one_records, &two_records);
+    Hash_Set records = hash_set_join(sem.perm_arena, &one_records, &two_records);
     result = type_compose(int_type, ptr_type, records);
   }
   else {
@@ -1710,10 +1720,12 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
   Type* result = sem.type_none;
   if (to->kind == Type_Kind_compose) {
     if (from->kind == Type_Kind_int) {
-      result = type_auto_cast(block, store, from, to->compose->int_type);
+      Type* int_type = type_auto_cast(block, store, from, to->compose->int_type);
+      result = type_compose(int_type, to->compose->ptr_type, to->compose->records);
     }
     else if (from->kind == Type_Kind_ptr) {
-      result = type_auto_cast(block, store, from, to->compose->ptr_type);
+      Type* ptr_type = type_auto_cast(block, store, from, to->compose->ptr_type);
+      result = type_compose(to->compose->int_type, ptr_type, to->compose->records);
     }
   }
   else if (from->kind == to->kind) {
@@ -2631,7 +2643,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a: I32, (x:I32); a = 1", "");
+  test("a: I32, (x:I32); a = 1; a", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
