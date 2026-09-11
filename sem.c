@@ -462,6 +462,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       }
       for (I32 i = 0; i < one->compose->records.len; i++) {
         Record* record = one->compose->records.list[i];
+        // TODO: relies on interning
         if (!hash_set_exists(&records, record)) {
           return false;
         }
@@ -644,38 +645,6 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
 }
 
 B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
-  if (two->kind == Type_Kind_compose) {
-    // a: I32, (x:I32; y:I32) = 1 (2 bits)
-    // a = (I32 1; I32 2)
-    Type* int_type = two->compose->int_type;
-    Type* ptr_type = two->compose->ptr_type;
-    Hash_Set records = two->compose->records;
-    switch (one->kind) {
-    case Type_Kind_int: {
-      return type_is_same_rec(block, one, int_type, visited);
-    } break;
-    case Type_Kind_ptr: {
-      return type_is_same_rec(block, one, ptr_type, visited);
-    } break;
-    case Type_Kind_compose: {
-      if (!type_is_same_rec(block, one->compose->int_type, int_type, visited)) {
-        return false;
-      }
-      if (!type_is_same_rec(block, one->compose->ptr_type, ptr_type, visited)) {
-        return false;
-      }
-      for (I32 i = 0; i < one->compose->records.len; i++) {
-        Record* record = one->compose->records.list[i];
-        if (!hash_set_exists(&records, record)) {
-          return false;
-        }
-      }
-      return true;
-    } break;
-    default: assert(0);
-    }
-  }
-
   if (one->kind != two->kind) {
     return false;
   }
@@ -735,7 +704,26 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
   case Type_Kind_fun: {
     return false;
   } break;
-  case Type_Kind_compose: assert(0); break;
+  case Type_Kind_compose: {
+    // a: I32, (x:I32; y:I32) = 1 (2 bits)
+    // a = (I32 1; I32 2)
+    Type* int_type = two->compose->int_type;
+    Type* ptr_type = two->compose->ptr_type;
+    Hash_Set records = two->compose->records;
+    if (!type_is_same_rec(block, one->compose->int_type, int_type, visited)) {
+      return false;
+    }
+    if (!type_is_same_rec(block, one->compose->ptr_type, ptr_type, visited)) {
+      return false;
+    }
+    for (I32 i = 0; i < one->compose->records.len; i++) {
+      Record* record = one->compose->records.list[i];
+      if (!hash_set_exists(&records, record)) {
+        return false;
+      }
+    }
+    return true;
+  } break;
   }
   return false;
 }
@@ -1874,7 +1862,6 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
           type_of_var_put(block, 0, var_field.var, field.assigned_type);
         }
       }
-
       var->block_types[block->id] = type;
     }
     else {
@@ -1971,21 +1958,25 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_str: {
-    Str* str = ir->str;
-    I32 length = str->length;
+    // Str* str = ir->str;
+    I32 length = 1;
     Record* new_record = &new(irgen.records);
-    new_record->is_array = true;
-    new_record->length   = length;
+    // new_record->is_array = true;
+    new_record->length   = 1;
     new_record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
     new_record->irs      = 0;
     new_record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
     new_record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
     new_record->position_from_name = hash_map_init(sem.perm_arena, length);
-    Type* bytes_range = type_range(-128, 127);
-    for (I32 i = 0; i < str->length; i++) {
-      new_record->types[i] = bytes_range;
-    }
-    result = type_record(new_record);
+    Type* len_range = type_range(0, I64_MAX);
+    new_record->types[0] = len_range;
+    new_record->names[0] = sem.str_len;
+    hash_map_put_i32(&new_record->position_from_name, sem.str_len, 0);
+    Type* bytes_range = type_range(I8_MIN, I8_MAX);
+    Type* ptr_type = type_ptr_to(bytes_range);
+    Hash_Set records = hash_set_init(sem.perm_arena, 1);
+    hash_set_put(&records, new_record);
+    result = type_compose(sem.type_none, ptr_type, records);
   } break;
   case Ir_Kind_declare: {
     result = sem_ensure_declared(ir->declare.var);
@@ -2269,6 +2260,19 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_join(block, result, type);
       }
     }
+    else if (ptr_type->kind == Type_Kind_compose) {
+      Pointer* pointer = ptr_type->compose->ptr_type->pointer;
+      Hash_Set stack = pointer->stack;
+      assert(stack.len >= 1);
+      for (I32 i = 0; i < stack.len; i++) {
+        sem_ensure_declared(stack.list[i]);
+      }
+      result = type_of_var(block, stack.list[0]);
+      for (I32 i = 1; i < stack.len; i++) {
+        Type* type = type_of_var(block, stack.list[i]);
+        result = type_join(block, result, type);
+      }
+    }
     else {
       assert(0);
     }
@@ -2278,6 +2282,23 @@ void sem_ir(Block* block, Ir* ir) {
     Type* rhs = type_of_ir(ir->binary.two);
     if (lhs->kind == Type_Kind_ptr) {
       Pointer* pointer = lhs->pointer;
+      Hash_Set stack = pointer->stack;
+      assert(stack.len >= 1);
+      if (stack.len == 1) {
+        Var* var = stack.list[0];
+        type_of_var_put(block, ir, var, rhs);
+      }
+      else {
+        for (I32 i = 0; i < stack.len; i++) {
+          Var* var = stack.list[i];
+          Type* old_type = type_of_var(block, var);
+          Type* new_type = type_join(block, old_type, rhs);
+          type_of_var_put(block, ir, var, new_type);
+        }
+      }
+    }
+    else if (lhs->kind == Type_Kind_compose) {
+      Pointer* pointer = lhs->compose->ptr_type->pointer;
       Hash_Set stack = pointer->stack;
       assert(stack.len >= 1);
       if (stack.len == 1) {
@@ -2704,7 +2725,10 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void sem_test(void) {
   // test("a: I32, (x:I32); a = 1; a", "");
-  test("a: (len:0; x:I32); a.len", "");
+  // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");
+  // test("a: Str; a.len = 10; a.len;", "");
+  test("a: Str = \"Hi\"; a@", "");
+  // test("a: @I32, (x:I32); a = @b; a.x = 4; a", "");
   // test("a: Str; a.len = 1", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");

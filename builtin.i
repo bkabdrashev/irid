@@ -4,17 +4,17 @@ I64 : type 64'bits (I64_MIN..I64_MAX)
 U64 : type 64'bits (0..I64_MAX)
 
 I32_MAX :  2147483647
-I32_MIN : -2147483648
+I32_MIN : -2147483647 - 1
 I32 : type 32'bits (I32_MIN..I32_MAX)
 
 I16_MAX :  32767
-I16_MIN : -32768
+I16_MIN : -32767 - 1
 I16 : type 16'bits (I16_MIN..I16_MAX)
 
 I8_MAX :  127
-I8_MIN : -128
+I8_MIN : -127 - 1
 I8 : type 8'bits (I8_MIN..I8_MAX)
 
 B8 : type 8'bits (0\1)
 
-Str : type (len:U64), @I8
+Str : type (len:U64), @(I8_MIN..I8_MAX)

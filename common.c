@@ -34,6 +34,8 @@ typedef intptr_t  Smp; //   signed memory pointer
 #define I32_MIN INT32_MIN
 #define I16_MAX INT16_MAX
 #define I16_MIN INT16_MIN
+#define I8_MAX  INT8_MAX
+#define I8_MIN  INT8_MIN
 
 #define KB(a) ((a)*1024llu)
 #define MB(a) (KB(a)*1024llu)
