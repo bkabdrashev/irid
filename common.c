@@ -256,6 +256,13 @@ U64 hash_u64(U64 x) {
   return x;
 }
 
+U64 hash_mix(U64 x, U64 y) {
+  x ^= y;
+  x *= 0xff51afd7ed558ccd;
+  x ^= x >> 32;
+  return x;
+}
+
 // array
 #define empty(slice) ((slice).length == 0)
 #define push(slice, item) ((slice).base[(slice).length++] = (item), ((slice).length)-1)

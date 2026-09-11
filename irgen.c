@@ -75,16 +75,11 @@ struct Int_Extend { Ir* value; I16 bits; };
 typedef struct Auto_Cast Auto_Cast;
 struct Auto_Cast { Ir* value; };
 
-typedef struct Record Record;
-struct Record {
+typedef struct Rec Rec;
+struct Rec {
   I32      length;
-  B8       offsets_all_equal;
-  B8       is_array;
   Ir**     irs;
-  Type**   types;
-  I32*     offsets;
   Str**    names;
-  Var**    vars;
   Hash_Map position_from_name;
 };
 
@@ -125,7 +120,7 @@ struct Ir {
     Str*    str;
     Var*    var;
     Fun*    fun;
-    Record* record;
+    Rec*    rec;
     Ir_Pair binary;
     Ir*     unary;
     Position_Offset position;
@@ -148,15 +143,11 @@ struct Irs {
   Ir* base[];
 };
 
-typedef struct Field Field;
-struct Field {
+typedef struct Ir_Field Ir_Field;
+struct Ir_Field {
   Str* name;
-  I32  position;
-  I32  offset;
-  Ir*  declared;
-  Type* declared_type;
-  Type* assigned_type;
-  Var*  var;
+  I32  pos;
+  Ir*  ir;
 };
 
 typedef struct Jump Jump;
@@ -246,10 +237,10 @@ struct Block {
   };
 };
 
-typedef struct Record_Pool Record_Pool;
-struct Record_Pool {
-  I32     length;
-  Record* base;
+typedef struct Rec_Pool Rec_Pool;
+struct Rec_Pool {
+  I32  length;
+  Rec* base;
 };
 
 struct Fun {
@@ -282,7 +273,7 @@ struct Irgen {
   Funs        funs;
   Var_Pool    vars;
   Block_Pool  blocks;
-  Record_Pool records;
+  Rec_Pool records;
   Ir_Pool     irs;
 
   Ir*         irid_nil;
@@ -297,17 +288,17 @@ struct Irgen {
 
 Irgen irgen = {};
 
-Field record_get_by_position(Record* record, I32 position) {
-  Field field = {};
+Ir_Field irgen_record_get_by_position(Rec* record, I32 position) {
+  Ir_Field field = {};
   field.name     = record->names[position];
-  field.position = position;
-  field.declared = record->irs[position];
+  field.pos = position;
+  field.ir = record->irs[position];
   return field;
 }
 
-Field record_get_by_name(Record* record, Str* name) {
+Ir_Field irgen_record_get_by_name(Rec* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
-  Field field = record_get_by_position(record, position);
+  Ir_Field field = irgen_record_get_by_position(record, position);
   return field;
 }
 
@@ -414,28 +405,28 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < ir->record->length; i++) {
-      Field field = record_get_by_position(ir->record, i);
+      Ir_Field field = irgen_record_get_by_position(ir->record, i);
       if (field.name) {
         string_builder_push_cstr(sb, " ");
         string_builder_push_str(sb, field.name);
-        if (field.declared) {
+        if (field.ir) {
           string_builder_push_cstr(sb, ":");
-          string_builder_push_irid(sb, field.declared);
+          string_builder_push_irid(sb, field.ir);
         }
       }
       else {
         string_builder_push_cstr(sb, " ");
-        string_builder_push_irid(sb, field.declared);
+        string_builder_push_irid(sb, field.ir);
       }
     }
   break;
   case Ir_Kind_and_list:
     string_builder_push_cstr(sb, "and list");
     for (I32 i = 0; i < ir->record->length; i++) {
-      Field field = record_get_by_position(ir->record, i);
+      Ir_Field field = irgen_record_get_by_position(ir->record, i);
       assert(!field.name);
       string_builder_push_cstr(sb, " ");
-      string_builder_push_irid(sb, field.declared);
+      string_builder_push_irid(sb, field.ir);
     }
   break;
   case Ir_Kind_add:  string_builder_push_cstr(sb, "add "); break;
@@ -646,12 +637,12 @@ Ir* irgen_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_record(Record* record) {
+Ir* irgen_push_record(Rec* record) {
   Ir ir = { Ir_Kind_record, .record = record };
   return irgen_push(ir);
 }
 
-Ir* irgen_push_and_list(Record* record) {
+Ir* irgen_push_and_list(Rec* record) {
   Ir ir = { Ir_Kind_and_list, .record = record };
   return irgen_push(ir);
 }
@@ -666,21 +657,19 @@ Ir* irgen_push_name_offset(Ir* record,Str* name) {
   return irgen_push(ir);
 }
 
-Record* record_new(I32 length) {
-  Record* new_record = &new(irgen.records);
-  new_record->length   = length;
-  new_record->names    = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
-  new_record->irs      = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
-  new_record->offsets  = arena_push_zero(irgen.perm_arena, length*sizeof(I32*));
-  new_record->types    = arena_push_zero(irgen.perm_arena, length*sizeof(Type*));
+Rec* irgen_record_new(I32 length) {
+  Rec* new_record = &new(irgen.records);
+  new_record->length = length;
+  new_record->names  = arena_push_zero(irgen.perm_arena, length*sizeof(Str*));
+  new_record->irs    = arena_push_zero(irgen.perm_arena, length*sizeof(Ir*));
   new_record->position_from_name = hash_map_init(irgen.perm_arena, length);
   return new_record;
 }
 
-void record_push_declare_position(Record* record, I32 position, Ir* value) {
+void irgen_record_push_declare_position(Rec* record, I32 position, Ir* value) {
   record->irs[position] = value;
 }
-void record_push_declare_name(Record* record, Str* name, I32 position) {
+void irgen_record_push_declare_name(Rec* record, Str* name, I32 position) {
   hash_map_put_i32(&record->position_from_name, name, position);
   record->names[position] = name;
 }
@@ -985,35 +974,35 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_assign(node->binary.lhs, rhs);
   } break;
   case Ast_Kind_and_list: {
-    Record* record = record_new(node->list->length);
+    Rec* record = irgen_record_new(node->list->length);
     for (I32 i = 0; i < node->list->length; i++) {
       Ir* ir = irgen_ast_node(node->list->base[i]);
-      record_push_declare_position(record, i, ir);
+      irgen_record_push_declare_position(record, i, ir);
     }
     result = irgen_push_and_list(record);
   } break;
   case Ast_Kind_record: {
-    Record* record = record_new(node->list->length);
+    Rec* record = irgen_record_new(node->list->length);
     for (I32 i = 0; i < node->list->length; i++) {
       Ast_Node* field_node = node->list->base[i];
       if (field_node->kind == Ast_Kind_declare) {
         Ir* ir = irgen_ast_node(field_node->declare.node);
-        record_push_declare_name(record, field_node->declare.name, i);
-        record_push_declare_position(record, i, ir);
+        irgen_record_push_declare_name(record, field_node->declare.name, i);
+        irgen_record_push_declare_position(record, i, ir);
       }
       else {
         Ir* ir = irgen_ast_node(field_node);
-        record_push_declare_position(record, i, ir);
+        irgen_record_push_declare_position(record, i, ir);
       }
     }
     result = irgen_push_record(record);
   } break;
 
   case Ast_Kind_declare: {
-    Record* record = record_new(1);
+    Rec* record = irgen_record_new(1);
     Ir* ir = irgen_ast_node(node->declare.node);
-    record_push_declare_name(record, node->declare.name, 0);
-    record_push_declare_position(record, 0, ir);
+    irgen_record_push_declare_name(record, node->declare.name, 0);
+    irgen_record_push_declare_position(record, 0, ir);
     result = irgen_push_record(record);
   } break;
 
@@ -1217,7 +1206,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.blocks.length  = 0;
   irgen.irs.base       = arena_push(irgen.perm_arena, total_nodes * sizeof(Ir));
   irgen.irs.length     = 0;
-  irgen.records.base   = arena_push(irgen.perm_arena, total_nodes * sizeof(Record));
+  irgen.records.base   = arena_push(irgen.perm_arena, total_nodes * sizeof(Rec));
   irgen.records.length = 0;
   irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
