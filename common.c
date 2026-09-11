@@ -487,13 +487,13 @@ void** hash_map_get_ptr(Hash_Map* map, void* key) {
 }
 
 void hash_map_put_i32(Hash_Map* map, void* key, I32 val) {
-  I64 cast = val;
+  I64 cast = val+1;
   hash_map_put(map, key, (void*)cast);
 }
 
 I32 hash_map_get_i32(Hash_Map* map, void* key) {
   void* val = hash_map_get(map, key);
-  I64 i64 = (I64)val;
+  I64 i64 = (I64)val - 1;
   return i64;
 }
 

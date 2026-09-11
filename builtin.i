@@ -17,4 +17,4 @@ I8 : type 8'bits (I8_MIN..I8_MAX)
 
 B8 : type 8'bits (0\1)
 
-Str : type (length:U64), @I8
+Str : type (len:U64), @I8

@@ -967,18 +967,76 @@ Field type_record_get_by_name(Block* block, Record* record, Str* name) {
 
 Var* sem_get_var_by_name(Var* var, Str* name) {
   assert(var->declared);
-  assert(var->declared->kind == Type_Kind_record);
-  Record* record = var->declared->record;
-  I32 position = hash_map_get_i32(&record->position_from_name, name);
-  return record->vars[position];
+  if (var->declared->kind == Type_Kind_record) {
+    Record* record = var->declared->record;
+    I32 position = hash_map_get_i32(&record->position_from_name, name);
+    return record->vars[position];
+  }
+  else if (var->declared->kind == Type_Kind_compose) {
+    I32 found = 0;
+    I32 found_i = 0;
+    for (I32 i = 0; i < var->declared->compose->records.len; i++) {
+      Type* type = var->declared->compose->records.list[i];
+      Record* record = type->record;
+      I32 position = hash_map_get_i32(&record->position_from_name, name);
+      if (position != -1) {
+        found++;
+        found_i = i;
+      }
+    }
+    if (found == 1) {
+      Type* type = var->declared->compose->records.list[found_i];
+      Record* record = type->record;
+      I32 position = hash_map_get_i32(&record->position_from_name, name);
+      return record->vars[position];
+    }
+    else if (found == 0) {
+      assert(0);
+    }
+    else {
+      assert(0);
+    }
+  }
+  else {
+    assert(0);
+  }
 }
 
 I32 sem_get_offset_by_name(Var* var, Str* name) {
   sem_ensure_declared(var);
-  assert(var->declared->kind == Type_Kind_record);
-  Record* record = var->declared->record;
-  I32 position = hash_map_get_i32(&record->position_from_name, name);
-  return record->offsets[position];
+  if (var->declared->kind == Type_Kind_record) {
+    Record* record = var->declared->record;
+    I32 position = hash_map_get_i32(&record->position_from_name, name);
+    return record->offsets[position];
+  }
+  else if (var->declared->kind == Type_Kind_compose) {
+    I32 found = 0;
+    I32 found_i = 0;
+    for (I32 i = 0; i < var->declared->compose->records.len; i++) {
+      Type* type = var->declared->compose->records.list[i];
+      Record* record = type->record;
+      I32 position = hash_map_get_i32(&record->position_from_name, name);
+      if (position != -1) {
+        found++;
+        found_i = i;
+      }
+    }
+    if (found == 1) {
+      Type* type = var->declared->compose->records.list[found_i];
+      Record* record = type->record;
+      I32 position = hash_map_get_i32(&record->position_from_name, name);
+      return record->offsets[position];
+    }
+    else if (found == 0) {
+      assert(0);
+    }
+    else {
+      assert(0);
+    }
+  }
+  else {
+    assert(0);
+  }
 }
 
 Type* type_record(Record* record) {
@@ -997,10 +1055,15 @@ Type* type_record(Record* record) {
     }
     for (I32 i = 0; i < record->length; i++) {
       Type* field_type = new_type->record->types[i];
-      new_type->bits_align = max(new_type->bits_align, field_type->bits_align);
-      new_type->bits_size = align_up(new_type->bits_size, field_type->bits_align);
-      new_type->record->offsets[i] = new_type->bits_size;
-      new_type->bits_size += field_type->bits_size;
+      if (!type_is_const(field_type)) {
+        new_type->bits_align = max(new_type->bits_align, field_type->bits_align);
+        new_type->bits_size = align_up(new_type->bits_size, field_type->bits_align);
+        new_type->record->offsets[i] = new_type->bits_size;
+        new_type->bits_size += field_type->bits_size;
+      }
+      else {
+        new_type->record->offsets[i] = -1;
+      }
     }
     new_type->bits_size = align_up(new_type->bits_size, new_type->bits_align);
     new_type->record->offsets_all_equal = true;
@@ -1829,44 +1892,39 @@ void sem_block(Block* block);
 void sem_init_block_preds(Block* block);
 
 void sem_record_declare_fields(Var* var, Type* type) {
-  if (type->kind != Type_Kind_record) return;
-  type->record->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
-  for (I32 i = 0; i < type->record->length; i++) {
-    Var* field_var = arena_push_zero(sem.perm_arena, sizeof(Var));
-    field_var->offset = i;
-    type->record->vars[i] = field_var;
-    field_var->name = type->record->names[i];
-    field_var->parent = var;
-    Type* field_type = type_of_field_at(type->record, i);
-    type->record->types[i] = field_type;
-    field_var->declared = field_type;
-    field_var->state = Var_State_resolved;
-    sem_record_declare_fields(field_var, field_type);
+  if (type->kind == Type_Kind_record) {
+    type->record->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
+    for (I32 i = 0; i < type->record->length; i++) {
+      Var* field_var = arena_push_zero(sem.perm_arena, sizeof(Var));
+      field_var->offset = i;
+      type->record->vars[i] = field_var;
+      field_var->name = type->record->names[i];
+      field_var->parent = var;
+      Type* field_type = type_of_field_at(type->record, i);
+      type->record->types[i] = field_type;
+      field_var->declared = field_type;
+      field_var->state = Var_State_resolved;
 
-    if (type_is_const(field_type)) {
-      field_var->kind = Var_Kind_constant;
-    }
-    else {
-      field_var->kind = Var_Kind_declared;
-      type->bits_align = max(type->bits_align, field_type->bits_align);
-      type->bits_size = align_up(type->bits_size, field_type->bits_align);
-      type->record->offsets[i] = type->bits_size;
-      type->bits_size += field_type->bits_size;
-    }
-  }
-  type->bits_size = align_up(type->bits_size, type->bits_align);
-  type->record->offsets_all_equal = true;
-  I16 last_field_bits_size = type->bits_size - type->record->offsets[type->record->length-1];
-  for (I32 i = 0; i+2 < type->record->length; i++) {
-    I16 field_bits_size = type->record->offsets[i+1] - type->record->offsets[i];
-    if (last_field_bits_size != field_bits_size) {
-      type->record->offsets_all_equal = false;
-    }
-  }
+      sem_record_declare_fields(field_var, field_type);
 
-  for (I32 i = 0; i < type->record->length; i++) {
-    type->record->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+      if (type_is_const(field_type)) {
+        field_var->kind = Var_Kind_constant;
+      }
+      else {
+        field_var->kind = Var_Kind_declared;
+      }
+    }
+    for (I32 i = 0; i < type->record->length; i++) {
+      type->record->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    }
   }
+  else if (type->kind == Type_Kind_compose) {
+    for (I32 i = 0; i < type->compose->records.len; i++) {
+      Type* rec = type->compose->records.list[i];
+      sem_record_declare_fields(var, rec);
+    }
+  }
+  return;
 }
 
 Type* sem_ensure_declared(Var* var) {
@@ -2645,7 +2703,9 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a: I32, (x:I32); a = 1; a", "");
+  // test("a: I32, (x:I32); a = 1; a", "");
+  test("a: (len:0; x:I32); a.len", "");
+  // test("a: Str; a.len = 1", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:(x:I32; y:I32); a = (y:1; x:2); a.x", "");
   // test("a: 8'bits 0..100 = 30; a+10", "");
