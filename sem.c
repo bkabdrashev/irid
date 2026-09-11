@@ -1026,17 +1026,19 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
   result->bits_size  = int_type->bits_size;
   result->bits_size  = align_up(result->bits_size, int_type->bits_align);
 
-  result->bits_size += ptr_type->bits_size;
-  result->bits_size  = align_up(result->bits_size, ptr_type->bits_align);
+  if (ptr_type != sem.type_none) {
+    result->bits_size += ptr_type->bits_size;
+    result->bits_size  = align_up(result->bits_size, ptr_type->bits_align);
+  }
 
   result->bits_align = max(int_type->bits_align, ptr_type->bits_align);
   for (I32 i = 0; i < records.len; i++) {
     Type* record = records.list[i];
     result->bits_align = max(result->bits_align, record->bits_align);
     result->bits_size  = align_up(result->bits_size, record->bits_align);
-    result->bits_size += records.list[i]->bits_size;
+    result->bits_size += record->bits_size;
   }
-  result->bits_align = aling_up(result->bits_size, result->bits_align);
+  result->bits_align = align_up(result->bits_size, result->bits_align);
   result->compose->int_type = int_type;
   result->compose->ptr_type = ptr_type;
   result->compose->records  = records;
