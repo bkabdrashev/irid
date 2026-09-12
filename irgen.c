@@ -109,6 +109,7 @@ struct Var {
   Str*  name;
   Type* declared;
   Ir*     declared_ir;
+  Var**   vars;
   Blocks* blocks;
   Type**  block_types;
 };
