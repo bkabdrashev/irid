@@ -65,7 +65,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
       }
     }
     if (type->record->is_array) {
-      Type* field_type = type_of_ir(type->record->irs[0]);
+      Type* field_type = type->record->types[0];
       LLVMTypeRef llvm_field_type = llvm_of_type(field_type);
       result = LLVMArrayType2(llvm_field_type, type->record->length);
     }
@@ -85,7 +85,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
         Record* record = type->function->arg->record;
         arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
         for (I32 i = 0; i < record->length; i++) {
-          Type* arg_type = type_of_ir(record->irs[i]);
+          Type* arg_type = record->types[i];
           arg_types[i] = llvm_of_type(arg_type);
         }
         arg_count = record->length;
@@ -331,12 +331,14 @@ void llvm_ir(Ir* ir) {
         llvm_arg_count = 0;
       }
       else if (fun_type->function->fun->foreign && arg_type->kind == Type_Kind_record) {
-        Record* record = arg_type->record;
-        llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
-        for (I32 i = 0; i < record->length; i++) {
-          llvm_args[i] = llvm_of_ir(record->irs[i]);
+        if (arg_ir->kind == Ir_Kind_record) {
+          Rec* rec = arg_ir->rec;
+          llvm_args = arena_push(llvm_gen.perm_arena, rec->length * sizeof(LLVMValueRef));
+          for (I32 i = 0; i < rec->length; i++) {
+            llvm_args[i] = llvm_of_ir(rec->irs[i]);
+          }
+          llvm_arg_count = rec->length;
         }
-        llvm_arg_count = record->length;
       }
       else {
         LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
@@ -403,13 +405,13 @@ void llvm_ir(Ir* ir) {
     if (ir->binary.two->kind == Ir_Kind_record) {
       Type* type_ptr = type_of_ir(ir->binary.one);
       Type* record_type = type_ptr->pointer->declared;
-      Record* record_one = ir->binary.two->record;
+      Rec* rec_one = ir->binary.two->rec;
       Record* record_two = record_type->record;
-      for (I32 pos = 0; pos < record_one->length; pos++) {
-        Str* name = record_one->names[pos];
+      for (I32 pos = 0; pos < rec_one->length; pos++) {
+        Str* name = rec_one->names[pos];
         if (name) {
           I32 position = hash_map_get_i32(&record_two->position_from_name, name);
-          LLVMValueRef llvm_assigned = llvm_of_ir(record_one->irs[pos]);
+          LLVMValueRef llvm_assigned = llvm_of_ir(rec_one->irs[pos]);
           LLVMTypeRef llvm_type = llvm_of_type(record_type);
           LLVMValueRef llvm_gep = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, llvm_one, position, "");
           LLVMBuildStore(llvm_gen.builder, llvm_assigned, llvm_gep);
@@ -467,11 +469,11 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_record: {
-    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->record->length * sizeof(LLVMValueRef));
-    for (I32 i = 0; i < ir->record->length; i++) {
-      values[i] =  llvm_of_ir(ir->record->irs[i]);
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->rec->length * sizeof(LLVMValueRef));
+    for (I32 i = 0; i < ir->rec->length; i++) {
+      values[i] =  llvm_of_ir(ir->rec->irs[i]);
     }
-    result = LLVMConstStructInContext(llvm_gen.context, values, ir->record->length, false);
+    result = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
   } break;
   case Ir_Kind_ptr: assert(0);
 

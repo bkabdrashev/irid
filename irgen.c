@@ -405,8 +405,8 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");
-    for (I32 i = 0; i < ir->record->length; i++) {
-      Ir_Field field = irgen_record_get_by_position(ir->record, i);
+    for (I32 i = 0; i < ir->rec->length; i++) {
+      Ir_Field field = irgen_record_get_by_position(ir->rec, i);
       if (field.name) {
         string_builder_push_cstr(sb, " ");
         string_builder_push_str(sb, field.name);
@@ -423,8 +423,8 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_and_list:
     string_builder_push_cstr(sb, "and list");
-    for (I32 i = 0; i < ir->record->length; i++) {
-      Ir_Field field = irgen_record_get_by_position(ir->record, i);
+    for (I32 i = 0; i < ir->rec->length; i++) {
+      Ir_Field field = irgen_record_get_by_position(ir->rec, i);
       assert(!field.name);
       string_builder_push_cstr(sb, " ");
       string_builder_push_irid(sb, field.ir);
@@ -638,13 +638,13 @@ Ir* irgen_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_record(Rec* record) {
-  Ir ir = { Ir_Kind_record, .record = record };
+Ir* irgen_push_record(Rec* rec) {
+  Ir ir = { Ir_Kind_record, .rec = rec };
   return irgen_push(ir);
 }
 
-Ir* irgen_push_and_list(Rec* record) {
-  Ir ir = { Ir_Kind_and_list, .record = record };
+Ir* irgen_push_and_list(Rec* rec) {
+  Ir ir = { Ir_Kind_and_list, .rec = rec };
   return irgen_push(ir);
 }
 

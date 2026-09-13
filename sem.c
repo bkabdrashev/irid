@@ -38,7 +38,6 @@ struct Field {
 typedef struct Record Record;
 struct Record {
   I32      length;
-  B8       offsets_all_equal;
   B8       is_array;
   Str**    names;
   Type**   types;
@@ -48,9 +47,9 @@ struct Record {
 
 typedef struct Compose Compose;
 struct Compose {
-  Type* int_type;
-  Type* ptr_type;
-  Hash_Set records;
+  Type*     int_type;
+  Type*     ptr_type;
+  Hash_Set* records;
 };
 
 typedef enum Type_Kind {
@@ -69,6 +68,7 @@ struct Type {
   I16 bits_align;
   I16 bits_size;
   union {
+    U64       value;
     Ranges*   ranges;
     Pointer*  pointer;
     Record*   record;
@@ -107,6 +107,11 @@ struct Sem {
   Type_Pool types;
 
   Hash_Set  type_set;
+  Hash_Set  record_set;
+  Hash_Set  pointer_set;
+  Hash_Set  ranges_set;
+  Hash_Set  compose_set;
+  Hash_Set  function_set;
 
   Type* type_none;
   Type* bits_fun;
@@ -240,11 +245,11 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
       string_builder_push_type(sb, block, type->compose->ptr_type);
       string_builder_push_cstr(sb, ", ");
     }
-    Hash_Set records = type->compose->records;
-    for (I32 i = 0; i < records.len; i++) {
-      Type* record = records.list[i];
+    Hash_Set* records = type->compose->records;
+    for (I32 i = 0; i < records->len; i++) {
+      Type* record = records->list[i];
       string_builder_push_type(sb, block, record);
-      if (i+1 < records.len) {
+      if (i+1 < records->len) {
         string_builder_push_cstr(sb, ", ");
       }
     }
@@ -461,7 +466,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     // a = (I32 1; I32 2)
     Type* int_type = two->compose->int_type;
     Type* ptr_type = two->compose->ptr_type;
-    Hash_Set records = two->compose->records;
+    Hash_Set* records = two->compose->records;
     switch (one->kind) {
     case Type_Kind_int: {
       return type_is_subtype_rec(block, one, int_type, visited);
@@ -476,9 +481,9 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       if (!type_is_subtype_rec(block, one->compose->ptr_type, ptr_type, visited)) {
         return false;
       }
-      for (I32 i = 0; i < one->compose->records.len; i++) {
-        Type* record = one->compose->records.list[i];
-        if (!hash_set_exists(&records, record)) {
+      for (I32 i = 0; i < one->compose->records->len; i++) {
+        Type* record = one->compose->records->list[i];
+        if (!hash_set_exists(records, record)) {
           return false;
         }
       }
@@ -620,8 +625,8 @@ B8 type_is_const(Type* type) {
     if (!type_is_const(type->compose->ptr_type)) {
       return false;
     }
-    for (I32 r = 0; r < type->compose->records.len; r++) {
-      Record* record = type->compose->records.list[r];
+    for (I32 r = 0; r < type->compose->records->len; r++) {
+      Record* record = type->compose->records->list[r];
       for (I32 i = 0; i < record->length; i++) {
         Type* field_declared = type_of_field_at(record, i);
         if (field_declared) {
@@ -719,16 +724,16 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
     // a = (I32 1; I32 2)
     Type* int_type = two->compose->int_type;
     Type* ptr_type = two->compose->ptr_type;
-    Hash_Set records = two->compose->records;
+    Hash_Set* records = two->compose->records;
     if (!type_is_same_rec(block, one->compose->int_type, int_type, visited)) {
       return false;
     }
     if (!type_is_same_rec(block, one->compose->ptr_type, ptr_type, visited)) {
       return false;
     }
-    for (I32 i = 0; i < one->compose->records.len; i++) {
-      Record* record = one->compose->records.list[i];
-      if (!hash_set_exists(&records, record)) {
+    for (I32 i = 0; i < one->compose->records->len; i++) {
+      Record* record = one->compose->records->list[i];
+      if (!hash_set_exists(records, record)) {
         return false;
       }
     }
@@ -755,24 +760,90 @@ void type_of_ir_put(Ir* ir, Type* type) {
   hash_map_put(&sem.type_of_irs, ir, type);
 }
 
-Type* type_ranges(Ranges* ranges) {
-  Type* new_type = &new(sem.types);
+Type* type_in_set(Type* type) {
+  Type* result = sem.type_none;
+  I32 i = hash_mix(type->value, type->bits_size);
+  i = hash_mix(i, type->kind);
+  i = hash_mix(i, type->bits_align);
+  i = hash_mix(i, type->size_defined);
+  for (;;) {
+    i &= sem.type_set.cap - 1;
+    Type* key = sem.type_set.keys[i];
+    if (!key) {
+      sem.type_set.keys[i] = type;
+      result = type;
+      break;
+    }
+    else {
+      if (key->kind == type->kind
+      &&  key->value == type->value
+      &&  key->bits_size == type->bits_size
+      &&  key->bits_align == type->bits_align
+      &&  key->size_defined == type->size_defined) {
+        arena_release_mark(sem.perm_arena, type);
+        result = key;
+        break;
+      }
+    }
+    i++;
+  }
+  return result;
+}
 
+B8 sem_ranges_is_equal(Ranges* one, Ranges* two) {
+  B8 result = false;
+  if (one->length == two->length) {
+    result = true;
+    for (I32 i = 0; i < one->length; i++) {
+      if (one->pairs[i].lo != two->pairs[i].lo) {
+        result = false;
+        break;
+      }
+      else if (one->pairs[i].hi != two->pairs[i].hi) {
+        result = false;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+Type* type_ranges(Ranges* ranges) {
+  Type* result = sem.type_none;
   if (ranges->length == 0) {
-    new_type->kind = Type_Kind_none;
+    result = sem.type_none;
   }
   else {
-    new_type->kind   = Type_Kind_int;
-    new_type->ranges = ranges;
-
+    I32 i = 0;
+    for (;;) {
+      i &= sem.ranges_set.cap - 1;
+      Ranges* key = sem.ranges_set.keys[i];
+      if (!key) {
+        sem.ranges_set.keys[i] = ranges;
+        break;
+      }
+      else {
+        if (sem_ranges_is_equal(key, ranges)) {
+          arena_release_mark(sem.perm_arena, ranges);
+          ranges = key;
+          break;
+        }
+      }
+      i++;
+    }
     I64 min = ranges_min(ranges);
     I64 max = ranges_max(ranges);
     I16 bits_size = bits_needed(min, max);
+    Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+    new_type->kind = Type_Kind_int;
     new_type->bits_align = align_up(bits_size, 8);
     new_type->bits_size  = bits_size;
+    new_type->size_defined = false;
+    new_type->ranges = ranges;
+    result = type_in_set(new_type);
   }
 
-  return new_type;
+  return result;
 }
 
 Type* type_range(I64 min, I64 max) {
@@ -956,8 +1027,8 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
   else if (var->declared->kind == Type_Kind_compose) {
     I32 found = 0;
     I32 found_i = 0;
-    for (I32 i = 0; i < var->declared->compose->records.len; i++) {
-      Type* type = var->declared->compose->records.list[i];
+    for (I32 i = 0; i < var->declared->compose->records->len; i++) {
+      Type* type = var->declared->compose->records->list[i];
       Record* record = type->record;
       I32 position = hash_map_get_i32(&record->position_from_name, name);
       if (position != -1) {
@@ -966,7 +1037,7 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
       }
     }
     if (found == 1) {
-      Type* type = var->declared->compose->records.list[found_i];
+      Type* type = var->declared->compose->records->list[found_i];
       Record* record = type->record;
       I32 position = hash_map_get_i32(&record->position_from_name, name);
       return var->vars[position];
@@ -993,8 +1064,8 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
   else if (var->declared->kind == Type_Kind_compose) {
     I32 found = 0;
     I32 found_i = 0;
-    for (I32 i = 0; i < var->declared->compose->records.len; i++) {
-      Type* type = var->declared->compose->records.list[i];
+    for (I32 i = 0; i < var->declared->compose->records->len; i++) {
+      Type* type = var->declared->compose->records->list[i];
       Record* record = type->record;
       I32 position = hash_map_get_i32(&record->position_from_name, name);
       if (position != -1) {
@@ -1003,7 +1074,7 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
       }
     }
     if (found == 1) {
-      Type* type = var->declared->compose->records.list[found_i];
+      Type* type = var->declared->compose->records->list[found_i];
       Record* record = type->record;
       I32 position = hash_map_get_i32(&record->position_from_name, name);
       return record->offsets[position];
@@ -1019,42 +1090,84 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
     assert(0);
   }
 }
+Record* type_record_init(I32 length) {
+  Record* result = arena_push(sem.perm_arena, sizeof(Record));
+  result->length  = length;
+  result->names   = arena_push(sem.perm_arena, length * sizeof(Str*));
+  result->types   = arena_push(sem.perm_arena, length * sizeof(Type*));
+  result->offsets = arena_push(sem.perm_arena, length * sizeof(I32));
+  result->position_from_name = hash_map_init(sem.perm_arena, length);
+  return result;
+}
 
-U64 type_record_hash(Record* record) {
+B8 type_record_is_equal(Record* one, Record* two) {
+  B8 result = false;
+  if (one->is_array == two->is_array) {
+    if (one->length == two->length) {
+      result = true;
+      for (I32 i = 0; i < one->length; i++) {
+        if (one->names[i] != two->names[i]) {
+          result = false;
+          break;
+        }
+        else if (one->types[i] != two->types[i]) {
+          result = false;
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+U64 sem_record_hash(Record* record) {
   return 0;
 }
 
-I64 type_record_is_equal(Record* one, Record* two) {
-}
-
-Type* type_record(Record record) {
-  Type new_type = {0};
+Type* type_record(Record* record) {
   Type* result = sem.type_none;
-  if (record.length > 0) {
-    new_type.kind = Type_Kind_record;
-    // new_type.record = record;
-    for (I32 i = 0; i < record.length; i++) {
-      Type* field_type = new_type.record->types[i];
+  if (record->length > 0) {
+    I16 bits_align = 0;
+    I16 bits_size = 0;
+    for (I32 i = 0; i < record->length; i++) {
+      Type* field_type = record->types[i];
       if (!type_is_const(field_type)) {
-        new_type.bits_align = max(new_type.bits_align, field_type->bits_align);
-        new_type.bits_size = align_up(new_type.bits_size, field_type->bits_align);
-        new_type.record->offsets[i] = new_type.bits_size;
-        new_type.bits_size += field_type->bits_size;
+        bits_align = max(bits_align, field_type->bits_align);
+        bits_size = align_up(bits_size, field_type->bits_align);
+        record->offsets[i] = bits_size;
+        bits_size += field_type->bits_size;
       }
       else {
-        new_type.record->offsets[i] = -1;
+        record->offsets[i] = -1;
       }
+      bits_size = align_up(bits_size, bits_align);
     }
-    new_type.bits_size = align_up(new_type.bits_size, new_type.bits_align);
-    new_type.record->offsets_all_equal = true;
-    I16 last_field_bits_size = new_type.bits_size - new_type.record->offsets[new_type.record->length-1];
-    for (I32 i = 0; i+2 < new_type.record->length; i++) {
-      I16 field_bits_size = new_type.record->offsets[i+1] - new_type.record->offsets[i];
-      if (last_field_bits_size != field_bits_size) {
-        new_type.record->offsets_all_equal = false;
+
+    I32 i = sem_record_hash(record);
+    for (;;) {
+      i &= sem.record_set.cap - 1;
+      Record* key_record = sem.record_set.keys[i];
+      if (!key_record) {
+        sem.record_set.keys[i] = record;
+        break;
       }
+      else {
+        if (type_record_is_equal(key_record, record)) {
+          arena_release_mark(sem.perm_arena, record);
+          record = key_record;
+          break;
+        }
+      }
+      i++;
     }
-    // Interning
+
+    Type* type = arena_push(sem.perm_arena, sizeof(Type));
+    type->kind = Type_Kind_record;
+    type->record = record;
+    result = type_in_set(type);
+  }
+  else {
+    result = sem.type_none;
   }
   return result;
 }
@@ -1062,7 +1175,7 @@ Type* type_record(Record record) {
 Type* type_ranges_meet(Ranges* one, Ranges* two);
 Type* type_ptr(Type* declared, Hash_Set stack);
 
-Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
+Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set* records) {
   Type* result = &new(sem.types);
   result->kind = Type_Kind_compose;
   result->compose = arena_push(sem.perm_arena, sizeof(Compose));
@@ -1076,8 +1189,8 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
   }
 
   result->bits_align = max(int_type->bits_align, ptr_type->bits_align);
-  for (I32 i = 0; i < records.len; i++) {
-    Type* record = records.list[i];
+  for (I32 i = 0; i < records->len; i++) {
+    Type* record = records->list[i];
     result->bits_align = max(result->bits_align, record->bits_align);
     result->bits_size  = align_up(result->bits_size, record->bits_align);
     result->bits_size += record->bits_size;
@@ -1090,6 +1203,7 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set records) {
 }
 
 Type* type_meet(Type* one, Type* two) {
+  void* mark = arena_mark(sem.temp_arena);
   Type* result = sem.type_none;
 
   if (one->kind == Type_Kind_none) {
@@ -1108,7 +1222,7 @@ Type* type_meet(Type* one, Type* two) {
     if (one->kind == Type_Kind_compose) {
       one_int_type = one->compose->int_type;
       one_ptr_type = one->compose->ptr_type;
-      one_records = one->compose->records;
+      one_records = *one->compose->records;
     }
     else if (one->kind == Type_Kind_record) {
       one_records = hash_set_init(sem.perm_arena, 1);
@@ -1127,7 +1241,7 @@ Type* type_meet(Type* one, Type* two) {
     if (two->kind == Type_Kind_compose) {
       two_int_type = two->compose->int_type;
       two_ptr_type = two->compose->ptr_type;
-      two_records = two->compose->records;
+      two_records = *two->compose->records;
     }
     else if (two->kind == Type_Kind_record) {
       two_records = hash_set_init(sem.perm_arena, 1);
@@ -1145,7 +1259,8 @@ Type* type_meet(Type* one, Type* two) {
 
     Type* int_type = type_meet(one_int_type, two_int_type);
     Type* ptr_type = type_meet(one_ptr_type, two_ptr_type);
-    Hash_Set records = hash_set_join(sem.perm_arena, &one_records, &two_records);
+    Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
+    *records = hash_set_join(sem.perm_arena, &one_records, &two_records);
     result = type_compose(int_type, ptr_type, records);
   }
   else {
@@ -1171,12 +1286,14 @@ Type* type_meet(Type* one, Type* two) {
     case Type_Kind_compose: {
       Type* int_type = type_meet(one->compose->int_type, two->compose->int_type);
       Type* ptr_type = type_meet(one->compose->ptr_type, two->compose->ptr_type);
-      Hash_Set records = hash_set_meet(sem.perm_arena, &one->compose->records, &two->compose->records);
+      Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
+      *records = hash_set_join(sem.perm_arena, one->compose->records, two->compose->records);
       result = type_compose(int_type, ptr_type, records);
     } break;
     }
   }
 
+  arena_release_mark(sem.temp_arena, mark);
   return result;
 }
 
@@ -1791,28 +1908,23 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
     } break;
     case Type_Kind_record: {
       I32 length = from->record->length;
-      Record new_record   = {0};
-      new_record.length   = length;
-      new_record.names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-      new_record.types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-      new_record.offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-      new_record.position_from_name = hash_map_init(sem.perm_arena, length);
+      Record* new_record  = type_record_init(length);
       for (I32 i = 0; i < length; i++) {
         Field field = type_record_get_by_position(block, from->record, i);
         Field var_field;
         if (field.name) {
           var_field = type_record_get_by_name(block, to->record, field.name);
-          new_record.names[i] = var_field.name;
-          hash_map_put_i32(&new_record.position_from_name, var_field.name, i);
+          new_record->names[i] = var_field.name;
+          hash_map_put_i32(&new_record->position_from_name, var_field.name, i);
         }
         else {
           var_field = type_record_get_by_position(block, to->record, i);
         }
         if (type_is_same(block, field.type, var_field.var->declared)) {
-          new_record.types[i] = field.type;
+          new_record->types[i] = field.type;
         }
         else {
-          new_record.types[i] = type_auto_cast(block, 0, field.type, var_field.var->declared);
+          new_record->types[i] = type_auto_cast(block, 0, field.type, var_field.var->declared);
         }
       }
       result = type_record(new_record);
@@ -1898,8 +2010,8 @@ void sem_record_declare_fields(Var* var, Type* type) {
     }
   }
   else if (type->kind == Type_Kind_compose) {
-    for (I32 i = 0; i < type->compose->records.len; i++) {
-      Type* rec = type->compose->records.list[i];
+    for (I32 i = 0; i < type->compose->records->len; i++) {
+      Type* rec = type->compose->records->list[i];
       sem_record_declare_fields(var, rec);
     }
   }
@@ -1951,23 +2063,18 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_str: {
     // Str* str = ir->str;
-    I32 length = 1;
-    Record record = {0};
-    // new_record->is_array = true;
-    record.length   = 1;
-    record.names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-    record.types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-    record.offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-    record.position_from_name = hash_map_init(sem.perm_arena, length);
+    Record* record = type_record_init(1);
+    record->is_array = true;
     Type* len_range = type_range(0, I64_MAX);
-    record.types[0] = len_range;
-    record.names[0] = sem.str_len;
-    hash_map_put_i32(&record.position_from_name, sem.str_len, 0);
+    record->types[0] = len_range;
+    record->names[0] = sem.str_len;
+    hash_map_put_i32(&record->position_from_name, sem.str_len, 0);
     Type* bytes_range = type_range(I8_MIN, I8_MAX);
     Type* ptr_type = type_ptr_to(bytes_range);
-    Hash_Set records = hash_set_init(sem.perm_arena, 1);
+    Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
+    *records = hash_set_init(sem.perm_arena, 1);
     Type* record_type = type_record(record);
-    hash_set_put(&records, record_type);
+    hash_set_put(records, record_type);
     result = type_compose(sem.type_none, ptr_type, records);
   } break;
   case Ir_Kind_declare: {
@@ -2093,13 +2200,17 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_record: {
-    Record record = {0};
-    // TODO temp alloc
+    Record* new_record  = arena_push_zero(sem.perm_arena, sizeof(Record));
+    new_record->length  = ir->rec->length;
+    new_record->names   = ir->rec->names;
+    new_record->types   = arena_push(sem.perm_arena, new_record->length * sizeof(Type*));
+    new_record->offsets = arena_push(sem.perm_arena, new_record->length * sizeof(I32));
     for (I32 i = 0; i < ir->rec->length; i++) {
-      Type* field_type = type_of_ir(ir->rec->irs[i]);
-      record.types[i] = field_type;
+      new_record->types[i] = type_of_ir(ir->rec->irs[i]);
     }
-    result = type_record(record);
+    new_record->position_from_name = ir->rec->position_from_name;
+
+    result = type_record(new_record);
   } break;
   case Ir_Kind_and_list: {
     for (I32 i = 0; i < ir->rec->length; i++) {
@@ -2108,21 +2219,21 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_span: {
-    Record record = {0};
+    Record* record = arena_push(sem.perm_arena, sizeof(Record));
     I32 length = 2;
-    record.length   = length;
-    record.names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-    record.types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-    record.offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-    record.position_from_name = hash_map_init(sem.perm_arena, length);
+    record->length   = length;
+    record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+    record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+    record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+    record->position_from_name = hash_map_init(sem.perm_arena, length);
 
     Type* ptr_to_type = type_of_ir(ir->unary);
-    record.names[0] = sem.str_len;
-    record.names[1] = sem.str_ptr;
-    record.types[0] = type_range(0, I64_MAX);
-    record.types[1] = type_ptr_to(ptr_to_type);
-    hash_map_put_i32(&record.position_from_name, sem.str_len, 0);
-    hash_map_put_i32(&record.position_from_name, sem.str_ptr, 1);
+    record->names[0] = sem.str_len;
+    record->names[1] = sem.str_ptr;
+    record->types[0] = type_range(0, I64_MAX);
+    record->types[1] = type_ptr_to(ptr_to_type);
+    hash_map_put_i32(&record->position_from_name, sem.str_len, 0);
+    hash_map_put_i32(&record->position_from_name, sem.str_ptr, 1);
 
     result = type_record(record);
   } break;
@@ -2131,15 +2242,15 @@ void sem_ir(Block* block, Ir* ir) {
     if (one_type->kind == Type_Kind_int) {
       if (type_is_const(one_type)) {
         I64 length = ranges_min(one_type->ranges);
-        Record record = {0};
-        record.is_array = true;
-        record.length   = length;
-        record.names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-        record.types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-        record.offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-        record.position_from_name = hash_map_init(sem.perm_arena, length);
+        Record* record = arena_push(sem.perm_arena, sizeof(Record));
+        record->is_array = true;
+        record->length   = length;
+        record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
+        record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
+        record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
+        record->position_from_name = hash_map_init(sem.perm_arena, length);
         for (I32 i = 0; i < length; i++) {
-          record.types[i] = type_of_ir(ir->binary.two);
+          record->types[i] = type_of_ir(ir->binary.two);
         }
         result = type_record(record);
       }
@@ -2159,9 +2270,6 @@ void sem_ir(Block* block, Ir* ir) {
         Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
         for (I32 i = 0; i < of_type->pointer->stack.len; i++) {
           Var* var = of_type->pointer->stack.list[i];
-          if (!var->declared->record->offsets_all_equal) {
-            assert(0);
-          }
           // FIX: position offset information for pointers. hardcoded with 0 instead
           hash_set_put(&stack, var->vars[0]);
         }
@@ -2664,6 +2772,12 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length*3);
   sem.types.base = arena_push(arena, irgen.irs.length * sizeof(Type));
   sem.types.length = 0;
+
+  sem.type_set   = hash_set_init(arena, irgen.irs.length);
+  sem.record_set = hash_set_init(arena, irgen.irs.length);
+  sem.ranges_set = hash_set_init(arena, irgen.irs.length);
+  // sem.pointer_set = hash_set_init(arena, irgen.irs.length);
+  // sem.compose_set = hash_set_init(arena, irgen.irs.length);
 
   sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;
