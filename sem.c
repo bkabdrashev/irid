@@ -31,7 +31,6 @@ struct Field {
   I32     pos;
   Ir*     ir;
   Type*   type;
-  Var*    var;
   I32     offset;
 };
 
@@ -456,7 +455,7 @@ void subtype_visited_push(Subtype_Visited* v, Pointer* one, Pointer* two) {
   v->length++;
 }
 
-B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
+B8 type_is_subtype_rec(Block* block, Var* var, Type* one, Type* two, Subtype_Visited* visited) {
   //    one is subtype of two
   // (1..3) is subtype of 1 -- false
   // (1..2) is subtype of (1..3) -- true
@@ -469,25 +468,44 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     Hash_Set* records = two->compose->records;
     switch (one->kind) {
     case Type_Kind_int: {
-      return type_is_subtype_rec(block, one, int_type, visited);
+      return type_is_subtype_rec(block, var ? var->var_int : 0, one, int_type, visited);
     } break;
     case Type_Kind_ptr: {
-      return type_is_subtype_rec(block, one, ptr_type, visited);
+      return type_is_subtype_rec(block, var ? var->var_ptr : 0, one, ptr_type, visited);
     } break;
     case Type_Kind_compose: {
-      if (!type_is_subtype_rec(block, one->compose->int_type, int_type, visited)) {
+      if (!type_is_subtype_rec(block, var ? var->var_int : 0, one->compose->int_type, int_type, visited)) {
         assert(0);
         return false;
       }
-      if (!type_is_subtype_rec(block, one->compose->ptr_type, ptr_type, visited)) {
+      if (!type_is_subtype_rec(block, var ? var->var_ptr : 0, one->compose->ptr_type, ptr_type, visited)) {
         assert(0);
         return false;
       }
       for (I32 i = 0; i < one->compose->records->len; i++) {
         Type* record = one->compose->records->list[i];
-        if (!hash_set_exists(records, record)) {
-          assert(0);
-          return false;
+        B8 is_subtype = false;
+        if (var) {
+          for (I32 j = 0; j < records->len; j++) {
+            if (type_is_subtype_rec(block, var->vars[j], record, records->list[j], visited)) {
+              is_subtype = true;
+              break;
+            }
+          }
+          if (!is_subtype) {
+            return false;
+          }
+        }
+        else {
+          for (I32 j = 0; j < records->len; j++) {
+            if (type_is_subtype_rec(block, 0, record, records->list[j], visited)) {
+              is_subtype = true;
+              break;
+            }
+          }
+          if (!is_subtype) {
+            return false;
+          }
         }
       }
       return true;
@@ -518,8 +536,8 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     // TODO: need to check whether pointer is global/stack/
     if (two->pointer->stack.len > 0) {
       for (I32 i = 0; i < one->pointer->stack.len; i++) {
-        Var* var = one->pointer->stack.list[i];
-        if (!hash_set_exists(&two->pointer->stack, var)) {
+        Var* stack_var = one->pointer->stack.list[i];
+        if (!hash_set_exists(&two->pointer->stack, stack_var)) {
           assert(0);
           return false;
         }
@@ -528,7 +546,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     Type* one_declared = type_pointer_declared(one->pointer);
     Type* two_declared = type_pointer_declared(two->pointer);
     if (one_declared && two_declared) {
-      if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) {
+      if (!type_is_subtype_rec(block, 0, one_declared, two_declared, visited)) {
         assert(0);
         return false;
       }
@@ -545,9 +563,17 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       else {
         field_two = type_record_get_by_position(block, two->record, i);
       }
-      if (!type_is_subtype_rec(block, field_one.type, field_two.var->declared, visited)) {
-        assert(0);
-        return false;
+      if (var) {
+        if (!type_is_subtype_rec(block, var->vars[field_two.pos], field_one.type, var->vars[field_two.pos]->declared, visited)) {
+          assert(0);
+          return false;
+        }
+      }
+      else {
+        if (!type_is_subtype_rec(block, 0, field_one.type, field_two.type, visited)) {
+          assert(0);
+          return false;
+        }
       }
     }
     return true;
@@ -654,10 +680,10 @@ B8 type_is_const(Type* type) {
   return false;
 }
 
-B8 type_is_subtype(Block* block, Type* one, Type* two) {
+B8 type_is_subtype(Block* block, Var* var, Type* one, Type* two) {
   Subtype_Visited visited = {0};
   visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
-  B8 result = type_is_subtype_rec(block, one, two, &visited);
+  B8 result = type_is_subtype_rec(block, var, one, two, &visited);
   arena_release_mark(sem.temp_arena, visited.base);
   return result;
 }
@@ -1940,20 +1966,20 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       Record* new_record  = type_record_init(length);
       for (I32 i = 0; i < length; i++) {
         Field field = type_record_get_by_position(block, from->record, i);
-        Field var_field;
+        Field field_var;
         if (field.name) {
-          var_field = type_record_get_by_name(block, to->record, field.name);
-          new_record->names[i] = var_field.name;
-          hash_map_put_i32(&new_record->position_from_name, var_field.name, i);
+          field_var = type_record_get_by_name(block, to->record, field.name);
+          new_record->names[i] = field_var.name;
+          hash_map_put_i32(&new_record->position_from_name, field_var.name, i);
         }
         else {
-          var_field = type_record_get_by_position(block, to->record, i);
+          field_var = type_record_get_by_position(block, to->record, i);
         }
-        if (type_is_same(block, field.type, var_field.var->declared)) {
+        if (type_is_same(block, field.type, field_var.type)) {
           new_record->types[i] = field.type;
         }
         else {
-          new_record->types[i] = type_auto_cast(block, 0, field.type, var_field.var->declared);
+          new_record->types[i] = type_auto_cast(block, 0, field.type, field_var.type);
         }
       }
       result = type_record(new_record);
@@ -1979,20 +2005,20 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
     var->block_types[block->id] = type;
   }
   else {
-    if (type_is_subtype(block, type, var->declared)) {
+    if (type_is_subtype(block, var, type, var->declared)) {
       type = type_auto_cast(block, store, type, var->declared);
 
       if (type->kind == Type_Kind_record) {
         for (I32 i = 0; i < type->record->length; i++) {
           Field field = type_record_get_by_position(block, type->record, i);
-          Field var_field;
+          Field field_var;
           if (field.name) {
-            var_field = type_record_get_by_name(block, var->declared->record, field.name);
+            field_var = type_record_get_by_name(block, var->declared->record, field.name);
           }
           else {
-            var_field = type_record_get_by_position(block, var->declared->record, i);
+            field_var = type_record_get_by_position(block, var->declared->record, i);
           }
-          type_of_var_put(block, 0, var_field.var, field.type);
+          type_of_var_put(block, 0, var->vars[field_var.pos], field.type);
         }
       }
       var->block_types[block->id] = type;
@@ -2021,7 +2047,6 @@ void sem_record_declare_fields(Var* var, Type* type) {
       field_var->name = type->record->names[i];
       field_var->parent = var;
       Type* field_type = type_of_field_at(type->record, i);
-      type->record->types[i] = field_type;
       field_var->declared = field_type;
       field_var->state = Var_State_resolved;
 
@@ -2039,9 +2064,17 @@ void sem_record_declare_fields(Var* var, Type* type) {
     }
   }
   else if (type->kind == Type_Kind_compose) {
+    var->vars = arena_push(sem.perm_arena, type->compose->records->len * sizeof(Var*));
     for (I32 i = 0; i < type->compose->records->len; i++) {
       Type* rec = type->compose->records->list[i];
-      sem_record_declare_fields(var, rec);
+      Var* field_var = arena_push_zero(sem.perm_arena, sizeof(Var));
+      field_var->offset = i;
+      var->vars[i] = field_var;
+      field_var->parent = var;
+      Type* field_type = rec;
+      field_var->declared = field_type;
+      field_var->state = Var_State_resolved;
+      sem_record_declare_fields(var->vars[i], rec);
     }
   }
   return;
@@ -2496,7 +2529,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else if (fun_type->kind == Type_Kind_fun) {
       Function* fun = fun_type->function;
-      if (type_is_subtype(block, arg_type, fun->arg)) {
+      if (type_is_subtype(block, 0, arg_type, fun->arg)) {
         result = fun->ret;
       }
       else {

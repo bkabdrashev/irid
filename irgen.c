@@ -110,6 +110,8 @@ struct Var {
   Type* declared;
   Ir*     declared_ir;
   Var**   vars;
+  Var*    var_int;
+  Var*    var_ptr;
   Blocks* blocks;
   Type**  block_types;
 };
