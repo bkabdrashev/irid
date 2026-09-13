@@ -1166,6 +1166,9 @@ Type* type_record(Record* record) {
 
     Type* type = arena_push(sem.perm_arena, sizeof(Type));
     type->kind = Type_Kind_record;
+    type->size_defined = false;
+    type->bits_size  = bits_size;
+    type->bits_align = bits_align;
     type->record = record;
     result = type_in_set(type);
   }
@@ -2380,27 +2383,35 @@ void sem_ir(Block* block, Ir* ir) {
     if (ptr_type->kind == Type_Kind_ptr) {
       Pointer* pointer = ptr_type->pointer;
       Hash_Set stack = pointer->stack;
-      assert(stack.len >= 1);
-      for (I32 i = 0; i < stack.len; i++) {
-        sem_ensure_declared(stack.list[i]);
+      if (stack.len >= 1) {
+        for (I32 i = 0; i < stack.len; i++) {
+          sem_ensure_declared(stack.list[i]);
+        }
+        result = type_of_var(block, stack.list[0]);
+        for (I32 i = 1; i < stack.len; i++) {
+          Type* type = type_of_var(block, stack.list[i]);
+          result = type_join(block, result, type);
+        }
       }
-      result = type_of_var(block, stack.list[0]);
-      for (I32 i = 1; i < stack.len; i++) {
-        Type* type = type_of_var(block, stack.list[i]);
-        result = type_join(block, result, type);
+      else {
+        result = pointer->declared;
       }
     }
     else if (ptr_type->kind == Type_Kind_compose) {
       Pointer* pointer = ptr_type->compose->ptr_type->pointer;
       Hash_Set stack = pointer->stack;
-      assert(stack.len >= 1);
-      for (I32 i = 0; i < stack.len; i++) {
-        sem_ensure_declared(stack.list[i]);
+      if (stack.len >= 1) {
+        for (I32 i = 0; i < stack.len; i++) {
+          sem_ensure_declared(stack.list[i]);
+        }
+        result = type_of_var(block, stack.list[0]);
+        for (I32 i = 1; i < stack.len; i++) {
+          Type* type = type_of_var(block, stack.list[i]);
+          result = type_join(block, result, type);
+        }
       }
-      result = type_of_var(block, stack.list[0]);
-      for (I32 i = 1; i < stack.len; i++) {
-        Type* type = type_of_var(block, stack.list[i]);
-        result = type_join(block, result, type);
+      else {
+        result = pointer->declared;
       }
     }
     else {
