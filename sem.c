@@ -1375,7 +1375,7 @@ Type* type_pointer_to(Type* type) {
   return type_pointer(type, stack);
 }
 
-Type* type_ptr_var(Var* var) {
+Type* type_pointer_var(Var* var) {
   Hash_Set stack  = hash_set_init(sem.perm_arena, 1);
   hash_set_put(&stack, var);
   return type_pointer(0, stack);
@@ -2107,11 +2107,11 @@ void sem_ir(Block* block, Ir* ir) {
     result = sem_ensure_declared(ir->declare.var);
   } break;
   case Ir_Kind_arg: {
-    result = type_ptr_var(ir->var);
+    result = type_pointer_var(ir->var);
   } break;
   case Ir_Kind_var: {
     ir->var->declared = sem.type_none;
-    result = type_ptr_var(ir->var);
+    result = type_pointer_var(ir->var);
   } break;
   case Ir_Kind_join: {
     Type_Pair pair = type_of_ir_binary(ir);
