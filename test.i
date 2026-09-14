@@ -36,7 +36,7 @@ print_str:(str: Str) -> {
   // TODO: figure out semantic logic for Str
   i:I32 = 0
   while i < str.len do {
-    putchar str[i]
+    putchar(str[i])
     i = i + 1
   }
   putchar 10
