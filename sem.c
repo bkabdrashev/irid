@@ -1184,7 +1184,7 @@ Type* type_record(Record* record) {
 }
 
 Type* type_ranges_meet(Ranges* one, Ranges* two);
-Type* type_pointer(Type* declared, Hash_Set stack);
+Type* type_pointer(Pointer* pointer);
 
 Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set* records) {
   Type* result = &new(sem.types);
@@ -1284,9 +1284,10 @@ Type* type_meet(Type* one, Type* two) {
       result = sem.type_none;
     } break;
     case Type_Kind_ptr: {
-      Hash_Set stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
-      Type* declared  = type_meet(one->pointer->declared, two->pointer->declared);
-      result = type_pointer(declared, stack);
+      Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+      pointer->stack  = hash_set_meet(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
+      pointer->declared  = type_meet(one->pointer->declared, two->pointer->declared);
+      result = type_pointer(pointer);
     } break;
     case Type_Kind_record: {
       result = sem.type_none;
@@ -1323,9 +1324,10 @@ Type* type_join(Block* block, Type* one, Type* two) {
     Type* one_declared = type_pointer_declared(one->pointer);
     Type* two_declared = type_pointer_declared(two->pointer);
     if (type_is_same(block, one_declared, two_declared)) {
-      Type*    declared = type_join(block, one_declared, two_declared);
-      Hash_Set stack    = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
-      result = type_pointer(declared, stack);
+      Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+      pointer->declared = type_join(block, one_declared, two_declared);
+      pointer->stack    = hash_set_join(sem.perm_arena, &one->pointer->stack, &two->pointer->stack);
+      result = type_pointer(pointer);
     }
     else {
       assert(0);
@@ -1347,11 +1349,8 @@ Type* type_join(Block* block, Type* one, Type* two) {
   return result;
 }
 
-Type* type_pointer(Type* declared, Hash_Set stack) {
+Type* type_pointer(Pointer* pointer) {
   Type* result = sem.type_none;
-  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->stack = stack;
-  pointer->declared = declared;
 
   I32 i = 0;
   for (;;) {
@@ -1362,8 +1361,8 @@ Type* type_pointer(Type* declared, Hash_Set stack) {
       break;
     }
     else {
-      if (key->declared == declared) {
-        if (hash_set_is_equal(key->stack, stack)) {
+      if (key->declared == pointer->declared) {
+        if (hash_set_is_equal(key->stack, pointer->stack)) {
           arena_release_mark(sem.perm_arena, pointer);
           pointer = key;
           break;
@@ -1385,14 +1384,17 @@ Type* type_pointer(Type* declared, Hash_Set stack) {
 }
 
 Type* type_pointer_to(Type* type) {
-  Hash_Set stack = hash_set_init(sem.perm_arena, 1);
-  return type_pointer(type, stack);
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  pointer->stack = hash_set_init(sem.perm_arena, 1);
+  pointer->declared = type;
+  return type_pointer(pointer);
 }
 
 Type* type_pointer_var(Var* var) {
-  Hash_Set stack  = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&stack, var);
-  return type_pointer(0, stack);
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+  pointer->stack   = hash_set_init(sem.perm_arena, 1);
+  hash_set_put(&pointer->stack, var);
+  return type_pointer(pointer);
 }
 
 Type* type_pointer_declared(Pointer* pointer) {
@@ -1629,10 +1631,11 @@ void sem_type_narrow_int_eq(Sem_Tasks* tasks, Ir* ir) {
 }
 
 void sem_type_narrow_ptr_eq(Sem_Tasks* tasks, Ir* ir) {
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
   Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
-  Type*    declared = type_meet(pair.one->declared, pair.two->declared);
-  Hash_Set stack    = hash_set_meet(sem.perm_arena, &pair.one->stack, &pair.two->stack);
-  Type* new_type = type_pointer(declared, stack);
+  pointer->declared = type_meet(pair.one->declared, pair.two->declared);
+  pointer->stack    = hash_set_meet(sem.perm_arena, &pair.one->stack, &pair.two->stack);
+  Type* new_type = type_pointer(pointer);
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
 
@@ -1654,13 +1657,17 @@ void sem_type_narrow_ptr_ne(Sem_Tasks* tasks, Ir* ir) {
   Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
   // TODO: pointer relations
   if (pair.one->stack.len == 1) {
-    Hash_Set new_set_two = hash_set_exclude(sem.perm_arena, &pair.two->stack, pair.one->stack.list[0]);
-    Type* new_type_two = type_pointer(pair.two->declared, new_set_two);
+    Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+    pointer->stack = hash_set_exclude(sem.perm_arena, &pair.two->stack, pair.one->stack.list[0]);
+    pointer->declared = pair.two->declared;
+    Type* new_type_two = type_pointer(pointer);
     sem_type_of_ir_narrow(tasks, ir->binary.two, new_type_two);
   }
   if (pointer_is_single(pair.two)) {
-    Hash_Set new_set_one = hash_set_exclude(sem.perm_arena, &pair.one->stack, pair.two->stack.list[0]);
-    Type* new_type_one = type_pointer(pair.one->declared, new_set_one);
+    Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+    pointer->stack = hash_set_exclude(sem.perm_arena, &pair.one->stack, pair.two->stack.list[0]);
+    pointer->declared = pair.one->declared;
+    Type* new_type_one = type_pointer(pointer);
     sem_type_of_ir_narrow(tasks, ir->binary.one, new_type_one);
   }
 }
@@ -2334,15 +2341,19 @@ void sem_ir(Block* block, Ir* ir) {
     Type* at_type = type_of_ir(ir->binary.two);
     if (of_type->kind == Type_Kind_ptr) {
       if (at_type->kind == Type_Kind_int) {
-        Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
-        for (I32 i = 0; i < of_type->pointer->stack.len; i++) {
-          Var* var = of_type->pointer->stack.list[i];
-          // FIX: position offset information for pointers. hardcoded with 0 instead
-          hash_set_put(&stack, var->vars[0]);
+        Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+        pointer->stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
+        if (ranges_is_single(at_type->ranges)) {
+          I64 val = ranges_min(at_type->ranges);
+          for (I32 i = 0; i < of_type->pointer->stack.len; i++) {
+            Var* var = of_type->pointer->stack.list[i];
+            // FIX: position offset information for pointers. hardcoded with 0 instead
+            hash_set_put(&pointer->stack, var->vars[val]);
+          }
+          Var* var = of_type->pointer->stack.list[0];
+          pointer->declared = var->declared;
+          result = type_pointer(pointer);
         }
-        Var* var = of_type->pointer->stack.list[0];
-        Type* declared = var->declared;
-        result = type_pointer(declared, stack);
       }
       else {
         assert(0);
@@ -2358,14 +2369,15 @@ void sem_ir(Block* block, Ir* ir) {
     if (at_type->kind == Type_Kind_int) {
       if (type_is_const(at_type)) {
         if (of_type->kind == Type_Kind_ptr) {
+          Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
           assert(of_type->pointer->stack.len > 0);
           I64 at = ranges_min(at_type->ranges);
-          Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
+          pointer->stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
           Var* first_var = of_type->pointer->stack.list[0];
           I32  first_offset = first_var->declared->record->offsets[at];
           Var* first_var_field = first_var->vars[at];
-          Type* declared = first_var_field->declared;
-          hash_set_put(&stack, first_var_field);
+          pointer->declared = first_var_field->declared;
+          hash_set_put(&pointer->stack, first_var_field);
           for (I32 i = 1; i < of_type->pointer->stack.len; i++) {
             Var* var = of_type->pointer->stack.list[i];
             I32  offset = var->declared->record->offsets[at];
@@ -2374,10 +2386,10 @@ void sem_ir(Block* block, Ir* ir) {
               assert(0);
             }
             Var* field_var = var->vars[at];
-            declared = type_meet(declared, field_var->declared);
-            hash_set_put(&stack, field_var);
+            pointer->declared = type_meet(pointer->declared, field_var->declared);
+            hash_set_put(&pointer->stack, field_var);
           }
-          result = type_pointer(declared, stack);
+          result = type_pointer(pointer);
         }
       }
       else {
@@ -2391,13 +2403,14 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
     if (of_type->kind == Type_Kind_ptr) {
+      Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
       assert(of_type->pointer->stack.len > 0);
-      Hash_Set stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
+      pointer->stack = hash_set_init(sem.perm_arena, of_type->pointer->stack.len);
       Var* first_var = of_type->pointer->stack.list[0];
       I32  first_offset = sem_get_offset_by_name(first_var, ir->name_offset.at);
       Var* first_var_field = sem_get_var_by_name(first_var, ir->name_offset.at);
-      Type* declared = first_var_field->declared;
-      hash_set_put(&stack, first_var_field);
+      pointer->declared = first_var_field->declared;
+      hash_set_put(&pointer->stack, first_var_field);
       for (I32 i = 1; i < of_type->pointer->stack.len; i++) {
         Var* var = of_type->pointer->stack.list[i];
         I32  offset = sem_get_offset_by_name(var, ir->name_offset.at);
@@ -2406,10 +2419,10 @@ void sem_ir(Block* block, Ir* ir) {
           assert(0);
         }
         Var* field_var = sem_get_var_by_name(var, ir->name_offset.at);
-        declared = type_meet(declared, field_var->declared);
-        hash_set_put(&stack, field_var);
+        pointer->declared = type_meet(pointer->declared, field_var->declared);
+        hash_set_put(&pointer->stack, field_var);
       }
-      result = type_pointer(declared, stack);
+      result = type_pointer(pointer);
     }
     else if (of_type->kind == Type_Kind_record) {
       Field field = type_record_get_by_name(block, of_type->record, ir->name_offset.at);
@@ -2912,7 +2925,7 @@ void sem_test(void) {
   // test("a: I32, (x:I32); a = 1; a", "");
   // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");
   // test("a: Str; a.len = 10; a.len;", "");
-  test("a: Str = \"Hi\"; a.len", "");
+  test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: @I32, (x:I32); a = @b; a.x = 4; a", "");
   // test("a: Str; a.len = 1", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
