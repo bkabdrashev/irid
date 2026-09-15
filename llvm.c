@@ -330,7 +330,28 @@ void llvm_ir(Ir* ir) {
     result = LLVMConstInt(llvm_type, ir->i64, 0);
   } break;
   case Ir_Kind_str: {
-    result = LLVMConstStringInContext2(llvm_gen.context, ir->str->base, ir->str->length, false);
+    LLVMValueRef str_record;
+    {
+      LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->str->length * sizeof(LLVMValueRef));
+      LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, 8);
+
+      for (I32 i = 0; i < ir->str->length; i++) {
+        values[i] =  LLVMConstInt(llvm_type, ir->str->base[i], 0);
+      }
+      str_record = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
+    }
+    LLVMValueRef len_record;
+    {
+      LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMValueRef));
+      LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, 64);
+
+      for (I32 i = 0; i < ir->str->length; i++) {
+        values[i] =  LLVMConstInt(llvm_type, ir->str->base[i], 0);
+      }
+      len_record = LLVMConstStructInContext(llvm_gen.context, values, 1, false);
+    }
+    str_record = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
+
   } break;
 
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:

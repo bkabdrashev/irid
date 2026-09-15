@@ -1954,14 +1954,14 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       Type* int_type = type_auto_cast(block, store, from, to->compose->int_type);
       result = type_compose(int_type, to->compose->ptr_type, to->compose->records);
       if (store) {
-        store->binary.two = sem_push_access(block, store->binary.two, 0);
+        store->binary.one = sem_push_access(block, store->binary.one, 0);
       }
     }
     else if (from->kind == Type_Kind_ptr) {
       Type* ptr_type = type_auto_cast(block, store, from, to->compose->ptr_type);
       result = type_compose(to->compose->int_type, ptr_type, to->compose->records);
       if (store) {
-        store->binary.two = sem_push_access(block, store->binary.two, 1);
+        store->binary.one = sem_push_access(block, store->binary.one, 1);
       }
     }
     else if (from->kind == Type_Kind_record) {
