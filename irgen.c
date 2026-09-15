@@ -46,10 +46,11 @@ typedef enum Ir_Kind {
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
 
-  Ir_Kind_int_extend = 140,
-  Ir_Kind_auto_cast  = 141,
+  Ir_Kind_int_extend  = 140,
+  Ir_Kind_record_cast = 141,
+  Ir_Kind_access      = 142,
 
-  Ir_Kind_and_list        = 144,
+  Ir_Kind_and_list    = 144,
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -69,11 +70,14 @@ struct Declare { Var* var; };
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Ir* of; Ir* at; };
 
+typedef struct Access Access;
+struct Access { Ir* of; I32 at; };
+
 typedef struct Int_Extend Int_Extend;
 struct Int_Extend { Ir* value; I16 bits; };
 
-typedef struct Auto_Cast Auto_Cast;
-struct Auto_Cast { Ir* value; };
+typedef struct Record_Cast Recrord_Cast;
+struct Record_Cast { Ir* value; };
 
 typedef struct Rec Rec;
 struct Rec {
@@ -130,7 +134,8 @@ struct Ir {
     Name_Offset     name_offset;
     Declare         declare;
     Int_Extend      int_extend;
-    Auto_Cast       auto_cast;
+    Recrord_Cast    record_cast;
+    Access access;
   };
 };
 
@@ -401,9 +406,15 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, " to ");
     string_builder_push_i64(sb, ir->int_extend.bits);
   break;
-  case Ir_Kind_auto_cast:
-    string_builder_push_cstr(sb, "auto cast ");
-    string_builder_push_irid(sb, ir->auto_cast.value);
+  case Ir_Kind_record_cast:
+    string_builder_push_cstr(sb, "record cast ");
+    string_builder_push_irid(sb, ir->record_cast.value);
+  break;
+  case Ir_Kind_access:
+    string_builder_push_cstr(sb, "access ");
+    string_builder_push_irid(sb, ir->access.of);
+    string_builder_push_cstr(sb, "at ");
+    string_builder_push_i64(sb, ir->access.at);
   break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");

@@ -788,7 +788,7 @@ Type* type_in_set(Type* type) {
       &&  key->bits_size == type->bits_size
       &&  key->bits_align == type->bits_align
       &&  key->size_defined == type->size_defined) {
-        arena_release_mark(sem.perm_arena, type);
+        del(sem.types);
         result = key;
         break;
       }
@@ -842,7 +842,7 @@ Type* type_ranges(Ranges* ranges) {
     I64 min = ranges_min(ranges);
     I64 max = ranges_max(ranges);
     I16 bits_size = bits_needed(min, max);
-    Type* new_type = arena_push(sem.perm_arena, sizeof(Type));
+    Type* new_type = &new(sem.types);
     new_type->kind = Type_Kind_int;
     new_type->bits_align = align_up(bits_size, 8);
     new_type->bits_size  = bits_size;
@@ -880,12 +880,30 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
   return sem_ir;
 }
 
-Ir* sem_push_auto_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_auto_cast, .auto_cast = { .value=value } };
+Ir* sem_push_record_cast(Block* block, Ir* value, Type* type) {
+  Ir new_ir = { Ir_Kind_record_cast, .record_cast = { .value=value } };
   Ir* sem_ir = &new(irgen.irs);
   *sem_ir = new_ir;
   sem_push_ir(block, sem_ir);
   type_of_ir_put(sem_ir, type);
+  return sem_ir;
+}
+
+Ir* sem_push_access(Block* block, Ir* of, I32 at) {
+  Ir new_ir = { Ir_Kind_record_cast, .access = { .of = of, .at = at } };
+  Ir* sem_ir = &new(irgen.irs);
+  *sem_ir = new_ir;
+  sem_push_ir(block, sem_ir);
+  Type* type = type_of_ir(of);
+  if (at == 0) {
+    type_of_ir_put(sem_ir, type->compose->int_type);
+  }
+  else if (at == 1) {
+    type_of_ir_put(sem_ir, type->compose->ptr_type);
+  }
+  else {
+    type_of_ir_put(sem_ir, type->compose->records->list[at]);
+  }
   return sem_ir;
 }
 
@@ -1072,6 +1090,7 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
   else if (var->declared->kind == Type_Kind_compose) {
     I32 found = 0;
     I32 found_i = 0;
+    // TODO: compose access IR instruction
     for (I32 i = 0; i < var->declared->compose->records->len; i++) {
       Type* type = var->declared->compose->records->list[i];
       Record* record = type->record;
@@ -1169,7 +1188,7 @@ Type* type_record(Record* record) {
       i++;
     }
 
-    Type* type = arena_push(sem.perm_arena, sizeof(Type));
+    Type* type = &new(sem.types);
     type->kind = Type_Kind_record;
     type->size_defined = false;
     type->bits_size  = bits_size;
@@ -1374,7 +1393,7 @@ Type* type_pointer(Pointer* pointer) {
     i++;
   }
   {
-    Type* type = arena_push(sem.perm_arena, sizeof(Type));
+    Type* type = &new(sem.types);
     type->kind = Type_Kind_ptr;
     type->bits_size  = 64;
     type->bits_align = 64;
@@ -1934,13 +1953,20 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
     if (from->kind == Type_Kind_int) {
       Type* int_type = type_auto_cast(block, store, from, to->compose->int_type);
       result = type_compose(int_type, to->compose->ptr_type, to->compose->records);
+      if (store) {
+        store->binary.two = sem_push_access(block, store->binary.two, 0);
+      }
     }
     else if (from->kind == Type_Kind_ptr) {
       Type* ptr_type = type_auto_cast(block, store, from, to->compose->ptr_type);
       result = type_compose(to->compose->int_type, ptr_type, to->compose->records);
+      if (store) {
+        store->binary.two = sem_push_access(block, store->binary.two, 1);
+      }
     }
     else if (from->kind == Type_Kind_record) {
       assert(0);
+      if (store) {}
     }
     else if (from->kind == Type_Kind_compose) {
       result = from;
@@ -1985,7 +2011,7 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       result = type_record(new_record);
 
       if (store) {
-        store->binary.two = sem_push_auto_cast(block, store->binary.two, result);
+        store->binary.two = sem_push_record_cast(block, store->binary.two, result);
       }
     } break;
     default: assert(0);
@@ -2937,7 +2963,7 @@ void sem_test(void) {
   // test("a: I32, (x:I32); a = 1; a", "");
   // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");
   // test("a: Str; a.len = 10; a.len;", "");
-  test("a: Str = \"Hi\"; a.len; a[0]", "");
+  // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: @I32, (x:I32); a = @b; a.x = 4; a", "");
   // test("a: Str; a.len = 1", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");

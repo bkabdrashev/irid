@@ -73,6 +73,30 @@ LLVMTypeRef llvm_of_type(Type* type) {
       result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
     }
   } break;
+  case Type_Kind_compose: {
+    I32 len = type->compose->records->len;
+    if (type->compose->int_type != sem.type_none) {
+      len += 1;
+    }
+    if (type->compose->ptr_type != sem.type_none) {
+      len += 1;
+    }
+    LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, len * sizeof(LLVMTypeRef));
+
+    I32 f = 0;
+    if (type->compose->int_type != sem.type_none) {
+      field_types[f++] = llvm_of_type(type->compose->int_type);
+    }
+    if (type->compose->ptr_type != sem.type_none) {
+      field_types[f++] = llvm_of_type(type->compose->ptr_type);
+    }
+
+    for (I32 i = 0; i < type->compose->records->len; i++) {
+      Type* record = type->compose->records->list[i];
+      field_types[i+f] = llvm_of_type(record);
+    }
+    result = LLVMStructTypeInContext(llvm_gen.context, field_types, len, false);
+  } break;
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;
     I32 arg_count = 0;
@@ -201,6 +225,31 @@ LLVMValueRef llvm_default_of_type(Type* type) {
       }
     }
     result = LLVMConstStructInContext(llvm_gen.context, values, type->record->length, false);
+  } break;
+  case Type_Kind_compose: {
+    I32 len = type->compose->records->len;
+    if (type->compose->int_type != sem.type_none) {
+      len += 1;
+    }
+    if (type->compose->ptr_type != sem.type_none) {
+      len += 1;
+    }
+
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, len * sizeof(LLVMValueRef));
+
+    I32 f = 0;
+    if (type->compose->int_type != sem.type_none) {
+      values[f++] = llvm_default_of_type(type->compose->int_type);
+    }
+    if (type->compose->ptr_type != sem.type_none) {
+      values[f++] = llvm_default_of_type(type->compose->ptr_type);
+    }
+
+    for (I32 i = 0; i < type->compose->records->len; i++) {
+      Type* record = type->compose->records->list[i];
+      values[i+f] = llvm_default_of_type(record);
+    }
+    result = LLVMConstStructInContext(llvm_gen.context, values, len, false);
   } break;
   }
   return result;
@@ -368,11 +417,14 @@ void llvm_ir(Ir* ir) {
     Type* of_type = type_of_ir(ir->name_offset.of);
     if (of_type->kind == Type_Kind_ptr) {
       Type* rec_type = type_pointer_declared(of_type->pointer);
-      assert(rec_type->kind == Type_Kind_record);
-      LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
-      I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name_offset.at);
-      LLVMTypeRef llvm_type = llvm_of_type(rec_type);
-      result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
+      if (rec_type->kind == Type_Kind_record) {
+        LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
+        I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name_offset.at);
+        LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+        result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
+      }
+      else if (rec_type->kind == Type_Kind_compose) {
+      }
     }
     else if (of_type->kind == Type_Kind_record) {
       Type* type = type_of_ir(ir);
@@ -444,14 +496,14 @@ void llvm_ir(Ir* ir) {
     LLVMTypeRef llvm_to = llvm_of_type(type);
     result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
   } break;
-  case Ir_Kind_auto_cast: {
+  case Ir_Kind_record_cast: {
     Type* type = type_of_ir(ir);
     assert(type->kind == Type_Kind_record);
     assert(!type->record->is_array);
 
     LLVMTypeRef llvm_type = llvm_of_type(type);
-    LLVMValueRef llvm_val = llvm_of_ir(ir->auto_cast.value);
-    Type* from_type = type_of_ir(ir->auto_cast.value);
+    LLVMValueRef llvm_val = llvm_of_ir(ir->record_cast.value);
+    Type* from_type = type_of_ir(ir->record_cast.value);
     assert(from_type->kind == Type_Kind_record);
     assert(!from_type->record->is_array);
 
@@ -466,6 +518,17 @@ void llvm_ir(Ir* ir) {
         field_val = llvm_conversion(field_val, field_from_type, field_type);
       }
       result = LLVMBuildInsertValue(llvm_gen.builder, result, field_val, i, "");
+    }
+  } break;
+  case Ir_Kind_access: {
+    Type* of_type = type_of_ir(ir->access.of);
+    if (of_type->kind == Type_Kind_compose) {
+      LLVMValueRef ptr = llvm_of_ir(ir->access.of);
+      LLVMTypeRef llvm_type = llvm_of_type(of_type);
+      result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, ir->access.at, "");
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ir_Kind_record: {
@@ -671,6 +734,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
