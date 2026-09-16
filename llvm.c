@@ -330,6 +330,7 @@ void llvm_ir(Ir* ir) {
     result = LLVMConstInt(llvm_type, ir->i64, 0);
   } break;
   case Ir_Kind_str: {
+    Type* type = type_of_ir(ir);
     LLVMValueRef str_record;
     {
       LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->str->length * sizeof(LLVMValueRef));
@@ -338,20 +339,39 @@ void llvm_ir(Ir* ir) {
       for (I32 i = 0; i < ir->str->length; i++) {
         values[i] =  LLVMConstInt(llvm_type, ir->str->base[i], 0);
       }
-      str_record = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
+      str_record = LLVMConstStructInContext(llvm_gen.context, values, ir->str->length, false);
     }
+
     LLVMValueRef len_record;
     {
       LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMValueRef));
       LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, 64);
+      values[0] =  LLVMConstInt(llvm_type, ir->str->length, 0);
 
-      for (I32 i = 0; i < ir->str->length; i++) {
-        values[i] =  LLVMConstInt(llvm_type, ir->str->base[i], 0);
-      }
       len_record = LLVMConstStructInContext(llvm_gen.context, values, 1, false);
     }
-    str_record = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
 
+    LLVMValueRef str_ptr;
+    {
+      Record* record = type_record_init(ir->str->length);
+      record->is_array = true;
+      for (I32 i = 0; i < ir->str->length; i++) {
+        record->types[i] = sem.bytes_range;
+      }
+      Type* record_type = type_record(record);
+
+      LLVMTypeRef llvm_type_str = llvm_of_type(record_type);
+      str_ptr = LLVMBuildAlloca(llvm_gen.builder, llvm_type_str, "");
+      LLVMBuildStore(llvm_gen.builder, str_record, str_ptr);
+    }
+
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 3 * sizeof(LLVMValueRef));
+
+    values[0] = str_ptr;
+    values[1] = len_record;
+    values[2] = str_record;
+
+    result = LLVMConstStructInContext(llvm_gen.context, values, 3, false);
   } break;
 
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:

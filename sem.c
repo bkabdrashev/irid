@@ -114,6 +114,7 @@ struct Sem {
 
   Type* type_none;
   Type* bits_fun;
+  Type* bytes_range;
 
   Str*  str_len;
   Str*  str_ptr;
@@ -2163,19 +2164,29 @@ void sem_ir(Block* block, Ir* ir) {
     result  = type_int(i64);
   } break;
   case Ir_Kind_str: {
-    // Str* str = ir->str;
     Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
-    *records = hash_set_init(sem.perm_arena, 1);
-    Record* record = type_record_init(1);
-    // record->is_array = true;
-    Type* len_range = type_int(ir->str->length);
-    record->types[0] = len_range;
-    record->names[0] = sem.str_len;
-    hash_map_put_i32(&record->position_from_name, sem.str_len, 0);
-    Type* bytes_range = type_range(I8_MIN, I8_MAX);
-    Type* ptr_type = type_pointer_to(bytes_range);
-    Type* record_type = type_record(record);
-    hash_set_put(records, record_type);
+    *records = hash_set_init(sem.perm_arena, 2);
+    Type* ptr_type = type_pointer_to(sem.bytes_range);
+    {
+      Record* record = type_record_init(1);
+      // record->is_array = true;
+      Type* len_range = type_int(ir->str->length);
+      record->types[0] = len_range;
+      record->names[0] = sem.str_len;
+      hash_map_put_i32(&record->position_from_name, sem.str_len, 0);
+      Type* record_type = type_record(record);
+      hash_set_put(records, record_type);
+    }
+    {
+      Record* record = type_record_init(ir->str->length);
+      record->is_array = true;
+      for (I32 i = 0; i < ir->str->length; i++) {
+        record->types[i] = sem.bytes_range;
+      }
+      Type* record_type = type_record(record);
+      hash_set_put(records, record_type);
+    }
+
     result = type_compose(sem.type_none, ptr_type, records);
   } break;
   case Ir_Kind_declare: {
@@ -2910,6 +2921,7 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.bits_fun = &new(sem.types);
   sem.bits_fun->kind = Type_Kind_none;
+  sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
   sem.str_len = str_from_cstr("len");
   sem.str_ptr = str_from_cstr("ptr");
