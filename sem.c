@@ -51,6 +51,11 @@ struct Compose {
   Hash_Set* records;
 };
 
+typedef struct Auto_Cast Auto_Cast;
+struct Auto_Cast {
+  Function* fun;
+};
+
 typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_int,
@@ -59,6 +64,7 @@ typedef enum Type_Kind {
   Type_Kind_record,
   Type_Kind_fun,
   Type_Kind_compose,
+  Type_Kind_auto_cast,
 } Type_Kind;
 
 struct Type {
