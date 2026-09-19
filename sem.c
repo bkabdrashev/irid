@@ -53,7 +53,7 @@ struct Compose {
 
 typedef struct Auto_Cast Auto_Cast;
 struct Auto_Cast {
-  Function* fun;
+  Type* to;
 };
 
 typedef enum Type_Kind {
@@ -80,6 +80,7 @@ struct Type {
     Function* function;
     Hash_Set* strings;
     Compose*  compose;
+    Auto_Cast* auto_cast;
   };
 };
 
@@ -260,6 +261,10 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
       }
     }
     string_builder_push_cstr(sb, ")");
+  } break;
+  case Type_Kind_auto_cast: {
+    string_builder_push_cstr(sb, "auto");
+    string_builder_push_type(sb, block, type->auto_cast->to);
   } break;
   }
 }
