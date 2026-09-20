@@ -2697,7 +2697,13 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_run: {
     Type* type = type_of_ir(ir->unary);
-    result = type;
+    if (type_is_const(type)) {
+      result = type;
+    }
+    else {
+      // TODO: generate code and run it
+      assert(0);
+    }
   } break;
   case Ir_Kind_range: {
     if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
