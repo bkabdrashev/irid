@@ -104,7 +104,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
       arg_types = 0;
       arg_count = 0;
     }
-    else if (type->function->fun->foreign) {
+    else if (type->function->fun->kind == Fun_Kind_foreign) {
       if (type->function->arg->kind == Type_Kind_record) {
         Record* record = type->function->arg->record;
         arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
@@ -420,7 +420,7 @@ void llvm_ir(Ir* ir) {
         llvm_args = 0;
         llvm_arg_count = 0;
       }
-      else if (fun_type->function->fun->foreign && arg_type->kind == Type_Kind_record) {
+      else if (fun_type->function->fun->kind == Fun_Kind_foreign && arg_type->kind == Type_Kind_record) {
         if (arg_ir->kind == Ir_Kind_record) {
           Rec* rec = arg_ir->rec;
           llvm_args = arena_push(llvm_gen.perm_arena, rec->length * sizeof(LLVMValueRef));
@@ -625,7 +625,7 @@ void llvm_block(Block* block) {
 
 LLVMValueRef llvm_fun(Fun* fun) {
   llvm_gen.function = llvm_of_fun(fun);
-  if (fun->foreign) {
+  if (fun->kind == Fun_Kind_foreign) {
     return llvm_gen.function;
   }
   for (I32 b = 0; b < fun->blocks->length; b++) {

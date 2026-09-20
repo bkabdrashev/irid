@@ -254,10 +254,16 @@ struct Rec_Pool {
   Rec* base;
 };
 
+typedef enum Fun_Kind {
+  Fun_Kind_none    = 0,
+  Fun_Kind_macro   = 1,
+  Fun_Kind_foreign = 2,
+} Fun_Kind;
+
 struct Fun {
+  Fun_Kind kind;
   Str*    name;
   Str*    foreign_name;
-  B8      foreign;
   Blocks* blocks;
   Block*  ret_block;
   Vars*   vars;
@@ -534,8 +540,11 @@ Cstr cstr_from_funs(Funs funs, C8* buffer) {
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
-    if (fun->foreign) {
-      string_builder_push_cstr(&sb, " #foreign.c");
+    if (fun->kind == Fun_Kind_foreign) {
+      string_builder_push_cstr(&sb, " #foreign");
+    }
+    else if (fun->kind == Fun_Kind_macro) {
+      string_builder_push_cstr(&sb, " #macro");
     }
     string_builder_push_cstr(&sb, " {");
 
@@ -783,7 +792,7 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   }
 
   Ir* ir = irgen_ast_node(node);
-  if (ir->kind == Ir_Kind_fun && !ir->fun->foreign) {
+  if (ir->kind == Ir_Kind_fun && ir->fun->kind != Fun_Kind_foreign) {
     ir->fun->name = var->name;
   }
   irgen_block_leave();
@@ -1201,6 +1210,17 @@ Ir* irgen_ast_node(Ast_Node* node) {
         fun->arg_var = sym->ir;
         irgen_var_declare(arg_var, lhs->declare.node);
         irgen_push_declare(arg_var);
+        irgen_sym_put(arg_var->name, sym);
+      }
+      else if (lhs->kind == Ast_Kind_name) {
+        scope = hash_map_init(irgen.perm_arena, 1);
+        add(irgen.scope_stack, &scope);
+        arg_var->name = lhs->str;
+        Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+        sym->kind = Symbol_Kind_variable;
+        sym->ir = irgen_push_arg(arg_var);
+        fun->arg_var = sym->ir;
+        fun->kind = Fun_Kind_macro;
         irgen_sym_put(arg_var->name, sym);
       }
       else {
