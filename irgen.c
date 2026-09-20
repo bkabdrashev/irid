@@ -292,8 +292,10 @@ struct Irgen {
   Ir*         ir_none;
 
   Str*        str_nil;
+  Str*        str_len;
 
-  Fun*        fun_len;
+  Hash_Map    builtins;
+  Ir*         irid_len;
 
   Fun_Stack   fun_stack;
   Blocks*     unresolved_breaks;
@@ -317,9 +319,14 @@ Ir_Field irgen_record_get_by_name(Rec* record, Str* name) {
 }
 
 void string_builder_push_irid(String_Builder* sb, Ir* ir) {
-  string_builder_push_cstr(sb, "r");
-  I32 irid = ir - irgen.irs.base;
-  string_builder_push_i64(sb, irid);
+  if (ir == irgen.irid_len) {
+    string_builder_push_cstr(sb, "len");
+  }
+  else {
+    string_builder_push_cstr(sb, "r");
+    I32 irid = ir - irgen.irs.base;
+    string_builder_push_i64(sb, irid);
+  }
 }
 
 void string_builder_push_var(String_Builder* sb, Var* var) {
@@ -359,6 +366,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   switch (ir->kind) {
   case Ir_Kind_none:
     string_builder_push_cstr(sb, "none");
+  break;
+  case Ir_Kind_len:
+    string_builder_push_cstr(sb, "len");
   break;
   case Ir_Kind_bits:
     string_builder_push_cstr(sb, "bits");
@@ -470,6 +480,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_array: string_builder_push_cstr(sb, "array "); break;
   case Ir_Kind_span:  string_builder_push_cstr(sb, "span "); break;
   case Ir_Kind_type:  string_builder_push_cstr(sb, "type "); break;
+  case Ir_Kind_run:   string_builder_push_cstr(sb, "run "); break;
   case Ir_Kind_subscript: string_builder_push_cstr(sb, "subscript "); break;
   default: {
     assert(0);
@@ -866,9 +877,11 @@ Fun* irgen_fun_leave(void) {
 void irgen_builtin_enter(void) {
   // foreign : (c: (str:Str) -> (fun: @Type) -> @Fun)
   // len : (record: @Type) -> I32
+  add(irgen.scope_stack, &irgen.builtins);
 }
 
 void irgen_builtin_leave(void) {
+  irgen_scope_leave();
 }
 
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
@@ -956,8 +969,11 @@ Ir* irgen_ast_node(Ast_Node* node) {
       if (sym->kind == Symbol_Kind_variable) {
         result = irgen_push_unary(Ir_Kind_load, sym->ir);
       }
-      else {
+      else if (sym->kind == Symbol_Kind_constant) {
         result = sym->ir;
+      }
+      else {
+        assert(0);
       }
     }
     else {
@@ -1242,9 +1258,19 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 
   irgen.irid_nil = 0;
   irgen.str_nil  = str_from_cstr("");
-  irgen.fun_len  = &new(irgen.funs);
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
+  irgen.irid_len = &new(irgen.irs);
+  irgen.irid_len->kind = Ir_Kind_len;
+
+  {
+    irgen.builtins = hash_map_init(irgen.perm_arena, 2);
+    irgen.str_len = str_from_cstr("len");
+    Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+    sym->kind = Symbol_Kind_constant;
+    sym->ir = irgen.irid_len;
+    hash_map_put(&irgen.builtins, irgen.str_len, sym);
+  }
 
   {
     Fun* fun = irgen_fun_enter();
@@ -1277,7 +1303,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 }
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Cstr builtin        = file_read("builtin.i");
+  Cstr builtin        = file_read("basic.i");
   I32  builtin_length = strlen(builtin);
   I32  source_length  = strlen(source);
   I32  length         = source_length + builtin_length + 32;
@@ -1310,6 +1336,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("#len (x:10)", "");
   // test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");

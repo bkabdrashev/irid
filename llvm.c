@@ -740,16 +740,16 @@ I32 llvm_funs(Arena* arena, Funs funs) {
 }
 
 void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Cstr builtin        = file_read("builtin.i");
-  I32  builtin_length = strlen(builtin);
+  Cstr basic        = file_read("basic.i");
+  I32  basic_length = strlen(basic);
   I32  source_length  = strlen(source);
-  I32  length         = source_length + builtin_length + 32;
+  I32  length         = source_length + basic_length + 32;
 
   Arena arena          = arena_init(KB(4) * length);
                          str_init(&arena, 2*length);
 
-  Tokens builtin_tokens = lex_source(&arena, builtin);
-  Ast_Block ast         = parse_tokens(&arena, builtin_tokens);
+  Tokens basic_tokens   = lex_source(&arena, basic);
+  Ast_Block ast         = parse_tokens(&arena, basic_tokens);
 
   Tokens source_tokens = lex_source(&arena, source);
   Ast_Block source_ast = parse_tokens(&arena, source_tokens);

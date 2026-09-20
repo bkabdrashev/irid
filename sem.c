@@ -115,11 +115,14 @@ struct Sem {
 
   Type* type_none;
   Type* bits_fun;
+  Type* len_fun;
   Type* bytes_range;
 
-  Str*  str_len;
   Str*  str_ptr;
   Fun*  str_from_i8_array;
+  struct {
+    Type* len;
+  } builtin;
 
   I32 sccid;
   Blocks* scc_stack;
@@ -2216,6 +2219,9 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_none: {
     result = sem.type_none;
   } break;
+  case Ir_Kind_len: {
+    result = sem.len_fun;
+  } break;
   case Ir_Kind_int: {
     I64 i64 = ir->i64;
     result  = type_int(i64);
@@ -2239,8 +2245,8 @@ void sem_ir(Block* block, Ir* ir) {
       // record->is_array = true;
       Type* len_range = type_int(ir->str->length);
       len_record->types[0] = len_range;
-      len_record->names[0] = sem.str_len;
-      hash_map_put_i32(&len_record->position_from_name, sem.str_len, 0);
+      len_record->names[0] = irgen.str_len;
+      hash_map_put_i32(&len_record->position_from_name, irgen.str_len, 0);
       Type* record_type = type_record(len_record);
       hash_set_put(records, len_record);
 
@@ -2250,7 +2256,6 @@ void sem_ir(Block* block, Ir* ir) {
       function->fun = sem.str_from_i8_array;
       Type* fun_type = type_fun(function);
     }
-
   } break;
   case Ir_Kind_declare: {
     result = sem_declare_var(ir->declare.var);
@@ -2403,11 +2408,11 @@ void sem_ir(Block* block, Ir* ir) {
     record->position_from_name = hash_map_init(sem.perm_arena, length);
 
     Type* ptr_to_type = type_of_ir(ir->unary);
-    record->names[0] = sem.str_len;
+    record->names[0] = irgen.str_len;
     record->names[1] = sem.str_ptr;
     record->types[0] = type_range(0, I64_MAX);
     record->types[1] = type_pointer_to(ptr_to_type);
-    hash_map_put_i32(&record->position_from_name, sem.str_len, 0);
+    hash_map_put_i32(&record->position_from_name, irgen.str_len, 0);
     hash_map_put_i32(&record->position_from_name, sem.str_ptr, 1);
 
     result = type_record(record);
@@ -2424,8 +2429,8 @@ void sem_ir(Block* block, Ir* ir) {
           Record* record = type_record_init(1);
           // record->is_array = true;
           record->types[0] = one_type;
-          record->names[0] = sem.str_len;
-          hash_map_put_i32(&record->position_from_name, sem.str_len, 0);
+          record->names[0] = irgen.str_len;
+          hash_map_put_i32(&record->position_from_name, irgen.str_len, 0);
           Type* record_type = type_record(record);
           hash_set_put(records, record_type);
         }
@@ -2657,6 +2662,14 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
     }
+    else if (fun_type == sem.len_fun) {
+      if (arg_type->kind == Type_Kind_record) {
+        result = type_int(arg_type->record->length);
+      }
+      else {
+        assert(0);
+      }
+    }
     else if (fun_type->kind == Type_Kind_fun) {
       Function* fun = fun_type->function;
       if (type_is_subtype(block, arg_type, fun->arg)) {
@@ -2681,6 +2694,10 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       assert(0);
     }
+  } break;
+  case Ir_Kind_run: {
+    Type* type = type_of_ir(ir->unary);
+    result = type;
   } break;
   case Ir_Kind_range: {
     if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
@@ -2977,6 +2994,7 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.record_set = hash_set_init(arena, irgen.irs.length);
   sem.ranges_set = hash_set_init(arena, irgen.irs.length);
   sem.pointer_set = hash_set_init(arena, irgen.irs.length);
+  sem.function_set = hash_set_init(arena, irgen.irs.length);
   // sem.compose_set = hash_set_init(arena, irgen.irs.length);
 
   sem.type_none = &new(sem.types);
@@ -2984,32 +3002,18 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.bits_fun = &new(sem.types);
   sem.bits_fun->kind = Type_Kind_none;
+
+  sem.len_fun = &new(sem.types);
+  sem.len_fun->kind = Type_Kind_none;
+  type_of_ir_put(irgen.irid_len, sem.len_fun);
+
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
-  sem.str_len = str_from_cstr("len");
   sem.str_ptr = str_from_cstr("ptr");
 
   sem.str_from_i8_array = arena_push(arena, sizeof(Fun));
   {
     Fun* fun = &new(irgen.funs);
-    fun->name = 0;
-    fun->type = 0;
-    fun->ret_block = &new(irgen.blocks);
-    memset(fun->ret_block, 0, sizeof(Block));
-    fa_temp(irgen.temp_ir_arena, fun->ret_block->irs);
-    add(irgen.fun_stack, fun);
-    {
-      Block* block = &new(irgen.blocks);
-      memset(block, 0, sizeof(Block));
-      fa_temp(irgen.temp_ir_arena, block->irs);
-      fa_temp(irgen.temp_var_arena, fun->vars);
-      fa_temp(irgen.temp_block_arena, fun->blocks);
-      fa_extend(irgen.temp_block_arena, fun->blocks, block);
-    }
-    Var* ret_var = irgen_var_new();
-    fun->ret_ir = irgen_push_var(ret_var);
-    fun->ret_ir->var->name = str_from_cstr("__ret");
-    // irgen_var_declare(fun->ret_ir->var, ret_decl); // TODO: declare return var
     sem.str_from_i8_array = fun;
   }
 
@@ -3027,7 +3031,7 @@ void sem_funs(Arena* arena, Funs funs) {
 }
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Cstr builtin        = file_read("builtin.i");
+  Cstr builtin        = file_read("basic.i");
   I32  builtin_length = strlen(builtin);
   I32  source_length  = strlen(source);
   I32  length         = source_length + builtin_length + 32;
@@ -3060,8 +3064,9 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  test("#len (x:10; y:20; z:30)", "");
   // (H; i), auto x -> @x
-  test("a: Str = \"Hi\"; a.len; a[0]", "");
+  // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");
   // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");
   // test("a: Str; a.len = 10; a.len;", "");

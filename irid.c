@@ -1,5 +1,5 @@
 void irid_run_path(Cstr path) {
-  Cstr builtin        = file_read("builtin.i");
+  Cstr builtin        = file_read("basic.i");
   I32  builtin_length = strlen(builtin);
   Cstr source         = file_read(path);
   I32  source_length  = strlen(source);
