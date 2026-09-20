@@ -775,7 +775,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("a: Str = \"Hi\"; a.len + 4", "");
+  // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");

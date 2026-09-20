@@ -25,6 +25,7 @@ typedef enum Ast_Kind {
   Ast_Kind_neg       = Token_Kind_minus+1,
   Ast_Kind_pos       = Token_Kind_plus+1,
   Ast_Kind_ptr       = Token_Kind_at+1,
+  Ast_Kind_run       = Token_Kind_sharp + 1,
   Ast_Kind_load      = Token_Kind_at,
   Ast_Kind_dot       = Token_Kind_dot,
   Ast_Kind_range     = Token_Kind_dot_dot,
@@ -47,7 +48,6 @@ typedef enum Ast_Kind {
   Ast_Kind_break_value = Token_Kind_break | Ast_Flag_value,
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
-  Ast_Kind_foreign_c   = Token_Kind_foreign_c,
   Ast_Kind_bits        = Token_Kind_bits,
   Ast_Kind_type        = Token_Kind_type+1,
   Ast_Kind_call        = 100,
@@ -106,7 +106,6 @@ struct Ast_Node {
       Ast_Node* lhs;
       Ast_Node* rhs;
     } binary;
-    Ast_Named foreign;
     Ast_Named declare;
     Ast_Block block;
   };
@@ -348,11 +347,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, ":");
     string_builder_push_ast_node(sb, node->declare.node);
   } break;
-  case Ast_Kind_foreign_c: {
-    string_builder_push_cstr(sb, "#c ");
-    string_builder_push_str(sb, node->foreign.name);
-    string_builder_push_cstr(sb, " ");
-    string_builder_push_ast_node(sb, node->foreign.node);
+  case Ast_Kind_run: {
+    string_builder_push_cstr(sb, "# ");
+    string_builder_push_ast_node(sb, node->unary);
   } break;
   }
 }
@@ -691,7 +688,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
   case Token_Kind_at_prefix:    case Token_Kind_at:
-  case Token_Kind_type:
+  case Token_Kind_type:         case Token_Kind_sharp:
   {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind);
@@ -785,19 +782,6 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
       node = ast_new_node(parser->perm_arena, Ast_Kind_span);
       node->unary = rhs;
     }
-  } break;
-  case Token_Kind_foreign_c: {
-    Ast_Kind kind = Ast_Kind_foreign_c;
-    Token token_name = parser->tokens.base[parser->tok];
-    if (parse_match_token(parser, Token_Kind_name)) {
-      node = ast_new_node(parser->perm_arena, kind);
-      node->foreign.name = token_name.str;
-      node->foreign.node = parse_fun_tuple_or_exp(parser);
-    }
-    else {
-      assert(0);
-    }
-
   } break;
   default:
     parser->tok--;

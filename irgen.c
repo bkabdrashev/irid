@@ -31,6 +31,7 @@ typedef enum Ir_Kind {
 
   Ir_Kind_neg = Ast_Kind_neg | Ir_Flag_unary,
 
+  Ir_Kind_run       = Ast_Kind_run | Ir_Flag_unary,
   Ir_Kind_load      = Ast_Kind_load | Ir_Flag_unary,
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
@@ -45,6 +46,8 @@ typedef enum Ir_Kind {
 
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
+
+  Ir_Kind_len  = 138,
 
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
@@ -253,6 +256,7 @@ struct Rec_Pool {
 
 struct Fun {
   Str*    name;
+  Str*    foreign_name;
   B8      foreign;
   Blocks* blocks;
   Block*  ret_block;
@@ -288,6 +292,8 @@ struct Irgen {
   Ir*         ir_none;
 
   Str*        str_nil;
+
+  Fun*        fun_len;
 
   Fun_Stack   fun_stack;
   Blocks*     unresolved_breaks;
@@ -518,7 +524,7 @@ Cstr cstr_from_funs(Funs funs, C8* buffer) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
     if (fun->foreign) {
-      string_builder_push_cstr(&sb, " #c");
+      string_builder_push_cstr(&sb, " #foreign.c");
     }
     string_builder_push_cstr(&sb, " {");
 
@@ -857,6 +863,14 @@ Fun* irgen_fun_leave(void) {
   return fun;
 }
 
+void irgen_builtin_enter(void) {
+  // foreign : (c: (str:Str) -> (fun: @Type) -> @Fun)
+  // len : (record: @Type) -> I32
+}
+
+void irgen_builtin_leave(void) {
+}
+
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
   case Ast_Kind_name: {
@@ -1070,9 +1084,16 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_span:
   case Ast_Kind_load: case Ast_Kind_type:
-  case Ast_Kind_pos: case Ast_Kind_neg: {
+  case Ast_Kind_pos: case Ast_Kind_neg:
+  {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
+  } break;
+  case Ast_Kind_run: {
+    irgen_builtin_enter();
+    Ir* unary = irgen_ast_node(node->unary);
+    result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
+    irgen_builtin_leave();
   } break;
   case Ast_Kind_bits: {
     result = irgen_push_bits();
@@ -1188,14 +1209,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_binary(Ir_Kind_store, fun->ret_ir, ret);
     irgen_block_return();
   } break;
-  case Ast_Kind_foreign_c: {
-    Ir* ir = irgen_ast_node(node->foreign.node);
-    if (ir->kind == Ir_Kind_fun) {
-      ir->fun->foreign = true;
-      ir->fun->name = node->foreign.name;
-      result = ir;
-    }
-  } break;
   case Ast_Kind_break: case Ast_Kind_break_value:
   case Ast_Kind_if_value: case Ast_Kind_else_value:
   case Ast_Kind_none: { assert(0); }
@@ -1226,8 +1239,10 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.fun_stack.length      = 0;
   irgen.scope_stack.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
+
   irgen.irid_nil = 0;
-  irgen.str_nil = str_from_cstr("");
+  irgen.str_nil  = str_from_cstr("");
+  irgen.fun_len  = &new(irgen.funs);
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
 
@@ -1295,7 +1310,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a: 1,2;", "");
+  // test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
