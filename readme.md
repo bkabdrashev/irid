@@ -45,7 +45,7 @@ sizeof, size
 ```irid
 char : (str : string) -> {
   str.len is 1
-  re str.0
+  return str.0
 }
 #char "a"
 ```
@@ -72,7 +72,7 @@ c : @a\@b // can only points to a or b
 - [ ] $ syntax for defining templates/variables based on pattern
 ```irid
 foo : (a: $T; b: T) -> {
-  re a+b
+  return a+b
 }
 size : [$N]$T -> N * sizeof T
 length : [$N]$ -> N;
@@ -169,17 +169,17 @@ print "after two"
 
 - [ ] break with if/else/while
 ```irid
-while 1 {
+while 1 do {
   a = if 2 do {
     break // breaks if
   }
 }
-while 1 {
+while 1 do {
   if 2 do {
     break // breaks wh
   }
 }
-a = while 1 {
+a = while 1 do {
   while 2 do {
     break // breaks inner wh
   }
@@ -307,7 +307,7 @@ b(x=1;)
 - [ ] Function return type
 ```irid
 add:(a:I32; b:I32) -> I32 do
-  re a+b
+ return a+b
 ```
 
 - [ ] Function call with ''

@@ -2852,6 +2852,9 @@ void sem_init_block_preds(Block* block) {
       add(to_block->preds, block);
     }
   }
+  if (block->preds.length == 0) {
+    block->state = Block_State_unreachable;
+  }
 }
 
 void sem_dfs_postorder(Block* block, Blocks* postorder) {
@@ -2940,15 +2943,13 @@ Type* sem_fun(Fun* fun) {
 
   sem_declare_var(fun->arg_var->var);
 
-  Block* entry_block = fun->blocks->base[0];
-  entry_block->state = Block_State_reachable;
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
-    if (!block->is_scc_visited) {
-      sem_scc_block(block);
-    }
   }
+  Block* entry_block = fun->blocks->base[0];
+  sem_scc_block(entry_block);
+  entry_block->state = Block_State_reachable;
 
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
