@@ -2671,13 +2671,24 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else if (fun_type->kind == Type_Kind_fun) {
-      Function* fun = fun_type->function;
-      if (type_is_subtype(block, arg_type, fun->arg)) {
-        result = fun->ret;
+      if (fun_type->function->fun->kind == Fun_Kind_macro) {
+        Fun* fun = fun_type->function->fun;
+        for (I32 b = 0; b < fun->blocks->length; b++) {
+          Block* block = fun->blocks->base[b];
+          for (I32 i = 0; i < block->irs->length; i++) {
+            Ir* ir = block->irs->base[i];
+          }
+        }
       }
       else {
-        printf("call not subtype\n");
-        assert(0);
+        Function* fun = fun_type->function;
+        if (type_is_subtype(block, arg_type, fun->arg)) {
+          result = fun->ret;
+        }
+        else {
+          printf("call not subtype\n");
+          assert(0);
+        }
       }
     }
     else if (fun_type->kind == Type_Kind_record) {
@@ -2934,55 +2945,63 @@ B8 sem_dominates(Block* one, Block* two) {
 }
 
 Type* sem_fun(Fun* fun) {
-  sem.current_fun = fun;
-  Type* fun_type = type_of_fun(fun);
-  if (fun_type) return fun_type;
-  fun->worklist = arena_push(sem.temp_arena, sizeof(Blocks) + sizeof(Block*)*fun->blocks->length);
-  fun->worklist->length = 0;
-  printf("fun: %s\n", fun->name->base);
-
-  sem_declare_var(fun->arg_var->var);
-
-  for (I32 b = 0; b < fun->blocks->length; b++) {
-    Block* block = fun->blocks->base[b];
-    sem_init_block_preds(block);
+  if (fun->kind == Fun_Kind_macro) {
+    Function* function = arena_push(sem.perm_arena, sizeof(Function));
+    function->fun = fun;
+    function->arg = sem.type_none;
+    function->ret = sem.type_none;
+    fun->type = type_fun(function);
+    return fun->type;
   }
-  Block* entry_block = fun->blocks->base[0];
-  sem_scc_block(entry_block);
-  entry_block->state = Block_State_reachable;
+  else {
+    sem.current_fun = fun;
+    Type* fun_type = type_of_fun(fun);
+    if (fun_type) return fun_type;
+    fun->worklist = arena_push(sem.temp_arena, sizeof(Blocks) + sizeof(Block*)*fun->blocks->length);
+    fun->worklist->length = 0;
+    printf("fun: %s\n", fun->name->base);
 
-  while (sem_worklist_is_not_empty()) {
-    Block* block = sem_worklist_pop();
-    // if (block->is_loop_head) {
-    //   printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    sem_declare_var(fun->arg_var->var);
+
+    for (I32 b = 0; b < fun->blocks->length; b++) {
+      Block* block = fun->blocks->base[b];
+      sem_init_block_preds(block);
+    }
+    Block* entry_block = fun->blocks->base[0];
+    sem_scc_block(entry_block);
+    entry_block->state = Block_State_reachable;
+
+    while (sem_worklist_is_not_empty()) {
+      Block* block = sem_worklist_pop();
+      // if (block->is_loop_head) {
+      //   printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+      // }
+      // else {
+      //   printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+      // }
+      sem_block(block);
+    }
+    // Blocks*  rpo = sem_cfg_rpo(fun);
+    //                sem_cfg_doms(fun, rpo);
+    // for (I32 i = 0; i < rpo->length; i++) {
+    //   Block* block = rpo->base[i];
+    //   sem_block(block);
     // }
-    // else {
-    //   printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
-    // }
-    sem_block(block);
+
+    Function* function = arena_push(sem.perm_arena, sizeof(Function));
+    function->fun = fun;
+    function->arg = fun->arg_var->var->declared;
+    function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+    fun->ret_ir->var->declared = function->ret;
+    Type* ret_type = type_of_ir(fun->ret_ir);
+    assert(ret_type->kind == Type_Kind_ptr);
+    ret_type->pointer->declared = function->ret;
+    fun->type = type_fun(function);
+
+    arena_release_mark(sem.temp_arena, fun->worklist);
+    printf("end: %s\n", fun->name->base);
+    return fun->type;
   }
-  // Blocks*  rpo = sem_cfg_rpo(fun);
-  //                sem_cfg_doms(fun, rpo);
-  // for (I32 i = 0; i < rpo->length; i++) {
-  //   Block* block = rpo->base[i];
-  //   sem_block(block);
-  // }
-
-  Type* new_type = &new(sem.types);
-  new_type->kind = Type_Kind_fun;
-  new_type->function = arena_push(sem.perm_arena, sizeof(Function));
-  new_type->function->fun = fun;
-  new_type->function->arg = fun->arg_var->var->declared;
-  new_type->function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
-  fun->ret_ir->var->declared = new_type->function->ret;
-  Type* ret_type = type_of_ir(fun->ret_ir);
-  assert(ret_type->kind == Type_Kind_ptr);
-  ret_type->pointer->declared = new_type->function->ret;
-  fun->type = new_type;
-
-  arena_release_mark(sem.temp_arena, fun->worklist);
-  printf("end: %s\n", fun->name->base);
-  return new_type;
 }
 
 void sem_funs(Arena* arena, Funs funs) {
