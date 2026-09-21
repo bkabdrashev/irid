@@ -23,7 +23,11 @@ typedef struct Pointer_Pair Pointer_Pair;
 struct Pointer_Pair { Pointer* one; Pointer* two; };
 
 typedef struct Function Function;
-struct Function { Fun* fun; Type* arg; Type* ret; };
+struct Function {
+  Fun* fun;
+  Type* arg;
+  Type* ret;
+};
 
 typedef struct Field Field;
 struct Field {
@@ -127,6 +131,8 @@ struct Sem {
   I32 sccid;
   Blocks* scc_stack;
   Fun* current_fun;
+  Ir*  current_arg;
+  Ir*  current_par;
 };
 
 Sem sem = {};
@@ -268,6 +274,10 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
+    if (fun->kind == Fun_Kind_macro) {
+      string_builder_push_cstr(&sb, " #macro ");
+      continue;
+    }
     string_builder_push_cstr(&sb, " : ");
     string_builder_push_type(&sb, fun->blocks->base[0], fun->type);
     string_builder_push_cstr(&sb, " {");
@@ -565,10 +575,9 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     } break;
     case Type_Kind_compose: assert(0); break;
     }
-    assert(0);
-    result = false;
   }
   else {
+    assert(0);
     result = false;
   }
 
@@ -2548,43 +2557,49 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_load: {
-    Type* ptr_type = type_of_ir(ir->unary);
-    if (ptr_type->kind == Type_Kind_ptr) {
-      Pointer* pointer = ptr_type->pointer;
-      Hash_Set stack = pointer->stack;
-      if (stack.len >= 1) {
-        for (I32 i = 0; i < stack.len; i++) {
-          sem_declare_var(stack.list[i]);
-        }
-        result = type_of_var(block, stack.list[0]);
-        for (I32 i = 1; i < stack.len; i++) {
-          Type* type = type_of_var(block, stack.list[i]);
-          result = type_join(block, result, type);
-        }
-      }
-      else {
-        result = pointer->declared;
-      }
-    }
-    else if (ptr_type->kind == Type_Kind_compose) {
-      Pointer* pointer = ptr_type->compose->ptr_type->pointer;
-      Hash_Set stack = pointer->stack;
-      if (stack.len >= 1) {
-        for (I32 i = 0; i < stack.len; i++) {
-          sem_declare_var(stack.list[i]);
-        }
-        result = type_of_var(block, stack.list[0]);
-        for (I32 i = 1; i < stack.len; i++) {
-          Type* type = type_of_var(block, stack.list[i]);
-          result = type_join(block, result, type);
-        }
-      }
-      else {
-        result = pointer->declared;
-      }
+    if (sem.current_fun->kind == Fun_Kind_macro && ir->unary == sem.current_par) {
+      // TODO: maybe add ir_kind_macro_par so that it can be substituted with arg
+      result = type_of_ir(sem.current_arg);
     }
     else {
-      assert(0);
+      Type* ptr_type = type_of_ir(ir->unary);
+      if (ptr_type->kind == Type_Kind_ptr) {
+        Pointer* pointer = ptr_type->pointer;
+        Hash_Set stack = pointer->stack;
+        if (stack.len >= 1) {
+          for (I32 i = 0; i < stack.len; i++) {
+            sem_declare_var(stack.list[i]);
+          }
+          result = type_of_var(block, stack.list[0]);
+          for (I32 i = 1; i < stack.len; i++) {
+            Type* type = type_of_var(block, stack.list[i]);
+            result = type_join(block, result, type);
+          }
+        }
+        else {
+          result = pointer->declared;
+        }
+      }
+      else if (ptr_type->kind == Type_Kind_compose) {
+        Pointer* pointer = ptr_type->compose->ptr_type->pointer;
+        Hash_Set stack = pointer->stack;
+        if (stack.len >= 1) {
+          for (I32 i = 0; i < stack.len; i++) {
+            sem_declare_var(stack.list[i]);
+          }
+          result = type_of_var(block, stack.list[0]);
+          for (I32 i = 1; i < stack.len; i++) {
+            Type* type = type_of_var(block, stack.list[i]);
+            result = type_join(block, result, type);
+          }
+        }
+        else {
+          result = pointer->declared;
+        }
+      }
+      else {
+        assert(0);
+      }
     }
   } break;
   case Ir_Kind_store: {
@@ -2632,9 +2647,19 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_pointer_to(type);
   } break;
   case Ir_Kind_fun: {
-    Fun* save_fun = sem.current_fun;
-    result = sem_fun(ir->fun);
-    sem.current_fun = save_fun;
+    if (ir->fun->kind == Fun_Kind_macro) {
+      Function* function = arena_push(sem.perm_arena, sizeof(Function));
+      function->fun = ir->fun;
+      function->arg = sem.type_none;
+      function->ret = sem.type_none;
+      // ir->fun->type = type_fun(function);
+      result = type_fun(function);
+    }
+    else {
+      Fun* save_fun = sem.current_fun;
+      result = sem_fun(ir->fun);
+      sem.current_fun = save_fun;
+    }
   } break;
   case Ir_Kind_call: {
     Type_Pair types = type_of_ir_binary(ir);
@@ -2673,12 +2698,13 @@ void sem_ir(Block* block, Ir* ir) {
     else if (fun_type->kind == Type_Kind_fun) {
       if (fun_type->function->fun->kind == Fun_Kind_macro) {
         Fun* fun = fun_type->function->fun;
-        for (I32 b = 0; b < fun->blocks->length; b++) {
-          Block* block = fun->blocks->base[b];
-          for (I32 i = 0; i < block->irs->length; i++) {
-            Ir* ir = block->irs->base[i];
-          }
-        }
+        Block* entry_block = fun->blocks->base[0];
+        sem.current_par = entry_block->irs->base[1];
+        sem.current_arg = ir->binary.two;
+        Fun* save_fun = sem.current_fun;
+        fun_type = sem_fun(fun);
+        sem.current_fun = save_fun;
+        result = fun_type->function->ret;
       }
       else {
         Function* fun = fun_type->function;
@@ -2945,63 +2971,53 @@ B8 sem_dominates(Block* one, Block* two) {
 }
 
 Type* sem_fun(Fun* fun) {
-  if (fun->kind == Fun_Kind_macro) {
-    Function* function = arena_push(sem.perm_arena, sizeof(Function));
-    function->fun = fun;
-    function->arg = sem.type_none;
-    function->ret = sem.type_none;
-    fun->type = type_fun(function);
-    return fun->type;
+  sem.current_fun = fun;
+  Type* fun_type = type_of_fun(fun);
+  if (fun_type) return fun_type;
+  fun->worklist = arena_push(sem.temp_arena, sizeof(Blocks) + sizeof(Block*)*fun->blocks->length);
+  fun->worklist->length = 0;
+  printf("fun: %s\n", fun->name->base);
+
+  sem_declare_var(fun->arg_var->var);
+
+  for (I32 b = 0; b < fun->blocks->length; b++) {
+    Block* block = fun->blocks->base[b];
+    sem_init_block_preds(block);
   }
-  else {
-    sem.current_fun = fun;
-    Type* fun_type = type_of_fun(fun);
-    if (fun_type) return fun_type;
-    fun->worklist = arena_push(sem.temp_arena, sizeof(Blocks) + sizeof(Block*)*fun->blocks->length);
-    fun->worklist->length = 0;
-    printf("fun: %s\n", fun->name->base);
+  Block* entry_block = fun->blocks->base[0];
+  sem_scc_block(entry_block);
+  entry_block->state = Block_State_reachable;
 
-    sem_declare_var(fun->arg_var->var);
-
-    for (I32 b = 0; b < fun->blocks->length; b++) {
-      Block* block = fun->blocks->base[b];
-      sem_init_block_preds(block);
-    }
-    Block* entry_block = fun->blocks->base[0];
-    sem_scc_block(entry_block);
-    entry_block->state = Block_State_reachable;
-
-    while (sem_worklist_is_not_empty()) {
-      Block* block = sem_worklist_pop();
-      // if (block->is_loop_head) {
-      //   printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
-      // }
-      // else {
-      //   printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
-      // }
-      sem_block(block);
-    }
-    // Blocks*  rpo = sem_cfg_rpo(fun);
-    //                sem_cfg_doms(fun, rpo);
-    // for (I32 i = 0; i < rpo->length; i++) {
-    //   Block* block = rpo->base[i];
-    //   sem_block(block);
+  while (sem_worklist_is_not_empty()) {
+    Block* block = sem_worklist_pop();
+    // if (block->is_loop_head) {
+    //   printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
     // }
-
-    Function* function = arena_push(sem.perm_arena, sizeof(Function));
-    function->fun = fun;
-    function->arg = fun->arg_var->var->declared;
-    function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
-    fun->ret_ir->var->declared = function->ret;
-    Type* ret_type = type_of_ir(fun->ret_ir);
-    assert(ret_type->kind == Type_Kind_ptr);
-    ret_type->pointer->declared = function->ret;
-    fun->type = type_fun(function);
-
-    arena_release_mark(sem.temp_arena, fun->worklist);
-    printf("end: %s\n", fun->name->base);
-    return fun->type;
+    // else {
+    //   printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    // }
+    sem_block(block);
   }
+  // Blocks*  rpo = sem_cfg_rpo(fun);
+  //                sem_cfg_doms(fun, rpo);
+  // for (I32 i = 0; i < rpo->length; i++) {
+  //   Block* block = rpo->base[i];
+  //   sem_block(block);
+  // }
+
+  Function* function = arena_push(sem.perm_arena, sizeof(Function));
+  function->fun = fun;
+  function->arg = fun->arg_var->var->declared;
+  function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+  fun->ret_ir->var->declared = function->ret;
+  Type* ret_type = type_of_ir(fun->ret_ir);
+  assert(ret_type->kind == Type_Kind_ptr);
+  ret_type->pointer->declared = function->ret;
+  fun->type = type_fun(function);
+
+  arena_release_mark(sem.temp_arena, fun->worklist);
+  printf("end: %s\n", fun->name->base);
+  return fun->type;
 }
 
 void sem_funs(Arena* arena, Funs funs) {
@@ -3051,7 +3067,9 @@ void sem_funs(Arena* arena, Funs funs) {
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
-    sem_fun(fun);
+    if (fun->kind != Fun_Kind_macro) {
+      sem_fun(fun);
+    }
   }
   arena_free(&temp);
 }
@@ -3090,7 +3108,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("#len (x:10; y:20; z:30)", "");
+  test("str_from_i8_array(10; 20)", "");
   // (H; i), auto x -> @x
   // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");

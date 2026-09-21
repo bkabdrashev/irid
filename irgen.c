@@ -1356,7 +1356,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("#len (x:10)", "");
+  test("str_from_i8_array(10; 20)", "");
   // test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
