@@ -22,6 +22,6 @@ Str : type (len:(0..I64_MAX)), @(I8_MIN..I8_MAX)
 str_from_i8_array : arr -> {
   result: Str
   result.len = #len arr
-  result = @arr
+  result = @arr[0]
   return result
 }

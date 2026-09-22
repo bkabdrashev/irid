@@ -46,8 +46,9 @@ typedef enum Ir_Kind {
 
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
+  Ir_Kind_macro_par  = 138,
 
-  Ir_Kind_len  = 138,
+  Ir_Kind_len  = 139,
 
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
@@ -406,6 +407,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_arg:
     string_builder_push_cstr(sb, "arg");
   break;
+  case Ir_Kind_macro_par:
+    string_builder_push_cstr(sb, "macro par");
+  break;
   case Ir_Kind_fun:
     string_builder_push_cstr(sb, "fun ");
     string_builder_push_fun(sb, ir->fun);
@@ -624,6 +628,11 @@ Ir* irgen_pop(void) {
 
 Ir* irgen_push_none(void) {
   Ir ir = { Ir_Kind_none, {0} };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_macro_par(void) {
+  Ir ir = { Ir_Kind_macro_par, {0} };
   return irgen_push(ir);
 }
 
@@ -901,6 +910,9 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       if (sym->kind == Symbol_Kind_variable) {
         irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
       }
+      else if (sym->kind == Symbol_Kind_parameter) {
+        irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
+      }
       else {
         printf("cannot assign '%s'\n", lhs->str->base);
         assert(0);
@@ -978,6 +990,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
       if (sym->kind == Symbol_Kind_variable) {
         result = irgen_push_unary(Ir_Kind_load, sym->ir);
       }
+      else if (sym->kind == Symbol_Kind_parameter) {
+        result = sym->ir;
+      }
       else if (sym->kind == Symbol_Kind_constant) {
         result = sym->ir;
       }
@@ -1014,13 +1029,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_subscript: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
-    if (lhs->kind == Ir_Kind_load) {
-      Ir* ptr = lhs->unary;
-      irgen_pop();
-      Ir* rhs = irgen_ast_node(node->binary.rhs);
-      Ir* subscript = irgen_push_binary(Ir_Kind_subscript, ptr, rhs);
-      result = irgen_push_unary(Ir_Kind_load, subscript);
-    }
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    Ir* subscript = irgen_push_binary(Ir_Kind_subscript, lhs, rhs);
+    result = irgen_push_unary(Ir_Kind_load, subscript);
   } break;
   case Ast_Kind_assign: {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
@@ -1217,8 +1228,8 @@ Ir* irgen_ast_node(Ast_Node* node) {
         add(irgen.scope_stack, &scope);
         arg_var->name = lhs->str;
         Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
-        sym->kind = Symbol_Kind_variable;
-        sym->ir = irgen_push_arg(arg_var);
+        sym->kind = Symbol_Kind_parameter;
+        sym->ir   = irgen_push_macro_par();
         fun->arg_var = sym->ir;
         fun->kind = Fun_Kind_macro;
         irgen_sym_put(arg_var->name, sym);

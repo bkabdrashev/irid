@@ -70,9 +70,10 @@ struct Ast_List {
 };
 
 typedef enum {
-  Symbol_Kind_none     = 0,
-  Symbol_Kind_constant = 1,
-  Symbol_Kind_variable = 2,
+  Symbol_Kind_none      = 0,
+  Symbol_Kind_constant  = 1,
+  Symbol_Kind_variable  = 2,
+  Symbol_Kind_parameter = 3,
 } Symbol_Kind;
 
 typedef struct Var Var;

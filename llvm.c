@@ -178,8 +178,8 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   case Type_Kind_none: {
   } break;
   case Type_Kind_ptr: {
-    if (type->pointer->stack.len > 0) {
-      Var* var = type->pointer->stack.list[0];
+    if (type->pointer->stack_vars.len > 0) {
+      Var* var = type->pointer->stack_vars.list[0];
       result = llvm_of_ir(var->declared_ir);
     }
     else {
