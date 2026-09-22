@@ -52,7 +52,6 @@ typedef enum Ir_Kind {
 
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
-  Ir_Kind_access      = 142,
 
   Ir_Kind_and_list    = 144,
 } Ir_Kind;
@@ -435,12 +434,6 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_record_cast:
     string_builder_push_cstr(sb, "record cast ");
     string_builder_push_irid(sb, ir->record_cast.value);
-  break;
-  case Ir_Kind_access:
-    string_builder_push_cstr(sb, "access ");
-    string_builder_push_irid(sb, ir->access.of);
-    string_builder_push_cstr(sb, "at ");
-    string_builder_push_i64(sb, ir->access.at);
   break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");

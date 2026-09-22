@@ -55,22 +55,20 @@ struct Types {
   Type*  base[];
 };
 
-typedef struct Compose Compose;
-struct Compose {
-  Type*      int_type;
-  Type*      ptr_type;
-  Hash_Set*  records;
-  Types*     auto_casts;
+typedef struct Array Array;
+struct Array {
+  I32     length;
+  Type*   to_type;
+  Types*  types;
 };
 
 typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_int,
   Type_Kind_ptr,
-  Type_Kind_str,
+  Type_Kind_array,
   Type_Kind_record,
   Type_Kind_fun,
-  Type_Kind_compose,
 } Type_Kind;
 
 struct Type {
@@ -82,10 +80,10 @@ struct Type {
     U64       value;
     Ranges*   ranges;
     Pointer*  pointer;
+    Array*    array;
     Record*   record;
     Function* function;
     Hash_Set* strings;
-    Compose*  compose;
   };
 };
 
@@ -191,17 +189,6 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
       string_builder_push_cstr(sb, ")");
     }
   } break;
-  case Type_Kind_str: {
-    for (I32 i = 0; i < type->strings->len; i++) {
-      Str* str = type->strings->list[i];
-      string_builder_push_cstr(sb, "\"");
-      string_builder_push_str(sb, str);
-      string_builder_push_cstr(sb, "\"");
-      if (i+1 < type->strings->len) {
-        string_builder_push_cstr(sb, "\\");
-      }
-    }
-  } break;
   case Type_Kind_ptr: {
     // Type* declared = type_pointer_declared(type->pointer);
     string_builder_push_cstr(sb, "@");
@@ -245,24 +232,19 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     }
     string_builder_push_cstr(sb, ")");
   } break;
-  case Type_Kind_compose: {
-    string_builder_push_cstr(sb, "compose(");
-    if (type->compose->int_type != sem.type_none) {
-      string_builder_push_type(sb, block, type->compose->int_type);
-      string_builder_push_cstr(sb, ", ");
-    }
-    if (type->compose->ptr_type != sem.type_none) {
-      string_builder_push_type(sb, block, type->compose->ptr_type);
-      string_builder_push_cstr(sb, ", ");
-    }
-    Hash_Set* records = type->compose->records;
-    for (I32 i = 0; i < records->len; i++) {
-      Type* record = records->list[i];
-      string_builder_push_type(sb, block, record);
-      if (i+1 < records->len) {
-        string_builder_push_cstr(sb, ", ");
+  case Type_Kind_array: {
+    string_builder_push_cstr(sb, "[");
+    string_builder_push_i64(sb, type->array->length);
+    string_builder_push_cstr(sb, "]");
+    string_builder_push_type(sb, block, type->array->to_type);
+    string_builder_push_cstr(sb, "(");
+      for (I32 i = 0; i < type->array->types->length; i++) {
+        Type* item = type->array->types->base[i];
+        string_builder_push_type(sb, block, item);
+        if (i+1 < type->array->types->length) {
+          string_builder_push_cstr(sb, ", ");
+        }
       }
-    }
     string_builder_push_cstr(sb, ")");
   } break;
   }
@@ -475,52 +457,9 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
   // (1..3) is subtype of 1 -- false
   // (1..2) is subtype of (1..3) -- true
   B8 result = false;
-  if (two->kind == Type_Kind_compose) {
-    // a: I32, (x:I32; y:I32) = 1 (2 bits)
-    // a = (I32 1; I32 2)
-    Type* int_type = two->compose->int_type;
-    Type* ptr_type = two->compose->ptr_type;
-    Hash_Set* records = two->compose->records;
-    switch (one->kind) {
-    case Type_Kind_int: {
-      result = type_is_subtype_rec(block, one, int_type, visited);
-    } break;
-    case Type_Kind_ptr: {
-      result = type_is_subtype_rec(block, one, ptr_type, visited);
-    } break;
-    case Type_Kind_compose: {
-      if (!type_is_subtype_rec(block, one->compose->int_type, int_type, visited)) {
-        assert(0);
-        result = false;
-      }
-      if (!type_is_subtype_rec(block, one->compose->ptr_type, ptr_type, visited)) {
-        assert(0);
-        result = false;
-      }
-      for (I32 i = 0; i < one->compose->records->len; i++) {
-        Type* record = one->compose->records->list[i];
-        B8 is_subtype = false;
-        for (I32 j = 0; j < records->len; j++) {
-          if (type_is_subtype_rec(block, record, records->list[j], visited)) {
-            is_subtype = true;
-            break;
-          }
-        }
-        if (!is_subtype) {
-          result = false;
-        }
-      }
-      result = true;
-    } break;
-    default: assert(0);
-    }
-  }
-  else if (one->kind == two->kind) {
+  if (one->kind == two->kind) {
     switch (one->kind) {
     case Type_Kind_none: {
-      result = true;
-    } break;
-    case Type_Kind_str: {
       result = true;
     } break;
     case Type_Kind_int: {
@@ -572,7 +511,6 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       assert(0);
       result = false;
     } break;
-    case Type_Kind_compose: assert(0); break;
     }
   }
   else {
@@ -580,20 +518,6 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     result = false;
   }
 
-  if (!result) {
-    if (one->kind == Type_Kind_compose) {
-      Types* auto_casts = one->compose->auto_casts;
-      for (I32 i = 0; i < auto_casts->length; i++) {
-        Type* auto_cast = auto_casts->base[i];
-        if (auto_cast->kind == Type_Kind_fun) {
-          result = type_is_subtype_rec(block, auto_cast->function->ret, two, visited);
-          if (result) {
-            break;
-          }
-        }
-      }
-    }
-  }
   return result;
 }
 
@@ -632,61 +556,35 @@ Type* type_of_field_at(Record* record, I32 position) {
 }
 
 B8 type_is_const(Type* type) {
+  B8 result = false;
   switch (type->kind) {
   case Type_Kind_none: {
-    return true;
-  } break;
-  case Type_Kind_str: {
-    return false;
+    result = true;
   } break;
   case Type_Kind_int: {
-    return ranges_is_single(type->ranges);
+    result = ranges_is_single(type->ranges);
   } break;
   case Type_Kind_record: {
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_declared = type_of_field_at(type->record, i);
-      if (field_declared) {
-        if (!type_is_const(field_declared)) {
-          return false;
-        }
-      }
-      else {
-        return false;
+      if (!type_is_const(field_declared)) {
+        result = false;
+        break;
       }
     }
-    return false;
+    result = true;
   } break;
-  case Type_Kind_compose: {
-    if (!type_is_const(type->compose->int_type)) {
-      return false;
-    }
-    if (!type_is_const(type->compose->ptr_type)) {
-      return false;
-    }
-    for (I32 r = 0; r < type->compose->records->len; r++) {
-      Record* record = type->compose->records->list[r];
-      for (I32 i = 0; i < record->length; i++) {
-        Type* field_declared = type_of_field_at(record, i);
-        if (field_declared) {
-          if (!type_is_const(field_declared)) {
-            return false;
-          }
-        }
-        else {
-          return false;
-        }
-      }
-    }
-    return true;
+  case Type_Kind_array: {
+    result = type_is_const(type->array->to_type);
   } break;
   case Type_Kind_ptr: {
-    return type->pointer->stack_vars.len == 1;
+    result = pointer_is_single_var(type->pointer);
   } break;
   case Type_Kind_fun: {
-    return true;
+    result = true;
   } break;
   }
-  return false;
+  return result;
 }
 
 B8 type_is_subtype(Block* block, Type* one, Type* two) {
@@ -698,42 +596,43 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
 }
 
 B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
+  B8 result = false;
   if (one->kind != two->kind) {
-    return false;
+    result = false;
   }
   switch (one->kind) {
   case Type_Kind_none: {
-    return true;
-  } break;
-  case Type_Kind_str: {
-    return true;
+    result = true;
   } break;
   case Type_Kind_int: {
     B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align && one->size_defined && two->size_defined;
-    return size_equal;
+    result = size_equal;
   } break;
   case Type_Kind_record: {
     if (one->record->length != two->record->length) {
-      return false;
+      result = false;
     }
-    for (I32 i = 0; i < one->record->length; i++) {
-      Field field_one = type_record_get_by_position(block, one->record, i);
-      Field field_two;
-      if (field_one.name) {
-        field_two = type_record_get_by_name(block, two->record, field_one.name);
+    else {
+      for (I32 i = 0; i < one->record->length; i++) {
+        Field field_one = type_record_get_by_position(block, one->record, i);
+        Field field_two;
+        if (field_one.name) {
+          field_two = type_record_get_by_name(block, two->record, field_one.name);
+        }
+        else {
+          field_two = type_record_get_by_position(block, two->record, i);
+        }
+        if (!type_is_same_rec(block, field_one.type, field_two.type, visited)) {
+          result = false;
+          break;
+        }
       }
-      else {
-        field_two = type_record_get_by_position(block, two->record, i);
-      }
-      if (!type_is_same_rec(block, field_one.type, field_two.type, visited)) {
-        return false;
-      }
+      result = true;
     }
-    return true;
   } break;
   case Type_Kind_ptr: {
     if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
-      return true;
+      result = true;
     }
     subtype_visited_push(visited, one->pointer, two->pointer);
     // TODO: need to check whether pointer is global/stack/
@@ -741,7 +640,7 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
       for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
         Var* var = one->pointer->stack_vars.list[i];
         if (!hash_set_exists(&two->pointer->stack_vars, var)) {
-          return false;
+          result = false;
         }
       }
     }
@@ -749,36 +648,26 @@ B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited
     Type* two_declared = type_pointer_declared(two->pointer);
     if (one_declared && two_declared) {
       if (!type_is_same_rec(block, one_declared, two_declared, visited)) {
-        return false;
+        result = false;
       }
     }
-    return true;
+    result = true;
   } break;
   case Type_Kind_fun: {
-    return false;
+    result = false;
   } break;
-  case Type_Kind_compose: {
+  case Type_Kind_array: {
     // a: I32, (x:I32; y:I32) = 1 (2 bits)
     // a = (I32 1; I32 2)
-    Type* int_type = two->compose->int_type;
-    Type* ptr_type = two->compose->ptr_type;
-    Hash_Set* records = two->compose->records;
-    if (!type_is_same_rec(block, one->compose->int_type, int_type, visited)) {
-      return false;
+    if (one->array->length == two->array->length) {
+      result = type_is_same_rec(block, one->array->to_type, two->array->to_type, visited);
     }
-    if (!type_is_same_rec(block, one->compose->ptr_type, ptr_type, visited)) {
-      return false;
+    else {
+      result = false;
     }
-    for (I32 i = 0; i < one->compose->records->len; i++) {
-      Record* record = one->compose->records->list[i];
-      if (!hash_set_exists(records, record)) {
-        return false;
-      }
-    }
-    return true;
   } break;
   }
-  return false;
+  return result;
 }
 
 B8 type_is_same(Block* block, Type* one, Type* two) {
@@ -957,24 +846,6 @@ Ir* sem_push_record_cast(Block* block, Ir* value, Type* type) {
   return sem_ir;
 }
 
-Ir* sem_push_access(Block* block, Ir* of, I32 at) {
-  Ir new_ir = { Ir_Kind_record_cast, .access = { .of = of, .at = at } };
-  Ir* sem_ir = &new(irgen.irs);
-  *sem_ir = new_ir;
-  sem_push_ir(block, sem_ir);
-  Type* type = type_of_ir(of);
-  if (at == 0) {
-    type_of_ir_put(sem_ir, type->compose->int_type);
-  }
-  else if (at == 1) {
-    type_of_ir_put(sem_ir, type->compose->ptr_type);
-  }
-  else {
-    type_of_ir_put(sem_ir, type->compose->records->list[at]);
-  }
-  return sem_ir;
-}
-
 Type* sem_ranges_reflow(Block* block, Ir* ir, Range range, Type_Pair types) {
   Type* result = sem.type_none;
   I16 bits_size = bits_needed(range.lo, range.hi);
@@ -1016,23 +887,6 @@ Type* sem_ranges_reflow(Block* block, Ir* ir, Range range, Type_Pair types) {
 
 Type* type_int(I64 i64) {
   return type_range(i64, i64);
-}
-
-Type* type_cstrs(Hash_Set strings) {
-  Type* new_type = &new(sem.types);
-  new_type->kind = Type_Kind_str;
-  new_type->strings = arena_push(sem.perm_arena, 1*sizeof(Hash_Set*));
-  *new_type->strings = strings;
-  new_type->size_defined = true;
-  new_type->bits_size  = 64;
-  new_type->bits_align = 64;
-  return new_type;
-}
-
-Type* type_cstr(Str* str) {
-  Hash_Set strings = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&strings, str);
-  return type_cstrs(strings);
 }
 
 Type* type_ranges_offset(Ranges* ranges, I64 offset) {
@@ -1112,33 +966,15 @@ Field type_record_get_by_name(Block* block, Record* record, Str* name) {
 }
 
 Var* sem_get_var_by_name(Var* var, Str* name) {
-  assert(var->declared);
+  sem_declare_var(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
     I32 position = hash_map_get_i32(&record->position_from_name, name);
     return var->vars[position];
   }
-  else if (var->declared->kind == Type_Kind_compose) {
-    Compose* compose = var->declared->compose;
-    I32 found = 0;
-    I32 found_i = 0;
-    for (I32 i = 0; i < compose->records->len; i++) {
-      Type* type = compose->records->list[i];
-      Record* record = type->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, name);
-      if (position != -1) {
-        found++;
-        found_i = i;
-      }
-    }
-    if (found == 1) {
-      Type* type = var->vars[found_i]->declared;
-      Record* record = type->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, name);
-      return var->vars[found_i]->vars[position];
-    }
-    else if (found == 0) {
-      assert(0);
+  else if (var->declared->kind == Type_Kind_array) {
+    if (name == irgen.str_len) {
+      return var->vars[0];
     }
     else {
       assert(0);
@@ -1156,27 +992,9 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
     I32 position = hash_map_get_i32(&record->position_from_name, name);
     return record->offsets[position];
   }
-  else if (var->declared->kind == Type_Kind_compose) {
-    I32 found = 0;
-    I32 found_i = 0;
-    // TODO: compose access IR instruction
-    for (I32 i = 0; i < var->declared->compose->records->len; i++) {
-      Type* type = var->declared->compose->records->list[i];
-      Record* record = type->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, name);
-      if (position != -1) {
-        found++;
-        found_i = i;
-      }
-    }
-    if (found == 1) {
-      Type* type = var->vars[found_i]->declared;
-      Record* record = type->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, name);
-      return record->offsets[position];
-    }
-    else if (found == 0) {
-      assert(0);
+  else if (var->declared->kind == Type_Kind_array) {
+    if (name == irgen.str_len) {
+      return -8;
     }
     else {
       assert(0);
@@ -1271,41 +1089,54 @@ Type* type_record(Record* record) {
   return result;
 }
 
-Type* type_ranges_meet(Ranges* one, Ranges* two);
-Type* type_pointer(Pointer* pointer);
-
-Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set* records, Types* auto_casts) {
-  Type* result = &new(sem.types);
-  result->kind = Type_Kind_compose;
-  result->compose = arena_push(sem.perm_arena, sizeof(Compose));
-
-  result->bits_size  = int_type->bits_size;
-  result->bits_size  = align_up(result->bits_size, int_type->bits_align);
-
-  if (ptr_type != sem.type_none) {
-    result->bits_size += ptr_type->bits_size;
-    result->bits_size  = align_up(result->bits_size, ptr_type->bits_align);
-  }
-
-  result->bits_align = max(int_type->bits_align, ptr_type->bits_align);
-  for (I32 i = 0; i < records->len; i++) {
-    Type* record = records->list[i];
-    if (record->bits_align > 0) {
-      result->bits_align = max(result->bits_align, record->bits_align);
-      result->bits_size  = align_up(result->bits_size, record->bits_align);
-      result->bits_size += record->bits_size;
+Type* type_array(Array* array) {
+  Type* result;
+  if (array->length > 0) {
+    I32 i = 0;
+    for (;;) {
+      i &= sem.array_set.cap - 1;
+      Array* key_array = sem.array_set.keys[i];
+      if (!key_array) {
+        sem.array_set.keys[i] = array;
+        break;
+      }
+      else {
+        if (key_array->length == array->length && key_array->to_type == array->to_type) {
+          B8 is_equal = true;
+          for (I32 i = 0; i < key_array->length; i++) {
+            Type* type = key_array->types->base[i];
+            if (type != array->types->base[i]) {
+              is_equal = false;
+            }
+          }
+          if (is_equal) {
+            arena_release_mark(sem.perm_arena, array);
+            array = key_array;
+            break;
+          }
+        }
+      }
+      i++;
     }
+
+    Type* type = &new(sem.types);
+    type->kind = Type_Kind_array;
+    type->size_defined = false;
+    type->bits_size  = array->to_type->bits_size  * array->length;
+    type->bits_align = array->to_type->bits_align * array->length;
+    type->array = array;
+    result = type_in_set(type);
   }
-  result->bits_align = align_up(result->bits_size, result->bits_align);
-  result->compose->int_type = int_type;
-  result->compose->ptr_type = ptr_type;
-  result->compose->records  = records;
-  result->compose->auto_casts = auto_casts;
+  else {
+    result = sem.type_none;
+  }
   return result;
 }
 
+Type* type_ranges_meet(Ranges* one, Ranges* two);
+Type* type_pointer(Pointer* pointer);
+
 Type* type_meet(Type* one, Type* two) {
-  void* mark = arena_mark(sem.temp_arena);
   Type* result = sem.type_none;
 
   if (one->kind == Type_Kind_none) {
@@ -1314,65 +1145,11 @@ Type* type_meet(Type* one, Type* two) {
   else if (two->kind == Type_Kind_none) {
     result = one;
   }
-  else if (one->kind != two->kind) {
-    Type* one_int_type = sem.type_none;
-    Type* one_ptr_type = sem.type_none;
-    Hash_Set one_records = {0};
-    Type* two_int_type = sem.type_none;
-    Type* two_ptr_type = sem.type_none;
-    Hash_Set two_records = {0};
-    if (one->kind == Type_Kind_compose) {
-      one_int_type = one->compose->int_type;
-      one_ptr_type = one->compose->ptr_type;
-      one_records = *one->compose->records;
-    }
-    else if (one->kind == Type_Kind_record) {
-      one_records = hash_set_init(sem.perm_arena, 1);
-      hash_set_put(&one_records, one);
-    }
-    else if (one->kind == Type_Kind_ptr) {
-      one_ptr_type = one;
-    }
-    else if (one->kind == Type_Kind_int) {
-      one_int_type = one;
-    }
-    else {
-      assert(0);
-    }
-
-    if (two->kind == Type_Kind_compose) {
-      two_int_type = two->compose->int_type;
-      two_ptr_type = two->compose->ptr_type;
-      two_records = *two->compose->records;
-    }
-    else if (two->kind == Type_Kind_record) {
-      two_records = hash_set_init(sem.perm_arena, 1);
-      hash_set_put(&two_records, two);
-    }
-    else if (two->kind == Type_Kind_int) {
-      two_int_type = two;
-    }
-    else if (two->kind == Type_Kind_ptr) {
-      two_ptr_type = two;
-    }
-    else {
-      assert(0);
-    }
-
-    Type* int_type = type_meet(one_int_type, two_int_type);
-    Type* ptr_type = type_meet(one_ptr_type, two_ptr_type);
-    Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
-    *records = hash_set_join(sem.perm_arena, &one_records, &two_records);
-    result = type_compose(int_type, ptr_type, records, 0);
-  }
   else {
     switch (one->kind) {
     case Type_Kind_none: break;
     case Type_Kind_int: {
       result = type_ranges_meet(one->ranges, two->ranges);
-    } break;
-    case Type_Kind_str: {
-      result = sem.type_none;
     } break;
     case Type_Kind_ptr: {
       Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
@@ -1386,17 +1163,12 @@ Type* type_meet(Type* one, Type* two) {
     case Type_Kind_fun: {
       result = sem.type_none;
     } break;
-    case Type_Kind_compose: {
-      Type* int_type = type_meet(one->compose->int_type, two->compose->int_type);
-      Type* ptr_type = type_meet(one->compose->ptr_type, two->compose->ptr_type);
-      Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
-      *records = hash_set_join(sem.perm_arena, one->compose->records, two->compose->records);
-      result = type_compose(int_type, ptr_type, records, 0);
+    case Type_Kind_array: {
+      result = sem.type_none;
     } break;
     }
   }
 
-  arena_release_mark(sem.temp_arena, mark);
   return result;
 }
 
@@ -1424,15 +1196,8 @@ Type* type_join(Block* block, Type* one, Type* two) {
       assert(0);
     }
   }
-  else if (one->kind == Type_Kind_str && two->kind == Type_Kind_str) {
-    Hash_Set strings = hash_set_join(sem.perm_arena, one->strings, two->strings);
-    result = type_cstrs(strings);
-  }
-  else if (one->kind == Type_Kind_compose && two->kind == Type_Kind_compose) {
-    Type* int_type = type_ranges_merge(one->compose->int_type->ranges, two->compose->int_type->ranges);
-    Type* ptr_type = type_ranges_merge(one->compose->ptr_type->ranges, two->compose->ptr_type->ranges);
-    // FIX: two->compose->records should be considered
-    result = type_compose(int_type, ptr_type, one->compose->records, 0);
+  else if (one->kind == Type_Kind_array && two->kind == Type_Kind_array) {
+    assert(0);
   }
   else {
     assert(0);
@@ -2032,27 +1797,14 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
     return from;
   }
   Type* result = sem.type_none;
-  if (to->kind == Type_Kind_compose) {
-    if (from->kind == Type_Kind_int) {
-      Type* int_type = type_auto_cast(block, store, from, to->compose->int_type);
-      result = type_compose(int_type, to->compose->ptr_type, to->compose->records, to->compose->auto_casts);
-      if (store) {
-        store->binary.one = sem_push_access(block, store->binary.one, 0);
-      }
-    }
-    else if (from->kind == Type_Kind_ptr) {
-      // Type* ptr_type = type_auto_cast(block, store, from, to->compose->ptr_type);
-      result = type_compose(to->compose->int_type, from, to->compose->records, to->compose->auto_casts);
-      if (store) {
-        store->binary.one = sem_push_access(block, store->binary.one, 1);
-      }
-    }
-    else if (from->kind == Type_Kind_record) {
-      assert(0);
-      if (store) {}
-    }
-    else if (from->kind == Type_Kind_compose) {
-      result = from;
+  if (to->kind == Type_Kind_array) {
+    if (from->kind == Type_Kind_ptr) {
+      Type* declared = type_pointer_declared(from->pointer);
+      Array* array = arena_push(arena, sizeof(Array));
+      array->to_type = declared;
+      array->length = 1;
+      array->types = 0;
+      result = type_array(array);
     }
   }
   else if (from->kind == to->kind) {
@@ -3168,7 +2920,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a: (I8; I8); str_from_i8_array a", "");
+  test("", "");
   // (H; i), auto x -> @x
   // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");
