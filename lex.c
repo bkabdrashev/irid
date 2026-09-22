@@ -41,7 +41,7 @@ typedef enum Token_Kind {
   Token_Kind_greater            = 45,
   Token_Kind_backslash          = 46,
   Token_Kind_quote              = 47,
-  Token_Kind_str                = 48,
+  Token_Kind_str                = 48 | Token_Kind_Flag_call_rhs,
   Token_Kind_sharp              = 49,
   Token_Kind_slash              = 51,
   Token_Kind_percent            = 52,

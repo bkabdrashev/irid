@@ -1025,6 +1025,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
         Ir* position_offset = irgen_push_position_offset(lhs->unary, lhs);
         result = irgen_push_unary(Ir_Kind_load, position_offset);
       }
+      else {
+        Ir* ir_pos = irgen_push_int(node->binary.rhs->i64);
+        result = irgen_push_position_offset(lhs, ir_pos);
+      }
     }
   } break;
   case Ast_Kind_subscript: {
@@ -1367,7 +1371,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("str_from_i8_array(10; 20)", "");
+  test("str_from_i8_array \"Hi\"", "");
   // test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");

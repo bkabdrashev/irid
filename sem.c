@@ -1274,7 +1274,7 @@ Type* type_record(Record* record) {
 Type* type_ranges_meet(Ranges* one, Ranges* two);
 Type* type_pointer(Pointer* pointer);
 
-Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set* records) {
+Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set* records, Types* auto_casts) {
   Type* result = &new(sem.types);
   result->kind = Type_Kind_compose;
   result->compose = arena_push(sem.perm_arena, sizeof(Compose));
@@ -1300,6 +1300,7 @@ Type* type_compose(Type* int_type, Type* ptr_type, Hash_Set* records) {
   result->compose->int_type = int_type;
   result->compose->ptr_type = ptr_type;
   result->compose->records  = records;
+  result->compose->auto_casts = auto_casts;
   return result;
 }
 
@@ -1362,7 +1363,7 @@ Type* type_meet(Type* one, Type* two) {
     Type* ptr_type = type_meet(one_ptr_type, two_ptr_type);
     Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
     *records = hash_set_join(sem.perm_arena, &one_records, &two_records);
-    result = type_compose(int_type, ptr_type, records);
+    result = type_compose(int_type, ptr_type, records, 0);
   }
   else {
     switch (one->kind) {
@@ -1390,7 +1391,7 @@ Type* type_meet(Type* one, Type* two) {
       Type* ptr_type = type_meet(one->compose->ptr_type, two->compose->ptr_type);
       Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
       *records = hash_set_join(sem.perm_arena, one->compose->records, two->compose->records);
-      result = type_compose(int_type, ptr_type, records);
+      result = type_compose(int_type, ptr_type, records, 0);
     } break;
     }
   }
@@ -1431,7 +1432,7 @@ Type* type_join(Block* block, Type* one, Type* two) {
     Type* int_type = type_ranges_merge(one->compose->int_type->ranges, two->compose->int_type->ranges);
     Type* ptr_type = type_ranges_merge(one->compose->ptr_type->ranges, two->compose->ptr_type->ranges);
     // FIX: two->compose->records should be considered
-    result = type_compose(int_type, ptr_type, one->compose->records);
+    result = type_compose(int_type, ptr_type, one->compose->records, 0);
   }
   else {
     assert(0);
@@ -1514,12 +1515,12 @@ Type* type_pointer_declared(Pointer* pointer) {
 }
 
 Type* type_define_size(I32 bits_size, Type* bits_of) {
-  Type* new_type = &new(sem.types);
-  *new_type = *bits_of;
-  new_type->size_defined = true;
-  new_type->bits_size = bits_size;
-  new_type->bits_align = align_up(bits_size, 8);
-  return new_type;
+  Type* type = &new(sem.types);
+  *type = *bits_of;
+  type->size_defined = true;
+  type->bits_size = bits_size;
+  type->bits_align = align_up(bits_size, 8);
+  return type_in_set(type);
 }
 
 Type_Pair type_of_ir_binary(Ir* ir) {
@@ -2034,14 +2035,14 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
   if (to->kind == Type_Kind_compose) {
     if (from->kind == Type_Kind_int) {
       Type* int_type = type_auto_cast(block, store, from, to->compose->int_type);
-      result = type_compose(int_type, to->compose->ptr_type, to->compose->records);
+      result = type_compose(int_type, to->compose->ptr_type, to->compose->records, to->compose->auto_casts);
       if (store) {
         store->binary.one = sem_push_access(block, store->binary.one, 0);
       }
     }
     else if (from->kind == Type_Kind_ptr) {
-      Type* ptr_type = type_auto_cast(block, store, from, to->compose->ptr_type);
-      result = type_compose(to->compose->int_type, ptr_type, to->compose->records);
+      // Type* ptr_type = type_auto_cast(block, store, from, to->compose->ptr_type);
+      result = type_compose(to->compose->int_type, from, to->compose->records, to->compose->auto_casts);
       if (store) {
         store->binary.one = sem_push_access(block, store->binary.one, 1);
       }
@@ -2253,11 +2254,12 @@ void sem_ir(Block* block, Ir* ir) {
       Record* str_record = type_record_init(ir->str->length);
       str_record->is_array = true;
       for (I32 i = 0; i < ir->str->length; i++) {
-        str_record->types[i] = sem.bytes_range;
+        Type* int_type = type_int(ir->str->base[i]);
+        str_record->types[i] = type_define_size(8, int_type);
       }
       str_record_type = type_record(str_record);
     }
-
+    Type* fun_type;
     {
       Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
       *records = hash_set_init(sem.perm_arena, 1);
@@ -2273,10 +2275,17 @@ void sem_ir(Block* block, Ir* ir) {
 
       Function* function = arena_push(sem.perm_arena, sizeof(Function));
       function->arg = str_record_type;
-      function->ret = type_compose(sem.type_none, ptr_type, records);
+      function->ret = type_compose(sem.type_none, ptr_type, records, 0);
       function->fun = sem.str_from_i8_array;
-      Type* fun_type = type_fun(function);
+      fun_type = type_fun(function);
     }
+    Hash_Set* records = arena_push(sem.perm_arena, sizeof(Hash_Set));
+    *records = hash_set_init(sem.perm_arena, 1);
+    hash_set_put(records, str_record_type);
+    Types* auto_casts;
+    fa_init(sem.perm_arena, auto_casts, 1);
+    fa_add(auto_casts, fun_type);
+    result = type_compose(sem.type_none, sem.type_none, records, auto_casts);
   } break;
   case Ir_Kind_declare: {
     result = sem_declare_var(ir->declare.var);
@@ -2465,7 +2474,7 @@ void sem_ir(Block* block, Ir* ir) {
           Type* record_type = type_record(record);
           hash_set_put(records, record_type);
         }
-        result = type_compose(sem.type_none, ptr_type, records);
+        result = type_compose(sem.type_none, ptr_type, records, 0);
       }
       else {
         assert(0);
@@ -2515,10 +2524,10 @@ void sem_ir(Block* block, Ir* ir) {
     Type* at_type = type_of_ir(ir->position.at);
     if (at_type->kind == Type_Kind_int) {
       if (type_is_const(at_type)) {
+        I64 at = ranges_min(at_type->ranges);
         if (of_type->kind == Type_Kind_ptr) {
           Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
           assert(of_type->pointer->stack_vars.len > 0);
-          I64 at = ranges_min(at_type->ranges);
           pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
           Var* first_var = of_type->pointer->stack_vars.list[0];
           I32  first_offset = first_var->declared->record->offsets[at];
@@ -2537,6 +2546,12 @@ void sem_ir(Block* block, Ir* ir) {
             hash_set_put(&pointer->stack_vars, field_var);
           }
           result = type_pointer(pointer);
+        }
+        else if (of_type->kind == Type_Kind_record) {
+          result = of_type->record->types[at];
+        }
+        else {
+          assert(0);
         }
       }
       else {
@@ -2728,6 +2743,10 @@ void sem_ir(Block* block, Ir* ir) {
     else if (fun_type == sem.len_fun) {
       if (arg_type->kind == Type_Kind_record) {
         result = type_int(arg_type->record->length);
+      }
+      else if (arg_type->kind == Type_Kind_compose && arg_type->compose->records->len == 1) {
+        Type* type = arg_type->compose->records->list[0];
+        result = type_int(type->record->length);
       }
       else {
         assert(0);
@@ -3017,7 +3036,9 @@ Type* sem_fun(Fun* fun) {
   fun->worklist->length = 0;
   printf("fun: %s\n", fun->name->base);
 
-  sem_declare_var(fun->arg_var->var);
+  if (fun->kind != Fun_Kind_macro) {
+    sem_declare_var(fun->arg_var->var);
+  }
 
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
@@ -3147,7 +3168,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("str_from_i8_array(10; 20)", "");
+  test("a: (I8; I8); str_from_i8_array a", "");
   // (H; i), auto x -> @x
   // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");
