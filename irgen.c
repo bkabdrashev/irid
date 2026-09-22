@@ -53,7 +53,7 @@ typedef enum Ir_Kind {
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
 
-  Ir_Kind_and_list    = 144,
+  Ir_Kind_meet = 144,
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -453,8 +453,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
       }
     }
   break;
-  case Ir_Kind_and_list:
-    string_builder_push_cstr(sb, "and list");
+  case Ir_Kind_meet:  string_builder_push_cstr(sb, "and list");
     for (I32 i = 0; i < ir->rec->length; i++) {
       Ir_Field field = irgen_record_get_by_position(ir->rec, i);
       assert(!field.name);
@@ -684,8 +683,8 @@ Ir* irgen_push_record(Rec* rec) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_and_list(Rec* rec) {
-  Ir ir = { Ir_Kind_and_list, .rec = rec };
+Ir* irgen_push_meet(Rec* rec) {
+  Ir ir = { Ir_Kind_meet, .rec = rec };
   return irgen_push(ir);
 }
 
@@ -1040,7 +1039,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       Ir* ir = irgen_ast_node(node->list->base[i]);
       irgen_record_push_declare_position(record, i, ir);
     }
-    result = irgen_push_and_list(record);
+    result = irgen_push_meet(record);
   } break;
   case Ast_Kind_record: {
     Rec* record = irgen_record_new(node->list->length);
@@ -1364,7 +1363,6 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("str_from_i8_array \"Hi\"", "");
   // test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
