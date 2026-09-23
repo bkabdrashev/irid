@@ -64,9 +64,17 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
   } break;
   case Type_Kind_array: {
-    Type* field_type = type->array->types->base[0];
-    LLVMTypeRef llvm_field_type = llvm_of_type(field_type);
-    result = LLVMArrayType2(llvm_field_type, type->record->length);
+    LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
+    if (ranges_is_single(type->array->length->ranges)) {
+      I32 length = ranges_min(type->array->length->ranges);
+      result = LLVMArrayType2(llvm_field_type, length);
+    }
+    else {
+      LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMTypeRef));
+      field_types[0] = LLVMIntTypeInContext(llvm_gen.context, 64);
+      field_types[1] = LLVMPointerType(llvm_field_type, 0);
+      result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
+    }
   } break;
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;
@@ -198,19 +206,36 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     result = LLVMConstStructInContext(llvm_gen.context, values, type->record->length, false);
   } break;
   case Type_Kind_array: {
-    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, type->array->types->length * sizeof(LLVMValueRef));
-    for (I32 i = 0; i < type->array->types->length; i++) {
-      Type* field_type = type->array->types->base[i];
-      if (type_is_const(field_type)) {
-        LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
-        values[i] = LLVMConstInt(llvm_zero_type, 0, false);
+    if (ranges_is_single(type->array->length->ranges)) {
+      I32 length = ranges_min(type->array->length->ranges);
+      LLVMValueRef* values = arena_push(llvm_gen.perm_arena, length * sizeof(LLVMValueRef));
+      for (I32 i = 0; i < length; i++) {
+        Type* field_type = type->array->types[i];
+        if (type_is_const(field_type)) {
+          LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
+          values[i] = LLVMConstInt(llvm_zero_type, 0, false);
+        }
+        else {
+          values[i] = llvm_default_of_type(field_type);
+        }
       }
-      else {
-        values[i] = llvm_default_of_type(field_type);
-      }
+      LLVMTypeRef llvm_item_type = llvm_of_type(type->array->of_type);
+      result = LLVMConstArray2(llvm_item_type, values, length);
     }
-    LLVMTypeRef llvm_item_type = llvm_of_type(type->array->of_type);
-    result = LLVMConstArray2(llvm_item_type, values, type->array->types->length);
+    else {
+      LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMValueRef));
+      LLVMTypeRef llvm_type = llvm_of_type(sem.type_len);
+      values[0] = LLVMConstInt(llvm_type, I64_MAX, false);
+
+      LLVMValueRef llvm_of_default = llvm_default_of_type(type->array->of_type);
+      LLVMTypeRef llvm_var_type = llvm_of_type(type->array->of_type);
+      LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
+      LLVMSetInitializer(llvm_global, llvm_of_default);
+      LLVMSetGlobalConstant(llvm_global, false);
+      values[1]  = llvm_global;
+
+      result = LLVMConstStructInContext(llvm_gen.context, values, 2, false);
+    }
   } break;
   }
   return result;
@@ -327,7 +352,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_neg: result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, ""); break;
   case Ir_Kind_call: {
     Type* fun_type = type_of_ir(ir->binary.one);
-    if (fun_type == sem.bits_fun) {
+    if (fun_type == sem.fun_bits) {
       // NOTE: LLVM NOP
     }
     else if (fun_type->kind == Type_Kind_fun) {
