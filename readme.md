@@ -310,6 +310,13 @@ add:(a:I32; b:I32) -> I32 do
  return a+b
 ```
 
+- [ ] Array, Span, Record
+```irid
+array: [2]I8 = "ef"
+record: (len: 2) & (I8 #char "c"; I8 #char "d") = "cd"
+span: []I8 = "ab"
+```
+
 - [ ] Function call with ''
 ```irid
 'a+b'foo

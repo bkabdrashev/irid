@@ -571,6 +571,7 @@ B8 type_is_const(Type* type) {
     result = ranges_is_single(type->ranges);
   } break;
   case Type_Kind_record: {
+    result = true;
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_declared = type_of_field_at(type->record, i);
       if (!type_is_const(field_declared)) {
@@ -578,7 +579,6 @@ B8 type_is_const(Type* type) {
         break;
       }
     }
-    result = true;
   } break;
   case Type_Kind_array: {
     result = type_is_const(type->array->of_type);
@@ -2767,7 +2767,7 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.ranges_set = hash_set_init(arena, irgen.irs.length);
   sem.pointer_set = hash_set_init(arena, irgen.irs.length);
   sem.function_set = hash_set_init(arena, irgen.irs.length);
-  // sem.compose_set = hash_set_init(arena, irgen.irs.length);
+  sem.array_set = hash_set_init(arena, irgen.irs.length);
 
   sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;
@@ -2838,9 +2838,8 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("", "");
-  // (H; i), auto x -> @x
-  // test("a: Str = \"Hi\"; a.len; a[0]", "");
+  // test("", "");
+  test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");
   // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");
   // test("a: Str; a.len = 10; a.len;", "");
