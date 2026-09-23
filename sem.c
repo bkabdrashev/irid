@@ -2160,23 +2160,11 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_span: {
-    Record* record = arena_push(sem.perm_arena, sizeof(Record));
-    I32 length = 2;
-    record->length   = length;
-    record->names    = arena_push_zero(sem.perm_arena, length*sizeof(Str*));
-    record->types    = arena_push_zero(sem.perm_arena, length*sizeof(Type*));
-    record->offsets  = arena_push_zero(sem.perm_arena, length*sizeof(I32*));
-    record->position_from_name = hash_map_init(sem.perm_arena, length);
-
-    Type* ptr_to_type = type_of_ir(ir->unary);
-    record->names[0] = irgen.str_len;
-    record->names[1] = sem.str_ptr;
-    record->types[0] = type_range(0, I64_MAX);
-    record->types[1] = type_pointer_to(ptr_to_type);
-    hash_map_put_i32(&record->position_from_name, irgen.str_len, 0);
-    hash_map_put_i32(&record->position_from_name, sem.str_ptr, 1);
-
-    result = type_record(record);
+    Array* array = arena_push(sem.perm_arena, sizeof(Array));
+    array->of_type = type_of_ir(ir->unary);
+    fa_init(sem.perm_arena, array->types, 0);
+    array->types->length = 0;
+    result = type_array(array);
   } break;
   case Ir_Kind_array: {
     Type* one_type = type_of_ir(ir->binary.one);
