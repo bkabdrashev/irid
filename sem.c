@@ -138,8 +138,8 @@ Sem sem = {};
 typedef struct Type_Pair Type_Pair;
 struct Type_Pair { Type* one; Type* two; };
 
-Field type_record_get_by_name(Block* block, Record* record, Str* name);
-Field type_record_get_by_position(Block* block, Record* record, I32 pos);
+Field type_record_get_by_name(Record* record, Str* name);
+Field type_record_get_by_position(Record* record, I32 pos);
 Type* type_of_field_at(Record* record, I32 position);
 Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
@@ -251,7 +251,9 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "[");
     string_builder_push_ranges(sb, type->array->length->ranges);
     string_builder_push_cstr(sb, "]");
+    string_builder_push_cstr(sb, "(");
     string_builder_push_type(sb, block, type->array->of_type);
+    string_builder_push_cstr(sb, ")");
     if (array_is_static(type->array)) {
       I32 length = array_static_length(type->array);
       string_builder_push_cstr(sb, "(");
@@ -470,6 +472,87 @@ void subtype_visited_push(Subtype_Visited* v, Pointer* one, Pointer* two) {
   v->length++;
 }
 
+B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
+  B8 result = false;
+  if (one->kind != two->kind) {
+    result = false;
+  }
+  switch (one->kind) {
+  case Type_Kind_none: {
+    result = true;
+  } break;
+  case Type_Kind_int: {
+    B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
+    result = size_equal;
+  } break;
+  case Type_Kind_record: {
+    if (one->record->length != two->record->length) {
+      result = false;
+    }
+    else {
+      for (I32 i = 0; i < one->record->length; i++) {
+        Field field_one = type_record_get_by_position(one->record, i);
+        Field field_two;
+        if (field_one.name) {
+          field_two = type_record_get_by_name(two->record, field_one.name);
+        }
+        else {
+          field_two = type_record_get_by_position(two->record, i);
+        }
+        if (!type_is_same_rec(field_one.type, field_two.type, visited)) {
+          result = false;
+          break;
+        }
+      }
+      result = true;
+    }
+  } break;
+  case Type_Kind_ptr: {
+    if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
+      result = true;
+    }
+    subtype_visited_push(visited, one->pointer, two->pointer);
+    // TODO: need to check whether pointer is global/stack/
+    if (two->pointer->stack_vars.len > 0) {
+      for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
+        Var* var = one->pointer->stack_vars.list[i];
+        if (!hash_set_exists(&two->pointer->stack_vars, var)) {
+          result = false;
+        }
+      }
+    }
+    Type* one_declared = type_pointer_declared(one->pointer);
+    Type* two_declared = type_pointer_declared(two->pointer);
+    if (one_declared && two_declared) {
+      if (!type_is_same_rec(one_declared, two_declared, visited)) {
+        result = false;
+      }
+    }
+    result = true;
+  } break;
+  case Type_Kind_fun: {
+    result = false;
+  } break;
+  case Type_Kind_array: {
+    if (one->array->length == two->array->length) {
+      result = type_is_same_rec(one->array->of_type, two->array->of_type, visited);
+    }
+    else {
+      result = false;
+    }
+  } break;
+  }
+  return result;
+}
+
+B8 type_is_same(Type* one, Type* two) {
+  Subtype_Visited visited = {0};
+  visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
+  B8 result = type_is_same_rec(one, two, &visited);
+  arena_release_mark(sem.temp_arena, visited.base);
+  return result;
+}
+
 B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
   //    one is subtype of two
   // (1..3) is subtype of 1 -- false
@@ -510,13 +593,13 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     } break;
     case Type_Kind_record: {
       for (I32 i = 0; i < one->record->length; i++) {
-        Field field_one = type_record_get_by_position(block, one->record, i);
+        Field field_one = type_record_get_by_position(one->record, i);
         Field field_two;
         if (field_one.name) {
-          field_two = type_record_get_by_name(block, two->record, field_one.name);
+          field_two = type_record_get_by_name(two->record, field_one.name);
         }
         else {
-          field_two = type_record_get_by_position(block, two->record, i);
+          field_two = type_record_get_by_position(two->record, i);
         }
         if (!type_is_subtype_rec(block, field_one.type, field_two.type, visited)) {
           assert(0);
@@ -527,11 +610,13 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
     } break;
     case Type_Kind_array: {
       if (type_is_subtype_rec(block, one->array->length, two->array->length, visited)) {
-        result = type_is_subtype_rec(block, one->array->of_type, two->array->of_type, visited);
+        // NOTE: []I8 is not subtype of []I16
+        result = type_is_same_rec(one->array->of_type, two->array->of_type, visited);
       }
       else {
         result = false;
       }
+      assert(result);
     } break;
     case Type_Kind_fun: {
       assert(0);
@@ -617,87 +702,6 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
   Subtype_Visited visited = {0};
   visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
   B8 result = type_is_subtype_rec(block, one, two, &visited);
-  arena_release_mark(sem.temp_arena, visited.base);
-  return result;
-}
-
-B8 type_is_same_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
-  B8 result = false;
-  if (one->kind != two->kind) {
-    result = false;
-  }
-  switch (one->kind) {
-  case Type_Kind_none: {
-    result = true;
-  } break;
-  case Type_Kind_int: {
-    B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align && one->size_defined && two->size_defined;
-    result = size_equal;
-  } break;
-  case Type_Kind_record: {
-    if (one->record->length != two->record->length) {
-      result = false;
-    }
-    else {
-      for (I32 i = 0; i < one->record->length; i++) {
-        Field field_one = type_record_get_by_position(block, one->record, i);
-        Field field_two;
-        if (field_one.name) {
-          field_two = type_record_get_by_name(block, two->record, field_one.name);
-        }
-        else {
-          field_two = type_record_get_by_position(block, two->record, i);
-        }
-        if (!type_is_same_rec(block, field_one.type, field_two.type, visited)) {
-          result = false;
-          break;
-        }
-      }
-      result = true;
-    }
-  } break;
-  case Type_Kind_ptr: {
-    if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
-      result = true;
-    }
-    subtype_visited_push(visited, one->pointer, two->pointer);
-    // TODO: need to check whether pointer is global/stack/
-    if (two->pointer->stack_vars.len > 0) {
-      for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
-        Var* var = one->pointer->stack_vars.list[i];
-        if (!hash_set_exists(&two->pointer->stack_vars, var)) {
-          result = false;
-        }
-      }
-    }
-    Type* one_declared = type_pointer_declared(one->pointer);
-    Type* two_declared = type_pointer_declared(two->pointer);
-    if (one_declared && two_declared) {
-      if (!type_is_same_rec(block, one_declared, two_declared, visited)) {
-        result = false;
-      }
-    }
-    result = true;
-  } break;
-  case Type_Kind_fun: {
-    result = false;
-  } break;
-  case Type_Kind_array: {
-    if (one->array->length == two->array->length) {
-      result = type_is_same_rec(block, one->array->of_type, two->array->of_type, visited);
-    }
-    else {
-      result = false;
-    }
-  } break;
-  }
-  return result;
-}
-
-B8 type_is_same(Block* block, Type* one, Type* two) {
-  Subtype_Visited visited = {0};
-  visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
-  B8 result = type_is_same_rec(block, one, two, &visited);
   arena_release_mark(sem.temp_arena, visited.base);
   return result;
 }
@@ -862,7 +866,16 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
 }
 
 Ir* sem_push_record_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_record_cast, .record_cast = { .value=value } };
+  Ir new_ir = { Ir_Kind_record_cast, .record_cast = value };
+  Ir* sem_ir = &new(irgen.irs);
+  *sem_ir = new_ir;
+  sem_push_ir(block, sem_ir);
+  type_of_ir_put(sem_ir, type);
+  return sem_ir;
+}
+
+Ir* sem_push_array_cast(Block* block, Ir* value, Type* type) {
+  Ir new_ir = { Ir_Kind_array_cast, .array_cast = value };
   Ir* sem_ir = &new(irgen.irs);
   *sem_ir = new_ir;
   sem_push_ir(block, sem_ir);
@@ -975,7 +988,7 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
   return type_ranges(new_ints);
 }
 
-Field type_record_get_by_position(Block* block, Record* record, I32 position) {
+Field type_record_get_by_position(Record* record, I32 position) {
   Field field = {};
   field.name   = record->names[position];
   field.type   = record->types[position];
@@ -984,9 +997,9 @@ Field type_record_get_by_position(Block* block, Record* record, I32 position) {
   return field;
 }
 
-Field type_record_get_by_name(Block* block, Record* record, Str* name) {
+Field type_record_get_by_name(Record* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
-  return type_record_get_by_position(block, record, position);
+  return type_record_get_by_position(record, position);
 }
 
 Var* sem_get_var_by_name(Var* var, Str* name) {
@@ -1225,7 +1238,7 @@ Type* type_join(Block* block, Type* one, Type* two) {
   else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
     Type* one_declared = type_pointer_declared(one->pointer);
     Type* two_declared = type_pointer_declared(two->pointer);
-    if (type_is_same(block, one_declared, two_declared)) {
+    if (type_is_same(one_declared, two_declared)) {
       Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
       pointer->declared = type_join(block, one_declared, two_declared);
       pointer->stack_vars    = hash_set_join(sem.perm_arena, &one->pointer->stack_vars, &two->pointer->stack_vars);
@@ -1642,7 +1655,7 @@ Type* type_narrow_eqz(Type* type) {
   case Type_Kind_int: {
     B8 have_zero = ranges_have(type->ranges, 0);
     if (have_zero) {
-      return type_int(0);
+      return sem.type_zero;
     }
     else {
       return 0;
@@ -1833,7 +1846,7 @@ Type* type_of_var(Block* block, Var* var) {
 }
 
 Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
-  if (type_is_same(block, from, to)) {
+  if (type_is_same(from, to)) {
     return from;
   }
   Type* result = sem.type_none;
@@ -1862,17 +1875,17 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       I32 length = from->record->length;
       Record* new_record  = type_record_init(length);
       for (I32 i = 0; i < length; i++) {
-        Field field = type_record_get_by_position(block, from->record, i);
+        Field field = type_record_get_by_position(from->record, i);
         Field field_var;
         if (field.name) {
-          field_var = type_record_get_by_name(block, to->record, field.name);
+          field_var = type_record_get_by_name(to->record, field.name);
           new_record->names[i] = field_var.name;
           hash_map_put_i32(&new_record->position_from_name, field_var.name, i);
         }
         else {
-          field_var = type_record_get_by_position(block, to->record, i);
+          field_var = type_record_get_by_position(to->record, i);
         }
-        if (type_is_same(block, field.type, field_var.type)) {
+        if (type_is_same(field.type, field_var.type)) {
           new_record->types[i] = field.type;
         }
         else {
@@ -1896,24 +1909,25 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
         for (I32 i = 0; i < length; i++) {
           Type* from_type = from->array->types[i];
           Type* to_type = to->array->types[i];
-          if (type_is_same(block, from_type, to_type)) {
+          if (!type_is_same(from_type, to_type)) {
             new_array->types[i] = from_type;
           }
           else {
             new_array->types[i] = type_auto_cast(block, 0, from_type, to_type);
           }
         }
+        new_array->of_type = type_auto_cast(block, 0, from->array->of_type, to->array->of_type);
       }
       else {
         new_array = arena_push(sem.perm_arena, sizeof(Array));
         new_array->length = type_auto_cast(block, 0, from->array->length, to->array->length);
         new_array->types = 0;
+        new_array->of_type = to->array->of_type;
       }
-      new_array->of_type = type_auto_cast(block, 0, from->array->of_type, to->array->of_type);
 
       result = type_array(new_array);
       if (store) {
-        store->binary.two = sem_push_record_cast(block, store->binary.two, result);
+        store->binary.two = sem_push_array_cast(block, store->binary.two, result);
       }
     } break;
     default: assert(0);
@@ -1940,13 +1954,13 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
 
       if (type->kind == Type_Kind_record) {
         for (I32 i = 0; i < type->record->length; i++) {
-          Field field = type_record_get_by_position(block, type->record, i);
+          Field field = type_record_get_by_position(type->record, i);
           Field field_var;
           if (field.name) {
-            field_var = type_record_get_by_name(block, var->declared->record, field.name);
+            field_var = type_record_get_by_name(var->declared->record, field.name);
           }
           else {
-            field_var = type_record_get_by_position(block, var->declared->record, i);
+            field_var = type_record_get_by_position(var->declared->record, i);
           }
           type_of_var_put(block, 0, var->vars[field_var.pos], field.type);
         }
@@ -2388,7 +2402,7 @@ void sem_ir(Block* block, Ir* ir) {
       result = type_pointer(pointer);
     }
     else if (of_type->kind == Type_Kind_record) {
-      Field field = type_record_get_by_name(block, of_type->record, ir->name_offset.at);
+      Field field = type_record_get_by_name(of_type->record, ir->name_offset.at);
       result = field.type;
     }
   } break;
@@ -2872,7 +2886,7 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
-  sem.type_len = type_range(0, I64_MAX);
+  sem.type_len = type_define_size(64, type_range(0, I64_MAX));
   sem.type_zero = type_int(0);
 
   sem.str_ptr = str_from_cstr("ptr");

@@ -52,6 +52,7 @@ typedef enum Ir_Kind {
 
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
+  Ir_Kind_array_cast  = 142,
 
   Ir_Kind_meet = 144,
 } Ir_Kind;
@@ -78,9 +79,6 @@ struct Access { Ir* of; I32 at; };
 
 typedef struct Int_Extend Int_Extend;
 struct Int_Extend { Ir* value; I16 bits; };
-
-typedef struct Record_Cast Recrord_Cast;
-struct Record_Cast { Ir* value; };
 
 typedef struct Rec Rec;
 struct Rec {
@@ -137,7 +135,8 @@ struct Ir {
     Name_Offset     name_offset;
     Declare         declare;
     Int_Extend      int_extend;
-    Recrord_Cast    record_cast;
+    Ir*             record_cast;
+    Ir*             array_cast;
     Access access;
   };
 };
@@ -433,7 +432,11 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_record_cast:
     string_builder_push_cstr(sb, "record cast ");
-    string_builder_push_irid(sb, ir->record_cast.value);
+    string_builder_push_irid(sb, ir->record_cast);
+  break;
+  case Ir_Kind_array_cast:
+    string_builder_push_cstr(sb, "array cast ");
+    string_builder_push_irid(sb, ir->array_cast);
   break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");

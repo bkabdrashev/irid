@@ -94,7 +94,7 @@ I64 bits_convert(I64 x, I16 bits) {
 }
 
 I16 bits_needed(I64 min, I64 max) {
-  // if (min == max) return 0;
+  if (min == max) return 0;
 
   if (min >= 0) {
     return bit_width((U64)max) + 1;
