@@ -255,8 +255,9 @@ struct Rec_Pool {
 };
 
 typedef enum Fun_Kind {
-  Fun_Kind_none    = 0,
-  Fun_Kind_macro   = 1,
+  Fun_Kind_none  = 0,
+  Fun_Kind_macro = 1,
+  Fun_Kind_type  = 2,
 } Fun_Kind;
 
 struct Fun {
@@ -1103,8 +1104,15 @@ Ir* irgen_ast_node(Ast_Node* node) {
       result = irgen_push_unary(Ir_Kind_ptr, unary);
     }
   } break;
+  case Ast_Kind_type: {
+    Ir* unary = irgen_ast_node(node->unary);
+    if (unary->kind == Ir_Kind_fun) {
+      unary->fun->kind = Fun_Kind_type;
+    }
+    result = irgen_push_unary(Ir_Kind_type, unary);
+  } break;
   case Ast_Kind_span:
-  case Ast_Kind_load: case Ast_Kind_type:
+  case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg:
   {
     Ir* unary = irgen_ast_node(node->unary);

@@ -26,9 +26,16 @@ struct Pointer_Pair { Pointer* one; Pointer* two; };
 typedef struct Function Function;
 struct Function {
   Fun* fun;
-  Str*  foreign_name;
+  Str* foreign_name;
+  I32  foreign_id;
   Type* arg;
   Type* ret;
+};
+
+typedef struct Functions Functions;
+struct Functions {
+  I32       length;
+  Function* base[];
 };
 
 typedef struct Field Field;
@@ -106,6 +113,7 @@ struct Sem {
   Arena* temp_arena;
   Arena* perm_arena;
   Funs   funs;
+  Functions* foreign_funs;
   Hash_Map  type_of_irs;
   Type_Pool types;
 
@@ -827,7 +835,8 @@ Type* type_function(Function* function) {
       if (key->fun == function->fun
       && key->arg == function->arg
       && key->ret == function->ret
-      && key->foreign_name == function->foreign_name) {
+      && key->foreign_name == function->foreign_name
+      && key->foreign_id == function->foreign_id) {
         arena_release_mark(sem.perm_arena, function);
         function = key;
         break;
@@ -858,6 +867,7 @@ Type* type_function_foreign(Function* function, Str* foreign_name) {
   Function* function_foreign = arena_push(sem.perm_arena, sizeof(Function));
   *function_foreign = *function;
   function_foreign->foreign_name = foreign_name;
+  function_foreign->foreign_id = fa_push(sem.foreign_funs, function_foreign);
   return type_function(function_foreign);
 }
 
@@ -2499,6 +2509,7 @@ void sem_ir(Block* block, Ir* ir) {
       Function* function = arena_push(sem.perm_arena, sizeof(Function));
       function->fun = ir->fun;
       function->foreign_name = irgen.str_nil;
+      function->foreign_id   = 0;
       function->arg = sem.type_none;
       function->ret = sem.type_none;
       // ir->fun->type = type_fun(function);
@@ -2907,6 +2918,7 @@ Type* sem_fun(Fun* fun) {
 
   Function* function = arena_push(sem.perm_arena, sizeof(Function));
   function->foreign_name = irgen.str_nil;
+  function->foreign_id   = 0;
   function->fun = fun;
   function->arg = fun->arg_var->var->declared;
   function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
@@ -2932,6 +2944,9 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.type_of_irs = hash_map_init(arena, irgen.irs.length*3);
   sem.types.base = arena_push(arena, irgen.irs.length * sizeof(Type));
   sem.types.length = 0;
+
+  fa_init(sem.perm_arena, sem.foreign_funs, irgen.irs.length);
+  fa_add(sem.foreign_funs, 0);
 
   sem.type_set   = hash_set_init(arena, irgen.irs.length);
   sem.record_set = hash_set_init(arena, irgen.irs.length);

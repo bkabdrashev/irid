@@ -25,6 +25,7 @@ struct LLVM_Gen {
   LLVMBasicBlockRef* blocks;
   LLVMTypeRef*       types;
   LLVMValueRef*      funs;
+  LLVMValueRef*      foreign_funs;
 
   LLVMModuleRef      module;
   LLVMContextRef     context;
@@ -156,6 +157,16 @@ void llvm_of_fun_put(Fun* fun, LLVMValueRef val) {
   I32 funid = fun - irgen.funs.base;
   llvm_gen.funs[funid] = val;
 }
+
+LLVMValueRef llvm_of_foreign_fun(I32 id) {
+  return llvm_gen.foreign_funs[id];
+}
+
+void llvm_of_foreign_fun_put(I32 f, LLVMValueRef llvm_fun) {
+  llvm_gen.foreign_funs[f] = llvm_fun;
+}
+
+
 LLVMValueRef llvm_fun(Fun* fun);
 void llvm_block(Block* block);
 
@@ -195,8 +206,8 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   case Type_Kind_fun: {
     LLVMValueRef save_function = llvm_gen.function;
     LLVMBasicBlockRef save_block = LLVMGetInsertBlock(llvm_gen.builder);
-    if (type->function->foreign_name != irgen.str_nil) {
-      result = llvm_of_fun(type->function->fun);
+    if (type->function->foreign_id) {
+      result = llvm_of_foreign_fun(type->function->foreign_id);
     }
     else {
       result = llvm_fun(type->function->fun);
@@ -395,10 +406,16 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->str) {
-        Type* type = type_of_ir(ir);
+      Type* type = type_of_ir(ir);
+      if (fun_type->size_defined) { // NOTE: bits function
+        result = llvm_default_of_type(type);
+      }
+      else if (fun_type->str) {
         assert(type->kind == Type_Kind_fun);
         result = llvm_of_fun(type->function->fun);
+        LLVMTypeRef llvm_fun_type = llvm_of_type(type);
+        result = LLVMAddFunction(llvm_gen.module, cstr_from_str(type->function->foreign_name), llvm_fun_type);
+        llvm_of_fun_put(type->function->fun, result);
       }
     }
   } break;
@@ -459,10 +476,7 @@ void llvm_ir(Ir* ir) {
   } break;
   case Ir_Kind_load: {
     Type* type = type_of_ir(ir);
-    if (type->kind == Type_Kind_fun) {
-      result = llvm_of_fun(type->function->fun);
-    }
-    else if (type_is_const(type)) {
+    if (type_is_const(type)) {
       result = llvm_default_of_type(type);
     }
     else {
@@ -635,6 +649,9 @@ void llvm_block(Block* block) {
 
 LLVMValueRef llvm_fun(Fun* fun) {
   llvm_gen.function = llvm_of_fun(fun);
+  if (fun->kind != Fun_Kind_none) {
+    return llvm_gen.function;
+  }
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     LLVMBasicBlockRef llvm_block = LLVMAppendBasicBlockInContext(llvm_gen.context, llvm_gen.function, "block");
@@ -663,8 +680,9 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   llvm_gen.perm_arena = arena;
   llvm_gen.blocks = arena_push(arena, irgen.blocks.length * sizeof(LLVMBasicBlockRef));
   llvm_gen.irs    = arena_push(arena, irgen.irs.length    * sizeof(LLVMValueRef));
-  llvm_gen.types  = arena_push_zero(arena, sem.types.length    * sizeof(LLVMTypeRef));
-  llvm_gen.funs   = arena_push_zero(arena, irgen.funs.length   * sizeof(LLVMValueRef));
+  llvm_gen.types  = arena_push_zero(arena, sem.types.length  * sizeof(LLVMTypeRef));
+  llvm_gen.funs   = arena_push_zero(arena, irgen.funs.length * sizeof(LLVMValueRef));
+  llvm_gen.foreign_funs = arena_push_zero(arena, sem.foreign_funs->length * sizeof(LLVMValueRef));
 
   llvm_gen.context = LLVMContextCreate();
   llvm_gen.module  = LLVMModuleCreateWithNameInContext("contex_name", llvm_gen.context);
@@ -672,13 +690,49 @@ I32 llvm_funs(Arena* arena, Funs funs) {
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
-    LLVMTypeRef llvm_fun_type = llvm_of_type(fun->type);
-    LLVMValueRef llvm_fun = LLVMAddFunction(llvm_gen.module, cstr_from_str(fun->name), llvm_fun_type);
-    llvm_of_fun_put(fun, llvm_fun);
+    if (fun->kind == Fun_Kind_none) {
+      LLVMTypeRef llvm_fun_type = llvm_of_type(fun->type);
+      LLVMValueRef llvm_fun = LLVMAddFunction(llvm_gen.module, cstr_from_str(fun->name), llvm_fun_type);
+      llvm_of_fun_put(fun, llvm_fun);
+    }
   }
+
+  for (I32 f = 1; f < sem.foreign_funs->length; f++) {
+    Function* function = sem.foreign_funs->base[f];
+    LLVMTypeRef* arg_types;
+    I32 arg_count = 0;
+    if (function->arg->kind == Type_Kind_none) {
+      arg_types = 0;
+      arg_count = 0;
+    }
+    else if (function->foreign_name != irgen.str_nil) {
+      if (function->arg->kind == Type_Kind_record) {
+        Record* record = function->arg->record;
+        arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
+        for (I32 i = 0; i < record->length; i++) {
+          Type* arg_type = record->types[i];
+          arg_types[i] = llvm_of_type(arg_type);
+        }
+        arg_count = record->length;
+      }
+      else {
+        LLVMTypeRef arg_type = llvm_of_type(function->arg);
+        arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
+        arg_types[0] = arg_type;
+        arg_count = 1;
+      }
+    }
+    LLVMTypeRef ret_type = llvm_of_type(function->ret);
+    LLVMTypeRef llvm_fun_type = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
+    LLVMValueRef llvm_fun = LLVMAddFunction(llvm_gen.module, cstr_from_str(function->foreign_name), llvm_fun_type);
+    llvm_of_foreign_fun_put(f, llvm_fun);
+  }
+
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
-    llvm_fun(fun);
+    if (fun->kind == Fun_Kind_none) {
+      llvm_fun(fun);
+    }
   }
 
   printf("Generated LLVM IR:\n");
