@@ -93,9 +93,7 @@ I64 bits_convert(I64 x, I16 bits) {
   return (I64)value;
 }
 
-I16 bits_needed(I64 min, I64 max) {
-  if (min == max) return 0;
-
+I16 bits_needed_non_zero(I64 min, I64 max) {
   if (min >= 0) {
     return bit_width((U64)max) + 1;
   }
@@ -113,6 +111,11 @@ I16 bits_needed(I64 min, I64 max) {
   unsigned w = bit_width(a);
   unsigned v = bit_width(b - 1);
   return (w > v ? w : v) + 1;
+}
+
+I16 bits_needed(I64 min, I64 max) {
+  if (min == max) return 0;
+  return bits_needed_non_zero(min, max);
 }
 
 Umi power_of_2_up(Umi v) {

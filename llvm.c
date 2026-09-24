@@ -44,7 +44,15 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMVoidTypeInContext(llvm_gen.context);
   } break;
   case Type_Kind_int: {
-    result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    if (type->bits_size > 0) {
+      result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    }
+    else {
+      I64 min = ranges_min(type->ranges);
+      I64 max = ranges_max(type->ranges);
+      I16 bits_size = bits_needed_non_zero(min, max);
+      result = LLVMIntTypeInContext(llvm_gen.context, bits_size);
+    }
   } break;
   case Type_Kind_ptr: {
     LLVMTypeRef pointer_to = llvm_of_type(type->pointer->declared);
@@ -386,7 +394,7 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_subscript: {
-    Type* of_type = type_of_ir(ir->name_offset.of);
+    Type* of_type = type_of_ir(ir->binary.one);
     Type* arr_type = type_pointer_declared(of_type->pointer);
     assert(arr_type->kind == Type_Kind_record);
     LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
@@ -421,6 +429,7 @@ void llvm_ir(Ir* ir) {
           result = llvm_default_of_type(type_length);
         }
         else {
+          result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
         }
       }
     }
@@ -766,14 +775,11 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  // test("a: Str = \"Hi\"; a.len", "");
-  test("1 + 2", "");
+  // test("a:12; b:I32; c: @12 = @12; b = c@", "");
+  test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
-  // 0000
-  // 1100
-  // test("a:12\\13; b:I32; b = a", "");
   // test("a:(x:0..2; y:1..2); a = (y:1; x:2); a.x", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
   // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");

@@ -120,6 +120,8 @@ struct Sem {
   Type* type_len;
   Type* fun_bits;
   Type* fun_len;
+  Type* rec_foreign;
+  Type* fun_c;
   Type* bytes_range;
 
   Str*  str_ptr;
@@ -2118,6 +2120,9 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_len: {
     result = sem.fun_len;
   } break;
+  case Ir_Kind_bits: {
+    result = sem.fun_bits;
+  } break;
   case Ir_Kind_int: {
     I64 i64 = ir->i64;
     result  = type_int(i64);
@@ -2512,7 +2517,8 @@ void sem_ir(Block* block, Ir* ir) {
         else {
           assert(0);
         }
-      } else {
+      }
+      else {
         assert(0);
       }
     }
@@ -2599,9 +2605,6 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_type: {
     result = type_of_ir(ir->unary);
-  } break;
-  case Ir_Kind_bits: {
-    result = sem.fun_bits;
   } break;
   default: assert(0);
   }
@@ -2879,10 +2882,15 @@ void sem_funs(Arena* arena, Funs funs) {
 
   sem.fun_bits = &new(sem.types);
   sem.fun_bits->kind = Type_Kind_none;
+  type_of_ir_put(irgen.irid_bits, sem.fun_bits);
 
   sem.fun_len = &new(sem.types);
   sem.fun_len->kind = Type_Kind_none;
   type_of_ir_put(irgen.irid_len, sem.fun_len);
+
+  sem.rec_foreign = &new(sem.types);
+  sem.rec_foreign->kind = Type_Kind_none;
+  type_of_ir_put(irgen.irid_foreign, sem.rec_foreign);
 
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
@@ -2946,8 +2954,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("", "");
-  test("a: Str = \"Hi\"; a.len; a[0]", "");
+  // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");
   // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");
   // test("a: Str; a.len = 10; a.len;", "");

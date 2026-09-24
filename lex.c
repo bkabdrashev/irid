@@ -1,6 +1,7 @@
 typedef enum {
   Token_Flag_wasnewline  = 1 << 0,
   Token_Flag_willnewline = 1 << 1,
+  Token_Flag_willspace   = 1 << 2,
 } Token_Flag;
 
 typedef enum Token_Kind_Flag {
@@ -42,10 +43,11 @@ typedef enum Token_Kind {
   Token_Kind_backslash          = 46,
   Token_Kind_quote              = 47,
   Token_Kind_str                = 48 | Token_Kind_Flag_call_rhs,
-  Token_Kind_sharp              = 49,
-  Token_Kind_slash              = 51,
-  Token_Kind_percent            = 52,
-  Token_Kind_dot_dot            = 53,
+  Token_Kind_sharp              = 49 | Token_Kind_Flag_call_rhs,
+  Token_Kind_sharp_late         = 51 | Token_Kind_Flag_call_rhs,
+  Token_Kind_slash              = 53,
+  Token_Kind_percent            = 55,
+  Token_Kind_dot_dot            = 57,
 
   Token_Kind_name               = String_Kind_name,
   Token_Kind_if                 = String_Kind_if,
@@ -54,7 +56,6 @@ typedef enum Token_Kind {
   Token_Kind_return             = String_Kind_return,
   Token_Kind_break              = String_Kind_break,
   Token_Kind_while              = String_Kind_while,
-  Token_Kind_bits               = String_Kind_bits,
   Token_Kind_type               = String_Kind_type,
 } Token_Kind;
 
@@ -366,6 +367,9 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case '#': {
       token.kind = Token_Kind_sharp;
       lexer.stream++;
+      if (isspace(*lexer.stream)) {
+        token.kind = Token_Kind_sharp_late;
+      }
     } break;
     default: {
       lexer.stream++;
@@ -523,13 +527,13 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     case Token_Kind_break:
       string_builder_push_cstr(&sb, "break");
     break;
-    case Token_Kind_bits:
-      string_builder_push_cstr(&sb, "bits");
-    break;
     case Token_Kind_type:
       string_builder_push_cstr(&sb, "type");
     break;
     case Token_Kind_sharp:
+      string_builder_push_cstr(&sb, "#");
+    break;
+    case Token_Kind_sharp_late:
       string_builder_push_cstr(&sb, "#");
     break;
     }

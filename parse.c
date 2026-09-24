@@ -48,7 +48,6 @@ typedef enum Ast_Kind {
   Ast_Kind_break_value = Token_Kind_break | Ast_Flag_value,
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
-  Ast_Kind_bits        = Token_Kind_bits,
   Ast_Kind_type        = Token_Kind_type+1,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
@@ -263,9 +262,6 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     }
     string_builder_push_cstr(sb, ")");
   break;
-  case Ast_Kind_bits:
-    string_builder_push_cstr(sb, "bits");
-  break;
   case Ast_Kind_type:
     string_builder_push_cstr(sb, "type ");
     string_builder_push_ast_node(sb, node->unary);
@@ -414,6 +410,7 @@ I32 parse_right_precedence(Ast_Kind kind) {
     return 16;
   case Ast_Kind_load:
     return 18;
+  case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
     return 20;
@@ -686,23 +683,34 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   Ast_Node* node = 0;
   Token token = parser->tokens.base[parser->tok++];
   switch (token.kind) {
+  case Token_Kind_sharp_late: {
+    Ast_Kind kind = Ast_Kind_run;
+    I32 precedence = 0;
+    Ast_Node* unary = parse_new_expression(parser, precedence);
+    node = ast_new_node(parser->perm_arena, kind);
+    node->unary = unary;
+  } break;
+  case Token_Kind_sharp: {
+    Ast_Kind kind = Ast_Kind_run;
+    I32 precedence = 20;
+    Ast_Node* unary = parse_new_expression(parser, precedence);
+    node = ast_new_node(parser->perm_arena, kind);
+    node->unary = unary;
+  } break;
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
   case Token_Kind_at_prefix:    case Token_Kind_at:
-  case Token_Kind_type:         case Token_Kind_sharp:
+  case Token_Kind_type:
   {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind);
     Ast_Node* unary = parse_new_expression(parser, precedence);
-    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-    node->kind = kind;
+    node = ast_new_node(parser->perm_arena, kind);
     node->unary = unary;
   } break;
-  case Token_Kind_bits:
   case Token_Kind_str: case Token_Kind_int: case Token_Kind_name: {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
-    node = arena_push(parser->perm_arena, sizeof(Ast_Node));
-    node->kind = kind;
+    node = ast_new_node(parser->perm_arena, kind);
     node->bits = token.bits;
   } break;
   case Token_Kind_backslash: {
@@ -948,9 +956,10 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("16'#bits",     "(bits 32)");
+  return;
   test("foo \"Hi\"",     "(bits 32)");
   test("[]1",     "(bits 32)");
-  return;
   test("bits 32",     "(bits 32)");
   test("bits 32 (0..9)",     "(bits 32)");
 

@@ -41,7 +41,7 @@ print_str:(str: Str) -> {
   putchar 10
 }
 
-putchar: #c putchar (char:I32) -> I32
+putchar: #foreign.c putchar (char:I32) -> I32
 
 Vec : (x: I32; y: I32; z: 100)
 v:Vec = (123;)
@@ -53,11 +53,11 @@ window: Window
 
 print_str(window.opaque)
 
-// CreateWindow : #c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
+// CreateWindow : #foreign.c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
 // import sdl
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
 // window := sdl.CreateWindow("Shy SDL3 Snake", WINDOW_WIDTH, WINDOW_HEIGHT, 0)
 //
 // Renderer : type 64'bits (opaque:"SDL_Renderer")
-// CreateRenderer : #c SDL_CreateRenderer (window: @Window; name: Cstr) -> @Renderer
-// GetTicks : #c SDL_GetTicks () -> U64
+// CreateRenderer : #foreign.c SDL_CreateRenderer (window: @Window; name: Cstr) -> @Renderer
+// GetTicks : #foreign.c SDL_GetTicks () -> U64

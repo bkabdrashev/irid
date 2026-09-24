@@ -36,7 +36,6 @@ typedef enum Ir_Kind {
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
-  Ir_Kind_bits      = Ast_Kind_bits,
   Ir_Kind_type      = Ast_Kind_type | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
@@ -48,13 +47,16 @@ typedef enum Ir_Kind {
   Ir_Kind_arg  = 137,
   Ir_Kind_macro_par  = 138,
 
-  Ir_Kind_len  = 139,
-
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
   Ir_Kind_array_cast  = 142,
 
   Ir_Kind_meet = 144,
+
+  Ir_Kind_foreign = 150,
+  Ir_Kind_bits    = 151,
+  Ir_Kind_len     = 152,
+
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -298,9 +300,13 @@ struct Irgen {
 
   Str*        str_nil;
   Str*        str_len;
+  Str*        str_bits;
+  Str*        str_foreign;
 
   Hash_Map    builtins;
   Ir*         irid_len;
+  Ir*         irid_bits;
+  Ir*         irid_foreign;
 
   Fun_Stack   fun_stack;
   Blocks*     unresolved_breaks;
@@ -374,6 +380,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_len:
     string_builder_push_cstr(sb, "len");
+  break;
+  case Ir_Kind_foreign:
+    string_builder_push_cstr(sb, "foreign");
   break;
   case Ir_Kind_bits:
     string_builder_push_cstr(sb, "bits");
@@ -628,11 +637,6 @@ Ir* irgen_push_none(void) {
 
 Ir* irgen_push_macro_par(void) {
   Ir ir = { Ir_Kind_macro_par, {0} };
-  return irgen_push(ir);
-}
-
-Ir* irgen_push_bits(void) {
-  Ir ir = { Ir_Kind_bits, {0} };
   return irgen_push(ir);
 }
 
@@ -1130,9 +1134,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
     irgen_builtin_leave();
   } break;
-  case Ast_Kind_bits: {
-    result = irgen_push_bits();
-  } break;
   case Ast_Kind_call:
   case Ast_Kind_array:
   case Ast_Kind_eq: case Ast_Kind_ne:
@@ -1290,16 +1291,36 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.str_nil  = str_from_cstr("");
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
-  irgen.irid_len = &new(irgen.irs);
-  irgen.irid_len->kind = Ir_Kind_len;
 
+  irgen.builtins = hash_map_init(irgen.perm_arena, 3);
   {
-    irgen.builtins = hash_map_init(irgen.perm_arena, 2);
+    irgen.irid_len = &new(irgen.irs);
+    irgen.irid_len->kind = Ir_Kind_len;
     irgen.str_len = str_from_cstr("len");
     Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
     sym->kind = Symbol_Kind_constant;
     sym->ir = irgen.irid_len;
     hash_map_put(&irgen.builtins, irgen.str_len, sym);
+  }
+
+  {
+    irgen.irid_bits = &new(irgen.irs);
+    irgen.irid_bits->kind = Ir_Kind_bits;
+    irgen.str_bits = str_from_cstr("bits");
+    Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+    sym->kind = Symbol_Kind_constant;
+    sym->ir = irgen.irid_bits;
+    hash_map_put(&irgen.builtins, irgen.str_bits, sym);
+  }
+
+  {
+    irgen.irid_foreign = &new(irgen.irs);
+    irgen.irid_foreign->kind = Ir_Kind_foreign;
+    irgen.str_foreign = str_from_cstr("foreign");
+    Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+    sym->kind = Symbol_Kind_constant;
+    sym->ir = irgen.irid_foreign;
+    hash_map_put(&irgen.builtins, irgen.str_foreign, sym);
   }
 
   {
@@ -1367,7 +1388,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void irgen_test(void) {
   // test("a: 1,2;", "");
-  // test("a: I32 = 3; a+a", "");
+  test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");
