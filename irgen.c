@@ -27,6 +27,7 @@ typedef enum Ir_Kind {
   Ir_Kind_span      = Ast_Kind_span      | Ir_Flag_unary,
 
   Ir_Kind_join  = Ast_Kind_join  | Ir_Flag_binary,
+  Ir_Kind_meet  = Ast_Kind_meet  | Ir_Flag_binary,
   Ir_Kind_range = Ast_Kind_range | Ir_Flag_binary,
 
   Ir_Kind_neg = Ast_Kind_neg | Ir_Flag_unary,
@@ -50,8 +51,6 @@ typedef enum Ir_Kind {
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
   Ir_Kind_array_cast  = 142,
-
-  Ir_Kind_meet = 144,
 
   Ir_Kind_foreign = 150,
   Ir_Kind_bits    = 151,
@@ -258,13 +257,11 @@ struct Rec_Pool {
 typedef enum Fun_Kind {
   Fun_Kind_none    = 0,
   Fun_Kind_macro   = 1,
-  Fun_Kind_foreign = 2,
 } Fun_Kind;
 
 struct Fun {
   Fun_Kind kind;
   Str*    name;
-  Str*    foreign_name;
   Blocks* blocks;
   Block*  ret_block;
   Vars*   vars;
@@ -548,10 +545,7 @@ Cstr cstr_from_funs(Funs funs, C8* buffer) {
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
-    if (fun->kind == Fun_Kind_foreign) {
-      string_builder_push_cstr(&sb, " #foreign");
-    }
-    else if (fun->kind == Fun_Kind_macro) {
+    if (fun->kind == Fun_Kind_macro) {
       string_builder_push_cstr(&sb, " #macro");
     }
     string_builder_push_cstr(&sb, " {");
@@ -800,7 +794,7 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   }
 
   Ir* ir = irgen_ast_node(node);
-  if (ir->kind == Ir_Kind_fun && ir->fun->kind != Fun_Kind_foreign) {
+  if (ir->kind == Ir_Kind_fun) {
     ir->fun->name = var->name;
   }
   irgen_block_leave();
@@ -952,17 +946,8 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       irgen_assign(node, at);
     }
   } break;
-  case Ast_Kind_and_list: {
-    if (rhs->kind == Ir_Kind_load) {
-      rhs = rhs->unary;
-    }
-    for (I32 i = 0; i < lhs->list->length; i++) {
-      Ir* int_ir = irgen_push_int(i);
-      Ir* offset = irgen_push_position_offset(rhs, int_ir);
-      Ir* at = irgen_push_unary(Ir_Kind_load, offset);
-      Ast_Node* node = lhs->list->base[i];
-      irgen_assign(node, at);
-    }
+  case Ast_Kind_meet: {
+    assert(0);
   } break;
   default : {
     Ir* lhs_ir = irgen_ast_node(lhs);
@@ -1040,13 +1025,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_assign(node->binary.lhs, rhs);
   } break;
-  case Ast_Kind_and_list: {
-    Rec* record = irgen_record_new(node->list->length);
-    for (I32 i = 0; i < node->list->length; i++) {
-      Ir* ir = irgen_ast_node(node->list->base[i]);
-      irgen_record_push_declare_position(record, i, ir);
-    }
-    result = irgen_push_meet(record);
+  case Ast_Kind_meet: {
+    Ir* lhs = irgen_ast_node(node->binary.lhs);
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    result = irgen_push_binary(Ir_Kind_meet, lhs, rhs);
   } break;
   case Ast_Kind_record: {
     Rec* record = irgen_record_new(node->list->length);
@@ -1387,8 +1369,9 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: 1,2;", "");
-  test("a: I32 = 3; a+a", "");
+  // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");

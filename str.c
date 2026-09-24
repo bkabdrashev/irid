@@ -7,7 +7,7 @@ typedef enum String_Kind {
   String_Kind_return = 141,
   String_Kind_break  = 142,
   String_Kind_while  = 143,
-  String_Kind_type   = 150,
+  String_Kind_type   = 150 | (1 << 9),
 } String_Kind;
 
 typedef struct Str Str;

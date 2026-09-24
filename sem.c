@@ -26,6 +26,7 @@ struct Pointer_Pair { Pointer* one; Pointer* two; };
 typedef struct Function Function;
 struct Function {
   Fun* fun;
+  Str*  foreign_name;
   Type* arg;
   Type* ret;
 };
@@ -82,7 +83,7 @@ struct Type {
     Array*    array;
     Record*   record;
     Function* function;
-    Hash_Set* strings;
+    Str*      str;
   };
 };
 
@@ -121,10 +122,11 @@ struct Sem {
   Type* fun_bits;
   Type* fun_len;
   Type* rec_foreign;
-  Type* fun_c;
+  Type* fun_foreign_c;
   Type* bytes_range;
 
   Str*  str_ptr;
+  Str*  str_c;
   Fun*  str_from_i8_array;
   struct {
     Type* len;
@@ -811,7 +813,7 @@ Type* type_range(I64 min, I64 max) {
   return type_ranges(ranges);
 }
 
-Type* type_fun(Function* function) {
+Type* type_function(Function* function) {
   Type* result = sem.type_none;
   I32 i = 0;
   for (;;) {
@@ -822,7 +824,10 @@ Type* type_fun(Function* function) {
       break;
     }
     else {
-      if (key->fun == function->fun && key->arg == function->arg && key->ret == function->ret) {
+      if (key->fun == function->fun
+      && key->arg == function->arg
+      && key->ret == function->ret
+      && key->foreign_name == function->foreign_name) {
         arena_release_mark(sem.perm_arena, function);
         function = key;
         break;
@@ -847,6 +852,13 @@ Type* type_fun(Function* function) {
 
   result = type_in_set(new_type);
   return result;
+}
+
+Type* type_function_foreign(Function* function, Str* foreign_name) {
+  Function* function_foreign = arena_push(sem.perm_arena, sizeof(Function));
+  *function_foreign = *function;
+  function_foreign->foreign_name = foreign_name;
+  return type_function(function_foreign);
 }
 
 void sem_push_ir(Block* block, Ir* sem_ir) {
@@ -2123,6 +2135,9 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_bits: {
     result = sem.fun_bits;
   } break;
+  case Ir_Kind_foreign: {
+    result = sem.rec_foreign;
+  } break;
   case Ir_Kind_int: {
     I64 i64 = ir->i64;
     result  = type_int(i64);
@@ -2272,10 +2287,9 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_record(new_record);
   } break;
   case Ir_Kind_meet: {
-    for (I32 i = 0; i < ir->rec->length; i++) {
-      Type* type = type_of_ir(ir->rec->irs[i]);
-      result = type_meet(result, type);
-    }
+    Type* type_one = type_of_ir(ir->binary.one);
+    Type* type_two = type_of_ir(ir->binary.two);
+    result = type_meet(type_one, type_two);
   } break;
   case Ir_Kind_span: {
     Array* array = arena_push(sem.perm_arena, sizeof(Array));
@@ -2484,10 +2498,11 @@ void sem_ir(Block* block, Ir* ir) {
     if (ir->fun->kind == Fun_Kind_macro) {
       Function* function = arena_push(sem.perm_arena, sizeof(Function));
       function->fun = ir->fun;
+      function->foreign_name = irgen.str_nil;
       function->arg = sem.type_none;
       function->ret = sem.type_none;
       // ir->fun->type = type_fun(function);
-      result = type_fun(function);
+      result = type_function(function);
     }
     else {
       Fun* save_fun = sem.current_fun;
@@ -2504,11 +2519,13 @@ void sem_ir(Block* block, Ir* ir) {
         if (ranges_is_single(arg_type->ranges)) {
           I64 val = ranges_min(arg_type->ranges);
           if (val < I16_MAX) {
-            result = &new(sem.types);
-            result->kind = Type_Kind_none;
-            result->size_defined = true;
-            result->bits_size = val;
-            result->bits_align = align_up(val, 8);
+            Type* type = &new(sem.types);
+            type->kind = Type_Kind_none;
+            type->size_defined = true;
+            type->bits_size = val;
+            type->bits_align = align_up(val, 8);
+            type->value = 0;
+            result = type_in_set(type);
           }
           else {
             assert(0);
@@ -2525,6 +2542,46 @@ void sem_ir(Block* block, Ir* ir) {
     else if (fun_type == sem.fun_len) {
       if (arg_type->kind == Type_Kind_record) {
         result = type_int(arg_type->record->length);
+      }
+      else if (arg_type->kind == Type_Kind_array) {
+        result = arg_type->array->length;
+      }
+      else {
+        assert(0);
+      }
+    }
+    else if (fun_type == sem.fun_foreign_c) {
+      if (arg_type->kind == Type_Kind_array) {
+        Array* array = arg_type->array;
+        if (array_is_static(array)) {
+          I32 length = array_static_length(array);
+          if (array->of_type == sem.bytes_range) {
+            C8* chars = arena_push(sem.perm_arena, length * sizeof(C8));
+            for (I32 i = 0; i < length; i++) {
+              if (!ranges_is_single(array->types[i]->ranges)) {
+                assert(0);
+              }
+              I64 val = ranges_min(array->types[i]->ranges);
+              if (0 < val && val < I8_MAX) {
+                chars[i] = (I8)val;
+              }
+              else {
+                assert(0);
+              }
+            }
+            Str* str = str_from_range(chars, chars+length);
+            Type* type = &new(sem.types);
+            type->kind = Type_Kind_none;
+            type->str = str;
+            result = type_in_set(type);
+          }
+          else {
+            assert(0);
+          }
+        }
+        else {
+          assert(0);
+        }
       }
       else if (arg_type->kind == Type_Kind_array) {
         result = arg_type->array->length;
@@ -2562,6 +2619,11 @@ void sem_ir(Block* block, Ir* ir) {
     else if (fun_type->kind == Type_Kind_none) {
       if (fun_type->size_defined) { // NOTE: bits function
         result = type_define_size(fun_type->bits_size, arg_type);
+      }
+      else if (fun_type->str) {
+        if (arg_type->kind == Type_Kind_fun) {
+          result = type_function_foreign(arg_type->function, fun_type->str);
+        }
       }
       else {
         assert(0);
@@ -2844,6 +2906,7 @@ Type* sem_fun(Fun* fun) {
   // }
 
   Function* function = arena_push(sem.perm_arena, sizeof(Function));
+  function->foreign_name = irgen.str_nil;
   function->fun = fun;
   function->arg = fun->arg_var->var->declared;
   function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
@@ -2851,7 +2914,7 @@ Type* sem_fun(Fun* fun) {
   Type* ret_type = type_of_ir(fun->ret_ir);
   assert(ret_type->kind == Type_Kind_ptr);
   ret_type->pointer->declared = function->ret;
-  fun->type = type_fun(function);
+  fun->type = type_function(function);
 
   arena_release_mark(sem.temp_arena, fun->worklist);
   printf("end: %s\n", fun->name->base);
@@ -2888,9 +2951,18 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.fun_len->kind = Type_Kind_none;
   type_of_ir_put(irgen.irid_len, sem.fun_len);
 
-  sem.rec_foreign = &new(sem.types);
-  sem.rec_foreign->kind = Type_Kind_none;
-  type_of_ir_put(irgen.irid_foreign, sem.rec_foreign);
+  {
+    sem.str_c = str_from_cstr("c");
+
+    sem.fun_foreign_c = &new(sem.types);
+    sem.fun_foreign_c->kind = Type_Kind_none;
+    Record* record_foreign = type_record_init(1);
+    record_foreign->types[0] = sem.fun_foreign_c;
+    record_foreign->names[0] = sem.str_c;
+    hash_map_put_i32(&record_foreign->position_from_name, sem.str_c, 0);
+    sem.rec_foreign = type_record(record_foreign);
+    type_of_ir_put(irgen.irid_foreign, sem.rec_foreign);
+  }
 
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
@@ -2954,6 +3026,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");
   // test("a: @I32, (x:I32); b: I32; a = @b; a@ = 7; a@; a.x = 4; a.x + b + a@; a", "");

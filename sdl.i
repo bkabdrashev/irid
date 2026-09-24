@@ -8,12 +8,12 @@ INIT_SENSOR   : 0x00008000 /**< `SDL_INIT_SENSOR` implies `SDL_INIT_EVENTS` */
 INIT_CAMERA   : 0x00010000 /**< `SDL_INIT_CAMERA` implies `SDL_INIT_EVENTS` */
 
 InitFlags : 32'bits (INIT_AUDIO\INIT_VIDEO\INIT_JOYSTICK\INIT_HAPTIC\INIT_GAMEPAD\INIT_EVENTS\INIT_SENSOR\INIT_CAMERA)
-init : #foreign.c "SDL_Init" (flags: InitFlags) -> B8
+init : #foreign.c "SDL_Init" type (flags: InitFlags) -> B8
 
 Window :  type 64'bits (opaque:"SDL_Window")
 WindowFlags : 64'bits
-CreateWindow : #foreign.c "SDL_CreateWindow" (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
+CreateWindow : #foreign.c "SDL_CreateWindow" type (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
 
 Renderer : type 64'bits (opaque:"SDL_Renderer")
-CreateRenderer : #foreign.c "SDL_CreateRenderer" (window: @Window; name: Str) -> @Renderer
+CreateRenderer : #foreign.c "SDL_CreateRenderer" type (window: @Window; name: Str) -> @Renderer
 GetTicks : #foreign.c "SDL_GetTicks" () -> I64

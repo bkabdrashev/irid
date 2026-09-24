@@ -91,7 +91,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
       arg_types = 0;
       arg_count = 0;
     }
-    else if (type->function->fun->kind == Fun_Kind_foreign) {
+    else if (type->function->foreign_name != irgen.str_nil) {
       if (type->function->arg->kind == Type_Kind_record) {
         Record* record = type->function->arg->record;
         arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
@@ -195,7 +195,12 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   case Type_Kind_fun: {
     LLVMValueRef save_function = llvm_gen.function;
     LLVMBasicBlockRef save_block = LLVMGetInsertBlock(llvm_gen.builder);
-    result = llvm_fun(type->function->fun);
+    if (type->function->foreign_name != irgen.str_nil) {
+      result = llvm_of_fun(type->function->fun);
+    }
+    else {
+      result = llvm_fun(type->function->fun);
+    }
     llvm_gen.function = save_function;
     LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
   } break;
@@ -370,7 +375,7 @@ void llvm_ir(Ir* ir) {
         llvm_args = 0;
         llvm_arg_count = 0;
       }
-      else if (fun_type->function->fun->kind == Fun_Kind_foreign && arg_type->kind == Type_Kind_record) {
+      else if (fun_type->function->foreign_name != irgen.str_nil && arg_type->kind == Type_Kind_record) {
         if (arg_ir->kind == Ir_Kind_record) {
           Rec* rec = arg_ir->rec;
           llvm_args = arena_push(llvm_gen.perm_arena, rec->length * sizeof(LLVMValueRef));
@@ -390,7 +395,11 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
     else if (fun_type->kind == Type_Kind_none) {
-      // TODO: Type conversions?
+      if (fun_type->str) {
+        Type* type = type_of_ir(ir);
+        assert(type->kind == Type_Kind_fun);
+        result = llvm_of_fun(type->function->fun);
+      }
     }
   } break;
   case Ir_Kind_subscript: {
@@ -590,6 +599,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_bits:   break;
   case Ir_Kind_len:    break;
   case Ir_Kind_run:    break;
+  case Ir_Kind_foreign:break;
   case Ir_Kind_macro_par: assert(0); break;
   }
 
@@ -625,9 +635,6 @@ void llvm_block(Block* block) {
 
 LLVMValueRef llvm_fun(Fun* fun) {
   llvm_gen.function = llvm_of_fun(fun);
-  if (fun->kind == Fun_Kind_foreign) {
-    return llvm_gen.function;
-  }
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
     LLVMBasicBlockRef llvm_block = LLVMAppendBasicBlockInContext(llvm_gen.context, llvm_gen.function, "block");
@@ -776,13 +783,13 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
-  test("a: Str = \"Hi\"; a.len + 4", "");
+  // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
   // test("a:I32 = 70; b:@I32 = @a;", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
   // test("a:(x:0..2; y:1..2); a = (y:1; x:2); a.x", "");
-  // test("putchar: #c putchar (char:I32) -> I32", "");
-  // test("putchar: #c putchar (char:I32) -> I32; putchar 65; putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" (char:I32) -> I32", "");
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar 65; putchar 10", "");
   // test("putchar: #c putchar (char:I32) -> I32; foo: () -> { putchar 65; putchar 10}; foo()", "");
   // test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
   // test("f:()->1", "");
