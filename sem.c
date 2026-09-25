@@ -2627,6 +2627,7 @@ void sem_ir(Block* block, Ir* ir) {
       else {
         Function* fun = fun_type->function;
         if (type_is_subtype(block, arg_type, fun->arg)) {
+          type_auto_cast(block, ir, arg_type, fun->arg);
           result = fun->ret;
         }
         else {
