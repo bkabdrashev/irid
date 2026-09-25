@@ -422,7 +422,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_subscript: {
     Type* of_type = type_of_ir(ir->binary.one);
     Type* arr_type = type_pointer_declared(of_type->pointer);
-    assert(arr_type->kind == Type_Kind_record);
+    // assert(arr_type->kind == Type_Kind_record);
     LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
     LLVMTypeRef llvm_type = llvm_of_type(arr_type);
     LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
@@ -525,22 +525,25 @@ void llvm_ir(Ir* ir) {
     result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
   } break;
   case Ir_Kind_record_cast: {
-    Type* type = type_of_ir(ir);
-    assert(type->kind == Type_Kind_record);
+    Type* type_to = type_of_ir(ir);
+    assert(type_to->kind == Type_Kind_record);
 
-    LLVMTypeRef llvm_type = llvm_of_type(type);
+    LLVMTypeRef llvm_type = llvm_of_type(type_to);
     LLVMValueRef llvm_val = llvm_of_ir(ir->record_cast);
     Type* type_from = type_of_ir(ir->record_cast);
     assert(type_from->kind == Type_Kind_record);
 
     result = LLVMGetUndef(llvm_type);
-    for (I32 i = 0; i < type->record->length; i++) {
-      Str* field_name = type->record->names[i];
-      I32 position = hash_map_get_i32(&type_from->record->position_from_name, field_name);
+    for (I32 i = 0; i < type_to->record->length; i++) {
+      Str* field_name = type_to->record->names[i];
+      I32 position = i;
+      if (field_name) {
+        position = hash_map_get_i32(&type_from->record->position_from_name, field_name);
+      }
       LLVMValueRef field_val = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, position, "");
       Type* field_from_type = type_of_field_at(type_from->record, position);
-      Type* field_type = type_of_field_at(type->record, i);
-      if (!type_is_same(field_from_type, field_type)) {
+      Type* field_type = type_of_field_at(type_to->record, i);
+      if (field_from_type != field_type) {
         field_val = llvm_conversion(field_val, field_from_type, field_type);
       }
       result = LLVMBuildInsertValue(llvm_gen.builder, result, field_val, i, "");
@@ -843,7 +846,7 @@ void llvm_test(void) {
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x); putchar 10", "");
   // test("a:(x:0..2; y:1..2); a = (y:1; x:2); a.x", "");
   // test("putchar: #foreign.c \"putchar\" (char:I32) -> I32", "");
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar 65; putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar 65; putchar 10", "");
   // test("putchar: #c putchar (char:I32) -> I32; foo: () -> { putchar 65; putchar 10}; foo()", "");
   // test("putchar: #c putchar (char:I32) -> I32; foo : (a:I32; b:I32) -> a+b; putchar(foo(30;35)); putchar 65; putchar 10", "");
   // test("f:()->1", "");

@@ -217,9 +217,9 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_ranges(sb, type->ranges);
   } break;
   case Type_Kind_ptr: {
-    Type* declared = type_pointer_declared(type->pointer);
+    // Type* declared = type_pointer_declared(type->pointer);
     string_builder_push_cstr(sb, "@");
-    string_builder_push_type(sb, block, declared);
+    // string_builder_push_type(sb, block, declared);
 
     if (type->pointer->stack_vars.len) {
       string_builder_push_cstr(sb, "|");
@@ -1230,7 +1230,9 @@ Type* type_meet(Type* one, Type* two) {
     case Type_Kind_ptr: {
       Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
       pointer->stack_vars  = hash_set_meet(sem.perm_arena, &one->pointer->stack_vars, &two->pointer->stack_vars);
-      pointer->declared  = type_meet(one->pointer->declared, two->pointer->declared);
+      Type* one_declared = type_pointer_declared(one->pointer);
+      Type* two_declared = type_pointer_declared(two->pointer);
+      pointer->declared  = type_meet(one_declared, two_declared);
       result = type_pointer(pointer);
     } break;
     case Type_Kind_record: {
@@ -2315,6 +2317,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_const(one_type)) {
         I64 length = ranges_min(one_type->ranges);
         Array* array = type_array_init(length);
+        array->of_type = two_type;
         for (I32 i = 0; i < length; i++) {
           array->types[i] = two_type;
         }
@@ -2344,7 +2347,7 @@ void sem_ir(Block* block, Ir* ir) {
           pointer->declared = declared->array->of_type;
         }
         else if (declared->kind == Type_Kind_ptr) {
-          pointer->declared = declared->pointer->declared;
+          pointer->declared = type_pointer_declared(declared->pointer);
         }
         else {
           assert(0);
@@ -2356,6 +2359,11 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else if (of_type->kind == Type_Kind_array) {
+      // foo: (s:[]I8) -> s
+      // a:[]I8
+      // foo(a)[0]
+      if (ir->binary.one->kind == Ir_Kind_load) {
+      }
       result = type_pointer_to(of_type->array->of_type);
     }
     else {
@@ -2459,7 +2467,7 @@ void sem_ir(Block* block, Ir* ir) {
         }
       }
       if (result == sem.type_none) {
-        result = ptr_type->pointer->declared;
+        result = type_pointer_declared(ptr_type->pointer);
       }
     }
     else if (ptr_type->kind == Type_Kind_array) {
@@ -2489,7 +2497,10 @@ void sem_ir(Block* block, Ir* ir) {
           }
         }
         else {
-          assert(0);
+          Type* declared = type_pointer_declared(lhs->pointer);
+          if (!type_is_subtype(block, rhs, declared)) {
+            assert(0);
+          }
         }
       }
       else {
@@ -2683,6 +2694,7 @@ void sem_ir(Block* block, Ir* ir) {
   }
   sem_push_ir(block, ir);
   type_of_ir_put(ir, result);
+  assert(result);
 }
 
 void sem_block(Block* block) {

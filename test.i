@@ -41,14 +41,14 @@ print_str:(str: Str) -> {
   putchar 10
 }
 
-putchar: #foreign.c putchar (char:I32) -> I32
+putchar: #foreign.c "putchar" type (char:I32) -> I32
 
 Vec : (x: I32; y: I32; z: 100)
 v:Vec = (123;)
 
 print_i32(v.x + v.y + v.z)
 
-Window : type 64'bits (opaque:"SDL_Window")
+Window : type 64'#bits (opaque:"SDL_Window")
 window: Window
 
 print_str(window.opaque)
