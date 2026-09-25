@@ -73,7 +73,7 @@ typedef struct Declare Declare;
 struct Declare { Var* var; };
 
 typedef struct Position_Offset Position_Offset;
-struct Position_Offset { Ir* of; Ir* at; };
+struct Position_Offset { Ir* of; I32 at; };
 
 typedef struct Access Access;
 struct Access { Ir* of; I32 at; };
@@ -423,7 +423,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "position offset ");
     string_builder_push_irid(sb, ir->position.of);
     string_builder_push_cstr(sb, ".");
-    string_builder_push_irid(sb, ir->position.at);
+    string_builder_push_i64(sb, ir->position.at);
   break;
   case Ir_Kind_name_offset:
     string_builder_push_cstr(sb, "name offset ");
@@ -690,7 +690,7 @@ Ir* irgen_push_meet(Rec* rec) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_position_offset(Ir* record, Ir* position) {
+Ir* irgen_push_position_offset(Ir* record, I32 position) {
   Ir ir = { Ir_Kind_position_offset, .position = { .of = record, .at = position } };
   return irgen_push(ir);
 }
@@ -940,8 +940,7 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
       rhs = rhs->unary;
     }
     for (I32 i = 0; i < lhs->list->length; i++) {
-      Ir* int_ir = irgen_push_int(i);
-      Ir* offset = irgen_push_position_offset(rhs, int_ir);
+      Ir* offset = irgen_push_position_offset(rhs, i);
       Ir* at = irgen_push_unary(Ir_Kind_load, offset);
       Ast_Node* node = lhs->list->base[i];
       irgen_assign(node, at);
@@ -1005,14 +1004,13 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
     else if (node->binary.rhs->kind == Ast_Kind_int) {
       if (lhs->kind == Ir_Kind_load) {
-        lhs->kind = Ir_Kind_int;
-        lhs->i64 = node->binary.rhs->i64;
-        Ir* position_offset = irgen_push_position_offset(lhs->unary, lhs);
-        result = irgen_push_unary(Ir_Kind_load, position_offset);
+        lhs->kind = Ir_Kind_position_offset;
+        lhs->position.of = lhs->unary;
+        lhs->position.at = node->binary.rhs->i64;
+        result = irgen_push_unary(Ir_Kind_load, lhs);
       }
       else {
-        Ir* ir_pos = irgen_push_int(node->binary.rhs->i64);
-        result = irgen_push_position_offset(lhs, ir_pos);
+        result = irgen_push_position_offset(lhs, node->binary.rhs->i64);
       }
     }
   } break;
@@ -1377,7 +1375,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
+  // test("p: @(x:8); p@.0",     "(bits 32)");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: 1,2;", "");
   // test("a: I32 = 3; a+a", "");
   // test("a: 32'bits (0\\1) = 0", "");

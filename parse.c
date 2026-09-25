@@ -918,7 +918,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("foo type 2 -> 3",     "(bits 32)");
+  test("p@.0",     "(bits 32)");
   // test("#foreign.c \"putchar\" (char:I32) -> I32",     "(bits 32)");
   return;
   test("foo \"Hi\"",     "(bits 32)");

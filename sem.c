@@ -2382,42 +2382,34 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_position_offset: {
     Type* of_type = type_of_ir(ir->position.of);
-    Type* at_type = type_of_ir(ir->position.at);
-    if (at_type->kind == Type_Kind_int) {
-      if (type_is_const(at_type)) {
-        I64 at = ranges_min(at_type->ranges);
-        if (of_type->kind == Type_Kind_ptr) {
-          Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-          assert(of_type->pointer->stack_vars.len > 0);
-          pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
-          Var* first_var = of_type->pointer->stack_vars.list[0];
-          I32  first_offset = first_var->declared->record->offsets[at];
-          Var* first_var_field = first_var->vars[at];
-          pointer->declared = first_var_field->declared;
-          hash_set_put(&pointer->stack_vars, first_var_field);
-          for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
-            Var* var = of_type->pointer->stack_vars.list[i];
-            I32  offset = var->declared->record->offsets[at];
-            if (offset != first_offset) {
-              printf("field offsets don't match\n");
-              assert(0);
-            }
-            Var* field_var = var->vars[at];
-            pointer->declared = type_meet(pointer->declared, field_var->declared);
-            hash_set_put(&pointer->stack_vars, field_var);
-          }
-          result = type_pointer(pointer);
-        }
-        else if (of_type->kind == Type_Kind_record) {
-          result = of_type->record->types[at];
-        }
-        else {
+    I64   at      = ir->position.at;
+    if (of_type->kind == Type_Kind_ptr) {
+      Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+      assert(of_type->pointer->stack_vars.len > 0);
+      pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
+
+      Var* first_var         = of_type->pointer->stack_vars.list[0];
+      I32  first_offset      = first_var->declared->record->offsets[at];
+      Var* first_var_field   = first_var->vars[at];
+           pointer->declared = first_var_field->declared;
+      hash_set_put(&pointer->stack_vars, first_var_field);
+      for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
+        Var* var    = of_type->pointer->stack_vars.list[i];
+        I32  offset = var->declared->record->offsets[at];
+
+        if (offset != first_offset) {
+          printf("field offsets don't match\n");
           assert(0);
         }
+
+        Var* field_var = var->vars[at];
+        pointer->declared = type_meet(pointer->declared, field_var->declared);
+        hash_set_put(&pointer->stack_vars, field_var);
       }
-      else {
-        assert(0);
-      }
+      result = type_pointer(pointer);
+    }
+    else if (of_type->kind == Type_Kind_record) {
+      result = of_type->record->types[at];
     }
     else {
       assert(0);

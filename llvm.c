@@ -467,8 +467,7 @@ void llvm_ir(Ir* ir) {
   } break;
   case Ir_Kind_position_offset: {
     Type* of_type = type_of_ir(ir->position.of);
-    Type* at_type = type_of_ir(ir->position.at);
-    I64 at = ranges_min(at_type->ranges);
+    I32 at = ir->position.at;
     Type* rec_type = of_type->pointer->declared;
     LLVMValueRef ptr = llvm_of_ir(ir->position.of);
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
@@ -841,8 +840,9 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  // TODO: figure out the llvm generation for @1 -- value pointer.
+  // TODO: figure out the llvm generation for @I8 1 -- value pointer.
   //       alloca for values that are pointed
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
   // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
