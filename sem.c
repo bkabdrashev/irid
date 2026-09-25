@@ -27,7 +27,7 @@ typedef struct Function Function;
 struct Function {
   Fun* fun;
   Str* foreign_name;
-  I32  foreign_id;
+  I32  foreign_id; // TODO: it is better not to create foreign_id; instead rely on foreign_name since it should be unique per declared
   Type* arg;
   Type* ret;
 };
@@ -1266,8 +1266,8 @@ Type* type_join(Block* block, Type* one, Type* two) {
     Type* two_declared = type_pointer_declared(two->pointer);
     if (type_is_same(one_declared, two_declared)) {
       Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-      pointer->declared = type_join(block, one_declared, two_declared);
-      pointer->stack_vars    = hash_set_join(sem.perm_arena, &one->pointer->stack_vars, &two->pointer->stack_vars);
+               pointer->declared   = type_join(block, one_declared, two_declared);
+               pointer->stack_vars = hash_set_join(sem.perm_arena, &one->pointer->stack_vars, &two->pointer->stack_vars);
       result = type_pointer(pointer);
     }
     else {
@@ -1307,11 +1307,11 @@ Type* type_pointer(Pointer* pointer) {
   }
   {
     Type* type = &new(sem.types);
-    type->kind = Type_Kind_ptr;
-    type->bits_size  = 64;
-    type->bits_align = 64;
-    type->size_defined = true;
-    type->pointer = pointer;
+          type->kind         = Type_Kind_ptr;
+          type->bits_size    = 64;
+          type->bits_align   = 64;
+          type->size_defined = true;
+          type->pointer      = pointer;
     result = type_in_set(type);
   }
   return result;
@@ -1319,51 +1319,61 @@ Type* type_pointer(Pointer* pointer) {
 
 Type* type_pointer_to(Type* type) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
-  pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
-  pointer->declared = type;
+           pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
+           pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
+           pointer->declared   = type;
   return type_pointer(pointer);
 }
 
 Type* type_pointer_var(Var* var) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
-  pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
+           pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
+           pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
   hash_set_put(&pointer->stack_vars, var);
   return type_pointer(pointer);
 }
 
 Type* type_pointer_val(Type* declared, Ir* val) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-  pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
-  pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
-  pointer->declared = declared;
+           pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
+           pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
+           pointer->declared   = declared;
   hash_set_put(&pointer->stack_vals, val);
   return type_pointer(pointer);
 }
 
 Type* type_pointer_declared(Pointer* pointer) {
-  if (pointer->declared) return pointer->declared;
-  Hash_Set stack = pointer->stack_vars;
-  if (stack.len == 0) return 0;
-  Var* first_var = stack.list[0];
-  sem_declare_var(first_var);
-  Type* result = first_var->declared;
-  for (I32 i = 1; i < stack.len; i++) {
-    Var* var = stack.list[i];
-    sem_declare_var(var);
-    result = type_meet(result, var->declared);
+  Type* result = sem.type_none;
+  if (pointer->declared) {
+    result = pointer->declared;
   }
-  pointer->declared = result;
+  else {
+    Hash_Set stack = pointer->stack_vars;
+    if (stack.len == 0) {
+      result = 0;
+    }
+    else {
+      Var* first_var = stack.list[0];
+      sem_declare_var(first_var);
+      Type* declared = first_var->declared;
+      for (I32 i = 1; i < stack.len; i++) {
+        Var* var = stack.list[i];
+        sem_declare_var(var);
+        declared = type_meet(declared, var->declared);
+      }
+      pointer->declared = declared;
+      result = declared;
+    }
+  }
   return result;
 }
 
 Type* type_define_size(I32 bits_size, Type* bits_of) {
   Type* type = &new(sem.types);
-  *type = *bits_of;
-  type->size_defined = true;
-  type->bits_size = bits_size;
-  type->bits_align = align_up(bits_size, 8);
+       *type = *bits_of;
+        type->size_defined = true;
+        type->bits_size    = bits_size;
+        type->bits_align   = align_up(bits_size, 8);
   return type_in_set(type);
 }
 
@@ -1576,11 +1586,11 @@ void sem_type_narrow_int_eq(Sem_Tasks* tasks, Ir* ir) {
 }
 
 void sem_type_narrow_ptr_eq(Sem_Tasks* tasks, Ir* ir) {
-  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
   Pointer_Pair pair = pointer_pair_of_ir_binary(ir);
-  pointer->declared = type_meet(pair.one->declared, pair.two->declared);
-  pointer->stack_vars = hash_set_meet(sem.perm_arena, &pair.one->stack_vars, &pair.two->stack_vars);
-  pointer->stack_vals = hash_set_meet(sem.perm_arena, &pair.one->stack_vals, &pair.two->stack_vals);
+  Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+           pointer->declared   = type_meet(pair.one->declared, pair.two->declared);
+           pointer->stack_vars = hash_set_meet(sem.perm_arena, &pair.one->stack_vars, &pair.two->stack_vars);
+           pointer->stack_vals = hash_set_meet(sem.perm_arena, &pair.one->stack_vals, &pair.two->stack_vals);
   Type* new_type = type_pointer(pointer);
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
@@ -1604,17 +1614,17 @@ void sem_type_narrow_ptr_ne(Sem_Tasks* tasks, Ir* ir) {
   // TODO: pointer relations
   if (pointer_is_single_var(pair.one)) {
     Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-    pointer->stack_vars = hash_set_exclude(sem.perm_arena, &pair.two->stack_vars, pair.one->stack_vars.list[0]);
-    pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
-    pointer->declared = pair.two->declared;
+             pointer->stack_vars = hash_set_exclude(sem.perm_arena, &pair.two->stack_vars, pair.one->stack_vars.list[0]);
+             pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
+             pointer->declared   = pair.two->declared;
     Type* new_type_two = type_pointer(pointer);
     sem_type_of_ir_narrow(tasks, ir->binary.two, new_type_two);
   }
   if (pointer_is_single_var(pair.two)) {
     Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-    pointer->stack_vars = hash_set_exclude(sem.perm_arena, &pair.one->stack_vars, pair.two->stack_vars.list[0]);
-    pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
-    pointer->declared = pair.one->declared;
+             pointer->stack_vars = hash_set_exclude(sem.perm_arena, &pair.one->stack_vars, pair.two->stack_vars.list[0]);
+             pointer->stack_vals = hash_set_init(sem.perm_arena, 1);
+             pointer->declared   = pair.one->declared;
     Type* new_type_one = type_pointer(pointer);
     sem_type_of_ir_narrow(tasks, ir->binary.one, new_type_one);
   }
@@ -2614,14 +2624,17 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else if (fun_type->kind == Type_Kind_fun) {
       if (fun_type->function->fun->kind == Fun_Kind_macro) {
-        Fun* fun = fun_type->function->fun;
+        Fun*   fun         = fun_type->function->fun;
         Block* entry_block = fun->blocks->base[0];
-        Ir macro_par = *entry_block->irs->base[1];
+        Ir     macro_par   = *entry_block->irs->base[1];
+        Fun*   save_fun    = sem.current_fun;
+
         *entry_block->irs->base[1] = *ir->binary.two;
-        Fun* save_fun = sem.current_fun;
         fun_type = sem_fun(fun);
+
         *entry_block->irs->base[1] = macro_par;
-        sem.current_fun = save_fun;
+        sem.current_fun            = save_fun;
+
         result = fun_type->function->ret;
       }
       else {
