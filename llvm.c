@@ -583,16 +583,18 @@ void llvm_ir(Ir* ir) {
       LLVMValueRef llvm_len = LLVMConstInt(llvm_type, length, false);
       LLVMValueRef llvm_ptr;
       {
-        LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
-        LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
-        LLVMValueRef indices[2] = { zero, zero };
-        Type* ptr_to = type_pointer_to(type_to->array->of_type);
-        LLVMTypeRef llvm_ptr_to = llvm_of_type(ptr_to);
-        llvm_ptr = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, llvm_val, indices, 2, "");
+        LLVMTypeRef  llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
+        LLVMValueRef zero          = LLVMConstInt(llvm_int_type, 0, 0);
+        LLVMValueRef indices[2]    = { zero, zero };
+        LLVMTypeRef  llvm_from     = llvm_of_type(type_from);
+                     llvm_ptr      = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_from, llvm_val, indices, 2, "");
       }
-      result = LLVMGetUndef(llvm_type);
-      result = LLVMBuildInsertValue(llvm_gen.builder, result, llvm_len, 0, "");
-      result = LLVMBuildInsertValue(llvm_gen.builder, result, llvm_ptr, 1, "");
+      LLVMValueRef undef    = LLVMGetUndef(llvm_type);
+      LLVMValueRef with_len = LLVMBuildInsertValue(llvm_gen.builder, undef, llvm_len, 0, "");
+                   result   = LLVMBuildInsertValue(llvm_gen.builder, with_len, llvm_ptr, 1, "");
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ir_Kind_record: {
@@ -839,6 +841,8 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  // TODO: figure out the llvm generation for @1 -- value pointer.
+  //       alloca for values that are pointed
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
   // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
