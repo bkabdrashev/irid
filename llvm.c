@@ -838,7 +838,8 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");
 //   // define void @main() {
 // block:
 //   store i32 66, { i0, i0 } zeroinitializer, align 4
