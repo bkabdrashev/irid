@@ -56,14 +56,15 @@ LLVMTypeRef llvm_of_type(Type* type) {
     }
   } break;
   case Type_Kind_ptr: {
-    LLVMTypeRef pointer_to = llvm_of_type(type->pointer->declared);
+    Type* declared = type_pointer_declared(type->pointer);
+    LLVMTypeRef pointer_to = llvm_of_type(declared);
     result = LLVMPointerType(pointer_to, 0);
   } break;
   case Type_Kind_record: {
     LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_type = type_of_field_at(type->record, i);
-      if (type_is_const(field_type)) {
+      if (field_type->bits_size == 0) {
         field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
       }
       else {
@@ -181,8 +182,9 @@ LLVMValueRef llvm_default_of_type(Type* type) {
       result = llvm_of_ir(var->declared_ir);
     }
     else {
-      LLVMValueRef llvm_of_default = llvm_default_of_type(type->pointer->declared);
-      LLVMTypeRef llvm_var_type = llvm_of_type(type->pointer->declared);
+      Type* declared = type_pointer_declared(type->pointer);
+      LLVMValueRef llvm_of_default = llvm_default_of_type(declared);
+      LLVMTypeRef llvm_var_type = llvm_of_type(declared);
       LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
       LLVMSetInitializer(llvm_global, llvm_of_default);
       LLVMSetGlobalConstant(llvm_global, false);
@@ -219,7 +221,7 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMValueRef));
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_type = type_of_field_at(type->record, i);
-      if (type_is_const(field_type)) {
+      if (field_type->bits_size == 0) {
         LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
         values[i] = LLVMConstInt(llvm_zero_type, 0, false);
       }
@@ -235,7 +237,7 @@ LLVMValueRef llvm_default_of_type(Type* type) {
       LLVMValueRef* values = arena_push(llvm_gen.perm_arena, length * sizeof(LLVMValueRef));
       for (I32 i = 0; i < length; i++) {
         Type* field_type = type->array->types[i];
-        if (type_is_const(field_type)) {
+        if (field_type->bits_size == 0) {
           LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
           values[i] = LLVMConstInt(llvm_zero_type, 0, false);
         }
@@ -466,7 +468,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_position_offset: {
     Type* of_type = type_of_ir(ir->position.of);
     I32 at = ir->position.at;
-    Type* rec_type = of_type->pointer->declared;
+    Type* rec_type = type_pointer_declared(of_type->pointer);
     LLVMValueRef ptr = llvm_of_ir(ir->position.of);
     LLVMTypeRef llvm_type = llvm_of_type(rec_type);
     result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, at, "");
@@ -483,7 +485,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_store: {
     if (ir->binary.two->kind == Ir_Kind_record) {
       Type*       type_ptr    = type_of_ir(ir->binary.one);
-      Type*       record_type = type_ptr->pointer->declared;
+      Type*       record_type = type_pointer_declared(type_ptr->pointer);
       LLVMTypeRef llvm_type   = llvm_of_type(record_type);
       Rec*        rec_one     = ir->binary.two->rec;
       Record*     record_two  = record_type->record;
@@ -529,13 +531,13 @@ void llvm_ir(Ir* ir) {
     result = LLVMGetUndef(llvm_type);
     for (I32 i = 0; i < type_to->record->length; i++) {
       Str* field_name = type_to->record->names[i];
-      I32 position = i;
+      I32  position   = i;
       if (field_name) {
         position = hash_map_get_i32(&type_from->record->position_from_name, field_name);
       }
-      LLVMValueRef field_val = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, position, "");
-      Type* field_from_type = type_of_field_at(type_from->record, position);
-      Type* field_type = type_of_field_at(type_to->record, i);
+      LLVMValueRef field_val       = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, position, "");
+      Type*        field_from_type = type_of_field_at(type_from->record, position);
+      Type*        field_type      = type_of_field_at(type_to->record, i);
       if (field_from_type != field_type) {
         field_val = llvm_conversion(field_val, field_from_type, field_type);
       }
@@ -835,7 +837,24 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
+//   // define void @main() {
+// block:
+//   store i32 66, { i0, i0 } zeroinitializer, align 4
+//   store i32 65, { i0, i0 } getelementptr inbounds nuw ({ i32, i32 }, { i0, i0 } zeroinitializer, i32 0, i32 1), align 4
+//   store { i0, i0 } zeroinitializer, ptr @p, align 1
+//   %0 = call i32 @putchar(i32 66)
+//   %1 = call i32 @putchar(i32 10)
+//
+//     r111 = record r105 r110 : 0 bits record(32'bits 66, 32'bits 65)
+//     r112 = var  : 64'bits @||
+//     r113 = store r112 r111 : 0 bits none
+//   br label %block1
+
+// block1:                                           ; preds = %block
+//   ret void
+// }
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
   // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");

@@ -1110,7 +1110,7 @@ Type* type_record(Record* record) {
     I16 bits_size = 0;
     for (I32 i = 0; i < record->length; i++) {
       Type* field_type = record->types[i];
-      if (!type_is_const(field_type)) {
+      if (field_type->bits_size != 0) {
         bits_align = max(bits_align, field_type->bits_align);
         bits_size = align_up(bits_size, field_type->bits_align);
         record->offsets[i] = bits_size;
@@ -2020,20 +2020,20 @@ void sem_record_declare_fields(Var* var, Type* type) {
   if (type->kind == Type_Kind_record) {
     var->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
     for (I32 i = 0; i < type->record->length; i++) {
-      Var* var_field = arena_push_zero(sem.perm_arena, sizeof(Var));
-      var_field->offset = i;
-      var->vars[i] = var_field;
-      var_field->name = type->record->names[i];
-      var_field->parent = var;
       Type* type_field = type_of_field_at(type->record, i);
       type->record->types[i] = type_field;
-      var_field->declared = type_field;
-      var_field->state = Var_State_resolved;
-      var_field->kind = Var_Kind_declared;
+      Var* var_field = arena_push_zero(sem.perm_arena, sizeof(Var));
+           var_field->offset   = i;
+           var_field->name     = type->record->names[i];
+           var_field->parent   = var;
+           var_field->declared = type_field;
+           var_field->state    = Var_State_resolved;
+           var_field->kind     = Var_Kind_declared;
+      var->vars[i] = var_field;
 
       sem_record_declare_fields(var_field, type_field);
 
-      if (type_is_const(type_field)) {
+      if (type_field->bits_size == 0) {
         var_field->kind = Var_Kind_constant;
       }
       else {
@@ -2064,7 +2064,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
         var_item->state  = Var_State_resolved;
         var_item->offset = idx;
         var_item->declared = type_item;
-        if (type_is_const(type_item)) {
+        if (type_item->bits_size == 0) {
           var_item->kind = Var_Kind_constant;
         }
         else {
@@ -2119,7 +2119,7 @@ Type* sem_declare_var(Var* var) {
   Type* type = type_of_ir(var->declared_ir);
   if (type) {
     var->declared = type;
-    if (type_is_const(type)) {
+    if (type->bits_size == 0) {
       var->kind = Var_Kind_constant;
     }
     else {
@@ -2314,7 +2314,7 @@ void sem_ir(Block* block, Ir* ir) {
     Type* one_type = type_of_ir(ir->binary.one);
     Type* two_type = type_of_ir(ir->binary.two);
     if (one_type->kind == Type_Kind_int) {
-      if (type_is_const(one_type)) {
+      if (ranges_is_single(one_type->ranges)) {
         I64 length = ranges_min(one_type->ranges);
         Array* array = type_array_init(length);
         array->of_type = two_type;
