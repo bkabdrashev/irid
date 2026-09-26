@@ -840,22 +840,6 @@ void llvm_test(void) {
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
   test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");
-//   // define void @main() {
-// block:
-//   store i32 66, { i0, i0 } zeroinitializer, align 4
-//   store i32 65, { i0, i0 } getelementptr inbounds nuw ({ i32, i32 }, { i0, i0 } zeroinitializer, i32 0, i32 1), align 4
-//   store { i0, i0 } zeroinitializer, ptr @p, align 1
-//   %0 = call i32 @putchar(i32 66)
-//   %1 = call i32 @putchar(i32 10)
-//
-//     r111 = record r105 r110 : 0 bits record(32'bits 66, 32'bits 65)
-//     r112 = var  : 64'bits @||
-//     r113 = store r112 r111 : 0 bits none
-//   br label %block1
-
-// block1:                                           ; preds = %block
-//   ret void
-// }
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
   // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
