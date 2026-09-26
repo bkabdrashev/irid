@@ -75,9 +75,6 @@ struct Declare { Var* var; };
 typedef struct Position_Offset Position_Offset;
 struct Position_Offset { Ir* of; I32 at; };
 
-typedef struct Access Access;
-struct Access { Ir* of; I32 at; };
-
 typedef struct Int_Extend Int_Extend;
 struct Int_Extend { Ir* value; I16 bits; };
 
@@ -113,11 +110,9 @@ struct Var {
   B8    global;
   Var*  parent;
   Str*  name;
-  Type* declared;
   Ir*     declared_ir;
+  Type* declared;
   Var**   vars;
-  Var*    var_int;
-  Var*    var_ptr;
   Blocks* blocks;
   Type**  block_types;
 };
@@ -138,7 +133,6 @@ struct Ir {
     Int_Extend      int_extend;
     Ir*             record_cast;
     Ir*             array_cast;
-    Access access;
   };
 };
 
@@ -626,37 +620,37 @@ Ir* irgen_pop(void) {
 }
 
 Ir* irgen_push_none(void) {
-  Ir ir = { Ir_Kind_none, {0} };
+  Ir ir = { Ir_Kind_none, false, {0} };
   return irgen_push(ir);
 }
 
 Ir* irgen_push_macro_par(void) {
-  Ir ir = { Ir_Kind_macro_par, {0} };
+  Ir ir = { Ir_Kind_macro_par, false, {0} };
   return irgen_push(ir);
 }
 
 Ir* irgen_push_type(Ir* of) {
-  Ir ir = { Ir_Kind_type, {.unary = of} };
+  Ir ir = { Ir_Kind_type, false, {.unary = of} };
   return irgen_push(ir);
 }
 
 Ir* irgen_push_int(I64 i64) {
-  Ir ir = { Ir_Kind_int, .i64 = i64 };
+  Ir ir = { Ir_Kind_int, false, .i64 = i64 };
   return irgen_push(ir);
 }
 
 Ir* irgen_push_arg(Var* var) {
-  Ir ir = { Ir_Kind_arg, .var = var};
+  Ir ir = { Ir_Kind_arg, false, .var = var};
   return irgen_push(ir);
 }
 
 Ir* irgen_push_str(Str* str) {
-  Ir ir = { Ir_Kind_str, .str = str };
+  Ir ir = { Ir_Kind_str, false, .str = str };
   return irgen_push(ir);
 }
 
 Ir* irgen_push_var(Var* var) {
-  Ir ir = { Ir_Kind_var, .var = var };
+  Ir ir = { Ir_Kind_var, false, .var = var };
   return irgen_push(ir);
 }
 
@@ -802,6 +796,10 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   var->blocks = irgen_blocks_perm(temp_fun.blocks);
   var->declared_ir = ir;
   var->kind = Var_Kind_declared;
+  for (I32 i = 0; i < temp_fun.vars->length; i++) {
+    Type** types = arena_push_zero(irgen.perm_arena, var->blocks->length * sizeof(Type*));
+    temp_fun.vars->base[i]->block_types = types;
+  }
   del(irgen.fun_stack);
 }
 
@@ -1099,7 +1097,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
       irgen_pop();
     }
     else {
-      result = irgen_push_unary(Ir_Kind_ptr, unary);
+      Var* var = irgen_var_new();
+           var->kind   = Var_Kind_none;
+           var->state  = Var_State_resolved;
+           var->global = irgen.scope_stack.length == 1;
+           var->name   = irgen.str_nil;
+      result = irgen_push_var(var);
+      // irgen_var_declare(var, node->unary);
+      irgen_push_binary(Ir_Kind_store, result, unary);
     }
   } break;
   case Ast_Kind_type: {
@@ -1277,7 +1282,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 
   irgen.irid_nil = 0;
   irgen.str_nil  = str_from_cstr("");
-  Ir ir_nil = {0, {0}};
+  Ir ir_nil = {0, false, {0}};
   add(irgen.irs, ir_nil);
 
   irgen.builtins = hash_map_init(irgen.perm_arena, 3);

@@ -280,6 +280,8 @@ void llvm_ir(Ir* ir) {
   LLVMValueRef llvm_two = 0;
   LLVMValueRef llvm_unary = 0;
 
+  Type* type = type_of_ir(ir);
+
   if (ir->kind & Ir_Flag_binary) {
     llvm_one = llvm_of_ir(ir->binary.one);
     llvm_two = llvm_of_ir(ir->binary.two);
@@ -335,7 +337,6 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_int: {
-    Type* type = type_of_ir(ir);
     LLVMTypeRef llvm_type = llvm_of_type(type);
     result = LLVMConstInt(llvm_type, ir->i64, 0);
   } break;
@@ -343,7 +344,6 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
   {
-    Type* type = type_of_ir(ir);
     Type_Pair pair = type_of_ir_binary(ir);
     if (pair.one->bits_size < pair.two->bits_size) {
       llvm_one = llvm_conversion(llvm_one, pair.one, pair.two);
@@ -406,7 +406,6 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
     else if (fun_type->kind == Type_Kind_none) {
-      Type* type = type_of_ir(ir);
       if (fun_type->size_defined) { // NOTE: bits function
         result = llvm_default_of_type(type);
       }
@@ -461,7 +460,6 @@ void llvm_ir(Ir* ir) {
     }
     else if (of_type->kind == Type_Kind_record) {
       // FIX:
-      Type* type = type_of_ir(ir);
       result = llvm_default_of_type(type);
     }
   } break;
@@ -474,7 +472,6 @@ void llvm_ir(Ir* ir) {
     result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, at, "");
   } break;
   case Ir_Kind_load: {
-    Type* type = type_of_ir(ir);
     if (type_is_const(type)) {
       result = llvm_default_of_type(type);
     }
@@ -518,13 +515,12 @@ void llvm_ir(Ir* ir) {
     LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
   } break;
   case Ir_Kind_int_extend: {
-    Type* type = type_of_ir(ir);
     LLVMValueRef llvm_val = llvm_of_ir(ir->int_extend.value);
     LLVMTypeRef llvm_to = llvm_of_type(type);
     result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
   } break;
   case Ir_Kind_record_cast: {
-    Type* type_to = type_of_ir(ir);
+    Type* type_to = type;
     assert(type_to->kind == Type_Kind_record);
 
     LLVMTypeRef llvm_type = llvm_of_type(type_to);
@@ -549,7 +545,7 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_array_cast: {
-    Type* type_to = type_of_ir(ir);
+    Type* type_to = type;
     assert(type_to->kind == Type_Kind_array);
 
     LLVMTypeRef llvm_type = llvm_of_type(type_to);
@@ -603,7 +599,9 @@ void llvm_ir(Ir* ir) {
     }
     result = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
   } break;
-  case Ir_Kind_ptr: assert(0);
+  case Ir_Kind_ptr: {
+    assert(0);
+  } break;
 
   case Ir_Kind_declare: break;
   case Ir_Kind_none:    break;
@@ -611,7 +609,6 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_str: case Ir_Kind_span: case Ir_Kind_array:
   case Ir_Kind_join: case Ir_Kind_meet: case Ir_Kind_range:
   {
-    Type* type = type_of_ir(ir);
     result = llvm_default_of_type(type);
   } break;
   case Ir_Kind_bits:   break;
@@ -695,8 +692,8 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
     if (fun->kind == Fun_Kind_none) {
-      LLVMTypeRef llvm_fun_type = llvm_of_type(fun->type);
-      LLVMValueRef llvm_fun = LLVMAddFunction(llvm_gen.module, cstr_from_str(fun->name), llvm_fun_type);
+      LLVMTypeRef  llvm_fun_type = llvm_of_type(fun->type);
+      LLVMValueRef llvm_fun      = LLVMAddFunction(llvm_gen.module, cstr_from_str(fun->name), llvm_fun_type);
       llvm_of_fun_put(fun, llvm_fun);
     }
   }
@@ -840,9 +837,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  // TODO: figure out the llvm generation for @I8 1 -- value pointer.
-  //       alloca for values that are pointed
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
   // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");
