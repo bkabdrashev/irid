@@ -482,22 +482,20 @@ void llvm_ir(Ir* ir) {
   } break;
   case Ir_Kind_store: {
     if (ir->binary.two->kind == Ir_Kind_record) {
-      Type* type_ptr = type_of_ir(ir->binary.one);
-      Type* record_type = type_ptr->pointer->declared;
-      Rec* rec_one = ir->binary.two->rec;
-      Record* record_two = record_type->record;
-      for (I32 pos = 0; pos < rec_one->length; pos++) {
-        Str* name = rec_one->names[pos];
+      Type*       type_ptr    = type_of_ir(ir->binary.one);
+      Type*       record_type = type_ptr->pointer->declared;
+      LLVMTypeRef llvm_type   = llvm_of_type(record_type);
+      Rec*        rec_one     = ir->binary.two->rec;
+      Record*     record_two  = record_type->record;
+      for (I32 i = 0; i < rec_one->length; i++) {
+        Str* name = rec_one->names[i];
+        LLVMValueRef llvm_assigned = llvm_of_ir(rec_one->irs[i]);
+        I32 position = i;
         if (name) {
-          I32 position = hash_map_get_i32(&record_two->position_from_name, name);
-          LLVMValueRef llvm_assigned = llvm_of_ir(rec_one->irs[pos]);
-          LLVMTypeRef llvm_type = llvm_of_type(record_type);
-          LLVMValueRef llvm_gep = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, llvm_one, position, "");
-          LLVMBuildStore(llvm_gen.builder, llvm_assigned, llvm_gep);
+          position = hash_map_get_i32(&record_two->position_from_name, name);
         }
-        else {
-          assert(0);
-        }
+        LLVMValueRef llvm_gep = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, llvm_one, position, "");
+        LLVMBuildStore(llvm_gen.builder, llvm_assigned, llvm_gep);
       }
     }
     else {

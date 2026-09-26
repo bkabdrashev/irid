@@ -1326,7 +1326,12 @@ Type* type_pointer_to(Type* type) {
 Type* type_pointer_var(Var* var) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
            pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
-  hash_set_put(&pointer->stack_vars, var);
+  if (var->is_temp) {
+    pointer->declared = sem_declare_var(var);
+  }
+  else {
+    hash_set_put(&pointer->stack_vars, var);
+  }
   return type_pointer(pointer);
 }
 
