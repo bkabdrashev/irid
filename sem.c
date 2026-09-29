@@ -85,7 +85,7 @@ struct Type {
     U64       value;
     Ranges*   ranges;
     Pointer*  pointer;
-    Types*    array;
+    Types*    array; // TODO: Should this be similar to span or not?
     Span*     span;
     Record*   record;
     Function* function;
