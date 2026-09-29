@@ -61,11 +61,10 @@ struct Types {
   Type*  base[];
 };
 
-typedef struct Array Array;
-struct Array {
+typedef struct Span Span;
+struct Span {
   Type*  length;
   Type*  of_type;
-  Type** types;
 };
 
 typedef enum Type_Kind {
@@ -86,7 +85,8 @@ struct Type {
     U64       value;
     Ranges*   ranges;
     Pointer*  pointer;
-    Array*    array;
+    Types*    array;
+    Span*     span;
     Record*   record;
     Function* function;
     Str*      str;
@@ -160,14 +160,6 @@ Type* type_pointer_declared(Pointer* pointer);
 Type* sem_declare_var(Var* var);
 B8 ranges_is_single(Ranges* ranges);
 I64 ranges_min(Ranges* ranges);
-
-B8 array_is_static(Array* array) {
-  return array->length->bits_size == 0;
-}
-
-I32 array_static_length(Array* array) {
-  return ranges_min(array->length->ranges);
-}
 
 void string_builder_push_ranges(String_Builder* sb, Ranges* ranges) {
   if (ranges->length > 1) {
@@ -260,7 +252,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   } break;
   case Type_Kind_array: {
     string_builder_push_cstr(sb, "[");
-    string_builder_push_ranges(sb, type->array->length->ranges);
+    string_builder_push_i64(sb, type->array->length);
     string_builder_push_cstr(sb, "]");
     string_builder_push_cstr(sb, "(");
     string_builder_push_type(sb, block, type->array->of_type);
