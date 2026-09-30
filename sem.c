@@ -61,6 +61,13 @@ struct Types {
   Type*  base[];
 };
 
+typedef struct Array Array;
+struct Array {
+  I32    length;
+  Type*  of_type;
+  Type*  types[];
+};
+
 typedef struct Span Span;
 struct Span {
   Type*  length;
@@ -72,6 +79,7 @@ typedef enum Type_Kind {
   Type_Kind_int,
   Type_Kind_ptr,
   Type_Kind_array,
+  Type_Kind_span,
   Type_Kind_record,
   Type_Kind_fun,
 } Type_Kind;
@@ -85,7 +93,7 @@ struct Type {
     U64       value;
     Ranges*   ranges;
     Pointer*  pointer;
-    Types*    array; // TODO: Should this be similar to span or not?
+    Array*    array;
     Span*     span;
     Record*   record;
     Function* function;
@@ -257,18 +265,16 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "(");
     string_builder_push_type(sb, block, type->array->of_type);
     string_builder_push_cstr(sb, ")");
-    if (array_is_static(type->array)) {
-      I32 length = array_static_length(type->array);
-      string_builder_push_cstr(sb, "(");
-      for (I32 i = 0; i < length; i++) {
-        Type* item = type->array->types[i];
-        string_builder_push_type(sb, block, item);
-        if (i+1 < length) {
-          string_builder_push_cstr(sb, ", ");
-        }
+    I32 length = type->array->length;
+    string_builder_push_cstr(sb, "(");
+    for (I32 i = 0; i < length; i++) {
+      Type* item = type->array->types[i];
+      string_builder_push_type(sb, block, item);
+      if (i+1 < length) {
+        string_builder_push_cstr(sb, ", ");
       }
-      string_builder_push_cstr(sb, ")");
     }
+    string_builder_push_cstr(sb, ")");
   } break;
   }
 }
@@ -612,7 +618,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       result = true;
     } break;
     case Type_Kind_array: {
-      if (type_is_subtype_rec(block, one->array->length, two->array->length, visited)) {
+      if (one->array->length == two->array->length) {
         // NOTE: []I8 is not subtype of []I16
         result = type_is_same_rec(one->array->of_type, two->array->of_type, visited);
       }
@@ -1067,9 +1073,8 @@ Record* type_record_init(I32 length) {
 }
 
 Array* type_array_init(I32 length) {
-  Array* result = arena_push(sem.perm_arena, sizeof(Array));
-  result->types = arena_push(sem.perm_arena, length * sizeof(Type*));
-  result->length = type_int(length);
+  Array* result = arena_push(sem.perm_arena, sizeof(Array) + length * sizeof(Type*));
+  result->length = length;
   return result;
 }
 
@@ -1148,7 +1153,7 @@ Type* type_record(Record* record) {
 
 Type* type_array(Array* array) {
   Type* result;
-  if (array->length != sem.type_zero) {
+  if (array->length != 0) {
     I32 i = 0;
     for (;;) {
       i &= sem.array_set.cap - 1;
@@ -1160,19 +1165,17 @@ Type* type_array(Array* array) {
       else {
         if (key_array->length == array->length && key_array->of_type == array->of_type) {
           B8 is_equal = true;
-          if (array_is_static(key_array)) {
-            I32 length = array_static_length(key_array);
-            for (I32 j = 0; j < length; j++) {
-              Type* type = key_array->types[j];
-              if (type != array->types[j]) {
-                is_equal = false;
-              }
+          I32 length = key_array->length;
+          for (I32 j = 0; j < length; j++) {
+            Type* type = key_array->types[j];
+            if (type != array->types[j]) {
+              is_equal = false;
             }
-            if (is_equal) {
-              arena_release_mark(sem.perm_arena, array);
-              array = key_array;
-              break;
-            }
+          }
+          if (is_equal) {
+            arena_release_mark(sem.perm_arena, array);
+            array = key_array;
+            break;
           }
         }
       }
@@ -1182,15 +1185,9 @@ Type* type_array(Array* array) {
     Type* type = &new(sem.types);
     type->kind = Type_Kind_array;
     type->size_defined = false;
-    if (array_is_static(array)) {
-      I32 length = array_static_length(array);
-      type->bits_size  = array->of_type->bits_size  * length;
-      type->bits_align = array->of_type->bits_align * length;
-    }
-    else {
-      type->bits_size  = 128;
-      type->bits_align = 64;
-    }
+    I32 length = array->length;
+    type->bits_size  = array->of_type->bits_size  * length;
+    type->bits_align = array->of_type->bits_align * length;
     type->array = array;
     result = type_in_set(type);
   }
@@ -1917,32 +1914,20 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       }
     } break;
     case Type_Kind_array: {
-      // const array -> array
-      // array -> array
-      // const array -> const array
       Array* new_array;
-      if (array_is_static(to->array)) {
-        I32 length = array_static_length(to->array);
-        new_array = type_array_init(length);
-        for (I32 i = 0; i < length; i++) {
-          Type* from_type = from->array->types[i];
-          Type* to_type = to->array->types[i];
-          if (!type_is_same(from_type, to_type)) {
-            new_array->types[i] = from_type;
-          }
-          else {
-            new_array->types[i] = type_auto_cast(block, 0, from_type, to_type);
-          }
+      I32 length = to->array->length;
+      new_array = type_array_init(length);
+      for (I32 i = 0; i < length; i++) {
+        Type* from_type = from->array->types[i];
+        Type* to_type = to->array->types[i];
+        if (!type_is_same(from_type, to_type)) {
+          new_array->types[i] = from_type;
         }
-        new_array->of_type = type_auto_cast(block, 0, from->array->of_type, to->array->of_type);
+        else {
+          new_array->types[i] = type_auto_cast(block, 0, from_type, to_type);
+        }
       }
-      else {
-        new_array = arena_push(sem.perm_arena, sizeof(Array));
-        new_array->length = type_auto_cast(block, 0, from->array->length, to->array->length);
-        new_array->types = 0;
-        new_array->of_type = to->array->of_type;
-      }
-
+      new_array->of_type = type_auto_cast(block, 0, from->array->of_type, to->array->of_type);
       result = type_array(new_array);
       if (store) {
         store->binary.two = sem_push_array_cast(block, store->binary.two, result);
@@ -1985,11 +1970,9 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
       }
       else if (type->kind == Type_Kind_array) {
         Array* array = type->array;
-        if (array_is_static(array)) {
-          I32 length = array_static_length(array);
-          for (I32 i = 0; i < length; i++) {
-            type_of_var_put(block, 0, var->vars[i+1], type->array->types[i]);
-          }
+        I32 length = array->length;
+        for (I32 i = 0; i < length; i++) {
+          type_of_var_put(block, 0, var->vars[i+1], array->types[i]);
         }
       }
       var->block_types[block->id] = type;
@@ -2038,58 +2021,48 @@ void sem_record_declare_fields(Var* var, Type* type) {
   }
   else if (type->kind == Type_Kind_array) {
     Array* array = type->array;
-    if (array_is_static(array)) {
-      I32 length = array_static_length(array);
-      var->vars = arena_push(sem.perm_arena, (1+length) * sizeof(Var*));
-      Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
-      var_len->offset = 0;
-      var_len->declared = array->length;
-      var_len->kind  = Var_Kind_constant;
-      var_len->state = Var_State_resolved;
-      var->vars[0] = var_len;
-      var->vars[0]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-
-      for (I32 i = 0; i < length; i++) {
-        I32 idx = i + 1;
-        Type* type_item = array->types[i];
-        Var* var_item = arena_push_zero(sem.perm_arena, sizeof(Var));
-        var_item->state  = Var_State_resolved;
-        var_item->offset = idx;
-        var_item->declared = type_item;
-        if (type_item->bits_size == 0) {
-          var_item->kind = Var_Kind_constant;
-        }
-        else {
-          var_item->kind = Var_Kind_declared;
-        }
-
-        var->vars[idx] = var_item;
-        var_item->parent = var;
-        sem_record_declare_fields(var->vars[i], type_item);
+    I32 length = array->length;
+    var->vars = arena_push(sem.perm_arena, length * sizeof(Var*));
+    for (I32 i = 0; i < length; i++) {
+      Type* type_item = array->types[i];
+      Var* var_item = arena_push_zero(sem.perm_arena, sizeof(Var));
+      var_item->state  = Var_State_resolved;
+      var_item->offset = i;
+      var_item->declared = type_item;
+      if (type_item->bits_size == 0) {
+        var_item->kind = Var_Kind_constant;
       }
-      for (I32 i = 0; i < length; i++) {
-        var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+      else {
+        var_item->kind = Var_Kind_declared;
       }
-    }
-    else {
-      var->vars = arena_push(sem.perm_arena, 2 * sizeof(Var*));
 
-      Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
-      var_len->offset = 0;
-      var_len->declared = array->length;
-      var_len->kind  = Var_Kind_declared;
-      var_len->state = Var_State_resolved;
-      var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-      var->vars[0] = var_len;
-
-      Var* var_ptr = arena_push_zero(sem.perm_arena, sizeof(Var));
-      var_ptr->offset = 1;
-      var_ptr->declared = type_pointer_to(array->of_type);
-      var_ptr->kind  = Var_Kind_declared;
-      var_ptr->state = Var_State_resolved;
-      var_ptr->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-      var->vars[1] = var_ptr;
+      var->vars[i] = var_item;
+      var_item->parent = var;
+      sem_record_declare_fields(var->vars[i], type_item);
     }
+    for (I32 i = 0; i < length; i++) {
+      var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    }
+  }
+  else if (type->kind == Type_Kind_span) {
+    Span* span = type->span;
+    var->vars = arena_push(sem.perm_arena, 2 * sizeof(Var*));
+
+    Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
+    var_len->offset = 0;
+    var_len->declared = span->length;
+    var_len->kind  = Var_Kind_declared;
+    var_len->state = Var_State_resolved;
+    var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    var->vars[0] = var_len;
+
+    Var* var_ptr = arena_push_zero(sem.perm_arena, sizeof(Var));
+    var_ptr->offset = 1;
+    var_ptr->declared = type_pointer_to(span->of_type);
+    var_ptr->kind  = Var_Kind_declared;
+    var_ptr->state = Var_State_resolved;
+    var_ptr->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    var->vars[1] = var_ptr;
   }
   return;
 }
@@ -2296,11 +2269,7 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_meet(type_one, type_two);
   } break;
   case Ir_Kind_span: {
-    Array* array = arena_push(sem.perm_arena, sizeof(Array));
-    array->of_type = type_of_ir(ir->unary);
-    array->length = sem.type_len;
-    array->types = 0;
-    result = type_array(array);
+    assert(0);
   } break;
   case Ir_Kind_array: {
     Type* one_type = type_of_ir(ir->binary.one);
@@ -2316,11 +2285,8 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_array(array);
       }
       else {
-        Array* array = arena_push(sem.perm_arena, sizeof(Array));
-        array->of_type = type_of_ir(ir->unary);
-        array->length = sem.type_len;
-        array->types = 0;
-        result = type_array(array);
+        // Span
+        assert(0);
       }
     }
     else {
@@ -2540,7 +2506,7 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_int(arg_type->record->length);
       }
       else if (arg_type->kind == Type_Kind_array) {
-        result = arg_type->array->length;
+        result = type_int(arg_type->array->length);
       }
       else {
         assert(0);
@@ -2549,38 +2515,30 @@ void sem_ir(Block* block, Ir* ir) {
     else if (fun_type == sem.fun_foreign_c) {
       if (arg_type->kind == Type_Kind_array) {
         Array* array = arg_type->array;
-        if (array_is_static(array)) {
-          I32 length = array_static_length(array);
-          if (array->of_type == sem.bytes_range) {
-            C8* chars = arena_push(sem.perm_arena, length * sizeof(C8));
-            for (I32 i = 0; i < length; i++) {
-              if (!ranges_is_single(array->types[i]->ranges)) {
-                assert(0);
-              }
-              I64 val = ranges_min(array->types[i]->ranges);
-              if (0 < val && val < I8_MAX) {
-                chars[i] = (I8)val;
-              }
-              else {
-                assert(0);
-              }
+        I32 length = array->length;
+        if (array->of_type == sem.bytes_range) {
+          C8* chars = arena_push(sem.perm_arena, length * sizeof(C8));
+          for (I32 i = 0; i < length; i++) {
+            if (!ranges_is_single(array->types[i]->ranges)) {
+              assert(0);
             }
-            Str* str = str_from_range(chars, chars+length);
-            Type* type = &new(sem.types);
-            type->kind = Type_Kind_none;
-            type->str = str;
-            result = type_in_set(type);
+            I64 val = ranges_min(array->types[i]->ranges);
+            if (0 < val && val < I8_MAX) {
+              chars[i] = (I8)val;
+            }
+            else {
+              assert(0);
+            }
           }
-          else {
-            assert(0);
-          }
+          Str* str = str_from_range(chars, chars+length);
+          Type* type = &new(sem.types);
+          type->kind = Type_Kind_none;
+          type->str = str;
+          result = type_in_set(type);
         }
         else {
           assert(0);
         }
-      }
-      else if (arg_type->kind == Type_Kind_array) {
-        result = arg_type->array->length;
       }
       else {
         assert(0);
