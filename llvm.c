@@ -512,8 +512,8 @@ void llvm_ir(Ir* ir) {
     assert(type_to->kind == Type_Kind_record);
 
     LLVMTypeRef llvm_type = llvm_of_type(type_to);
-    LLVMValueRef llvm_val = llvm_of_ir(ir->record_cast);
-    Type* type_from = type_of_ir(ir->record_cast);
+    LLVMValueRef llvm_val = llvm_of_ir(ir->cast_value);
+    Type* type_from = type_of_ir(ir->cast_value);
     assert(type_from->kind == Type_Kind_record);
 
     result = LLVMGetUndef(llvm_type);
@@ -537,8 +537,8 @@ void llvm_ir(Ir* ir) {
     assert(type_to->kind == Type_Kind_array);
 
     LLVMTypeRef llvm_type = llvm_of_type(type_to);
-    LLVMValueRef llvm_val = llvm_of_ir(ir->array_cast);
-    Type* type_from = type_of_ir(ir->array_cast);
+    LLVMValueRef llvm_val = llvm_of_ir(ir->cast_value);
+    Type* type_from = type_of_ir(ir->cast_value);
     assert(type_from->kind == Type_Kind_array);
 
     I32 length = type_to->array->length;

@@ -129,6 +129,7 @@ struct Sem {
   Hash_Set  pointer_set;
   Hash_Set  ranges_set;
   Hash_Set  array_set;
+  Hash_Set  span_set;
   Hash_Set  function_set;
 
   Type* type_none;
@@ -168,6 +169,7 @@ Type* type_pointer_declared(Pointer* pointer);
 Type* sem_declare_var(Var* var);
 B8 ranges_is_single(Ranges* ranges);
 I64 ranges_min(Ranges* ranges);
+Type* type_int(I64 i64);
 
 void string_builder_push_ranges(String_Builder* sb, Ranges* ranges) {
   if (ranges->length > 1) {
@@ -256,6 +258,14 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
         string_builder_push_cstr(sb, ", ");
       }
     }
+    string_builder_push_cstr(sb, ")");
+  } break;
+  case Type_Kind_span: {
+    string_builder_push_cstr(sb, "[");
+    string_builder_push_type(sb, block, type->span->length);
+    string_builder_push_cstr(sb, "]");
+    string_builder_push_cstr(sb, "(");
+    string_builder_push_type(sb, block, type->span->of_type);
     string_builder_push_cstr(sb, ")");
   } break;
   case Type_Kind_array: {
@@ -550,6 +560,14 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
       result = false;
     }
   } break;
+  case Type_Kind_span: {
+    if (type_is_same_rec(one->span->length, two->span->length, visited)) {
+      result = type_is_same_rec(one->span->of_type, two->span->of_type, visited);
+    }
+    else {
+      result = false;
+    }
+  } break;
   }
   return result;
 }
@@ -562,7 +580,7 @@ B8 type_is_same(Type* one, Type* two) {
   return result;
 }
 
-B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visited) {
+B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
   //    one is subtype of two
   // (1..3) is subtype of 1 -- false
   // (1..2) is subtype of (1..3) -- true
@@ -593,7 +611,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       Type* one_declared = type_pointer_declared(one->pointer);
       Type* two_declared = type_pointer_declared(two->pointer);
       if (one_declared && two_declared) {
-        if (!type_is_subtype_rec(block, one_declared, two_declared, visited)) {
+        if (!type_is_subtype_rec(one_declared, two_declared, visited)) {
           assert(0);
           result = false;
         }
@@ -610,7 +628,7 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
         else {
           field_two = type_record_get_by_position(two->record, i);
         }
-        if (!type_is_subtype_rec(block, field_one.type, field_two.type, visited)) {
+        if (!type_is_subtype_rec(field_one.type, field_two.type, visited)) {
           assert(0);
           result = false;
         }
@@ -618,9 +636,20 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       result = true;
     } break;
     case Type_Kind_array: {
+      // TODO: should [2]I8 be subtype of [4]I8?
       if (one->array->length == two->array->length) {
-        // NOTE: []I8 is not subtype of []I16
+        // NOTE: [2]I8 is not subtype of [2]I16
         result = type_is_same_rec(one->array->of_type, two->array->of_type, visited);
+      }
+      else {
+        result = false;
+      }
+      assert(result);
+    } break;
+    case Type_Kind_span: {
+      if (type_is_subtype_rec(one->span->length, two->span->length, visited)) {
+        // NOTE: []I8 is not subtype of []I16
+        result = type_is_same_rec(one->span->of_type, two->span->of_type, visited);
       }
       else {
         result = false;
@@ -632,6 +661,16 @@ B8 type_is_subtype_rec(Block* block, Type* one, Type* two, Subtype_Visited* visi
       result = false;
     } break;
     }
+  }
+  else if (one->kind == Type_Kind_array && two->kind == Type_Kind_span) {
+    Type* type_length_one = type_int(one->array->length);
+    if (type_is_subtype_rec(type_length_one, two->span->length, visited)) {
+      result = type_is_same_rec(one->array->of_type, two->span->of_type, visited);
+    }
+    else {
+      result = false;
+    }
+    assert(result);
   }
   else {
     assert(0);
@@ -697,6 +736,10 @@ B8 type_is_const(Type* type) {
   case Type_Kind_array: {
     result = type_is_const(type->array->of_type);
   } break;
+  case Type_Kind_span: {
+    // TODO: what is const?
+    result = type_is_const(type->array->of_type);
+  } break;
   case Type_Kind_ptr: {
     result = pointer_is_single_var(type->pointer);
   } break;
@@ -710,7 +753,7 @@ B8 type_is_const(Type* type) {
 B8 type_is_subtype(Block* block, Type* one, Type* two) {
   Subtype_Visited visited = {0};
   visited.base = arena_push(sem.temp_arena, sizeof(Pointer_Pair));
-  B8 result = type_is_subtype_rec(block, one, two, &visited);
+  B8 result = type_is_subtype_rec(one, two, &visited);
   arena_release_mark(sem.temp_arena, visited.base);
   return result;
 }
@@ -887,7 +930,7 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
 }
 
 Ir* sem_push_record_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_record_cast, .record_cast = value };
+  Ir new_ir = { Ir_Kind_record_cast, .cast_value = value };
   Ir* sem_ir = &new(irgen.irs);
   *sem_ir = new_ir;
   sem_push_ir(block, sem_ir);
@@ -896,7 +939,16 @@ Ir* sem_push_record_cast(Block* block, Ir* value, Type* type) {
 }
 
 Ir* sem_push_array_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_array_cast, .array_cast = value };
+  Ir new_ir = { Ir_Kind_array_cast, .cast_value = value };
+  Ir* sem_ir = &new(irgen.irs);
+  *sem_ir = new_ir;
+  sem_push_ir(block, sem_ir);
+  type_of_ir_put(sem_ir, type);
+  return sem_ir;
+}
+
+Ir* sem_push_span_from_array_cast(Block* block, Ir* value, Type* type) {
+  Ir new_ir = { Ir_Kind_span_from_array_cast, .cast_value = value };
   Ir* sem_ir = &new(irgen.irs);
   *sem_ir = new_ir;
   sem_push_ir(block, sem_ir);
@@ -1197,6 +1249,41 @@ Type* type_array(Array* array) {
   return result;
 }
 
+Type* type_span(Span* span) {
+  Type* result;
+  if (span->length != 0) {
+    I32 i = 0;
+    for (;;) {
+      i &= sem.span_set.cap - 1;
+      Span* key_span = sem.span_set.keys[i];
+      if (!key_span) {
+        sem.span_set.keys[i] = span;
+        break;
+      }
+      else {
+        if (key_span->length == span->length && key_span->of_type == span->of_type) {
+          arena_release_mark(sem.perm_arena, span);
+          span = key_span;
+          break;
+        }
+      }
+      i++;
+    }
+
+    Type* type = &new(sem.types);
+    type->kind = Type_Kind_span;
+    type->size_defined = false;
+    type->bits_size  = 64 + 64;
+    type->bits_align = 64;
+    type->span = span;
+    result = type_in_set(type);
+  }
+  else {
+    result = sem.type_none;
+  }
+  return result;
+}
+
 Type* type_ranges_meet(Ranges* one, Ranges* two);
 Type* type_pointer(Pointer* pointer);
 
@@ -1230,6 +1317,9 @@ Type* type_meet(Type* one, Type* two) {
       result = sem.type_none;
     } break;
     case Type_Kind_array: {
+      result = sem.type_none;
+    } break;
+    case Type_Kind_span: {
       result = sem.type_none;
     } break;
     }
@@ -1865,13 +1955,7 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
     return from;
   }
   Type* result = sem.type_none;
-  if (to->kind == Type_Kind_ptr) {
-    if (from->kind == Type_Kind_array) {
-      Type* declared = from->array->of_type;
-      result = type_pointer_to(declared);
-    }
-  }
-  else if (from->kind == to->kind) {
+  if (from->kind == to->kind) {
     switch (from->kind) {
     case Type_Kind_int: {
       if (store) {
@@ -1934,6 +2018,29 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       }
     } break;
     default: assert(0);
+    }
+  }
+  else if (to->kind == Type_Kind_ptr) {
+    if (from->kind == Type_Kind_array) {
+      Type* declared = from->array->of_type;
+      result = type_pointer_to(declared);
+    }
+    else {
+      assert(0);
+    }
+  }
+  else if (to->kind == Type_Kind_span) {
+    if (from->kind == Type_Kind_array) {
+      Span* span = arena_push(sem.perm_arena, sizeof(Span));
+      span->length = type_int(from->array->length);
+      span->of_type = from->array->of_type;
+      result = type_span(span);
+      if (store) {
+        store->binary.two = sem_push_span_from_array_cast(block, store->binary.two, result);
+      }
+    }
+    else {
+      assert(0);
     }
   }
   else {
@@ -2269,7 +2376,11 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_meet(type_one, type_two);
   } break;
   case Ir_Kind_span: {
-    assert(0);
+    Type* unary = type_of_ir(ir->unary);
+    Span* span = arena_push(sem.perm_arena, sizeof(Span));
+    span->length = sem.type_len;
+    span->of_type = unary;
+    result = type_span(span);
   } break;
   case Ir_Kind_array: {
     Type* one_type = type_of_ir(ir->binary.one);
@@ -2285,7 +2396,6 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_array(array);
       }
       else {
-        // Span
         assert(0);
       }
     }
@@ -2896,12 +3006,13 @@ void sem_funs(Arena* arena, Funs funs) {
   fa_init(sem.perm_arena, sem.foreign_funs, irgen.irs.length);
   fa_add(sem.foreign_funs, 0);
 
-  sem.type_set   = hash_set_init(arena, irgen.irs.length);
-  sem.record_set = hash_set_init(arena, irgen.irs.length);
-  sem.ranges_set = hash_set_init(arena, irgen.irs.length);
-  sem.pointer_set = hash_set_init(arena, irgen.irs.length);
+  sem.type_set     = hash_set_init(arena, irgen.irs.length);
+  sem.record_set   = hash_set_init(arena, irgen.irs.length);
+  sem.ranges_set   = hash_set_init(arena, irgen.irs.length);
+  sem.pointer_set  = hash_set_init(arena, irgen.irs.length);
   sem.function_set = hash_set_init(arena, irgen.irs.length);
-  sem.array_set = hash_set_init(arena, irgen.irs.length);
+  sem.array_set    = hash_set_init(arena, irgen.irs.length);
+  sem.span_set     = hash_set_init(arena, irgen.irs.length);
 
   sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;

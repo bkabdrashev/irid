@@ -51,6 +51,7 @@ typedef enum Ir_Kind {
   Ir_Kind_int_extend  = 140,
   Ir_Kind_record_cast = 141,
   Ir_Kind_array_cast  = 142,
+  Ir_Kind_span_from_array_cast = 143,
 
   Ir_Kind_foreign = 150,
   Ir_Kind_bits    = 151,
@@ -133,8 +134,7 @@ struct Ir {
     Name_Offset     name_offset;
     Declare         declare;
     Int_Extend      int_extend;
-    Ir*             record_cast;
-    Ir*             array_cast;
+    Ir*             cast_value;
   };
 };
 
@@ -435,11 +435,15 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   break;
   case Ir_Kind_record_cast:
     string_builder_push_cstr(sb, "record cast ");
-    string_builder_push_irid(sb, ir->record_cast);
+    string_builder_push_irid(sb, ir->cast_value);
   break;
   case Ir_Kind_array_cast:
     string_builder_push_cstr(sb, "array cast ");
-    string_builder_push_irid(sb, ir->array_cast);
+    string_builder_push_irid(sb, ir->cast_value);
+  break;
+  case Ir_Kind_span_from_array_cast:
+    string_builder_push_cstr(sb, "span_from_array cast ");
+    string_builder_push_irid(sb, ir->cast_value);
   break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");
