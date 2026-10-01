@@ -75,16 +75,15 @@ LLVMTypeRef llvm_of_type(Type* type) {
   } break;
   case Type_Kind_array: {
     LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
-    if (array_is_static(type->array)) {
-      I32 length = array_static_length(type->array);
-      result = LLVMArrayType2(llvm_field_type, length);
-    }
-    else {
-      LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMTypeRef));
-      field_types[0] = LLVMIntTypeInContext(llvm_gen.context, 64);
-      field_types[1] = LLVMPointerType(llvm_field_type, 0);
-      result = LLVMStructTypeInContext(llvm_gen.context, field_types, 2, false);
-    }
+    I32 length = type->array->length;
+    result = LLVMArrayType2(llvm_field_type, length);
+  } break;
+  case Type_Kind_span: {
+    LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
+    LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMTypeRef));
+    field_types[0] = LLVMIntTypeInContext(llvm_gen.context, 64);
+    field_types[1] = LLVMPointerType(llvm_field_type, 0);
+    result = LLVMStructTypeInContext(llvm_gen.context, field_types, 2, false);
   } break;
   case Type_Kind_fun: {
     LLVMTypeRef* arg_types;
@@ -232,36 +231,34 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     result = LLVMConstStructInContext(llvm_gen.context, values, type->record->length, false);
   } break;
   case Type_Kind_array: {
-    if (array_is_static(type->array)) {
-      I32 length = array_static_length(type->array);
-      LLVMValueRef* values = arena_push(llvm_gen.perm_arena, length * sizeof(LLVMValueRef));
-      for (I32 i = 0; i < length; i++) {
-        Type* field_type = type->array->types[i];
-        if (field_type->bits_size == 0) {
-          LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
-          values[i] = LLVMConstInt(llvm_zero_type, 0, false);
-        }
-        else {
-          values[i] = llvm_default_of_type(field_type);
-        }
+    I32 length = type->array->length;
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, length * sizeof(LLVMValueRef));
+    for (I32 i = 0; i < length; i++) {
+      Type* field_type = type->array->types[i];
+      if (field_type->bits_size == 0) {
+        LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
+        values[i] = LLVMConstInt(llvm_zero_type, 0, false);
       }
-      LLVMTypeRef llvm_item_type = llvm_of_type(type->array->of_type);
-      result = LLVMConstArray2(llvm_item_type, values, length);
+      else {
+        values[i] = llvm_default_of_type(field_type);
+      }
     }
-    else {
-      LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMValueRef));
-      LLVMTypeRef llvm_type = llvm_of_type(sem.type_len);
-      values[0] = LLVMConstInt(llvm_type, 0, false);
+    LLVMTypeRef llvm_item_type = llvm_of_type(type->array->of_type);
+    result = LLVMConstArray2(llvm_item_type, values, length);
+  } break;
+  case Type_Kind_span: {
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMValueRef));
+    LLVMTypeRef llvm_type = llvm_of_type(sem.type_len);
+    values[0] = LLVMConstInt(llvm_type, 0, false);
 
-      LLVMValueRef llvm_of_default = llvm_default_of_type(type->array->of_type);
-      LLVMTypeRef llvm_var_type = llvm_of_type(type->array->of_type);
-      LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
-      LLVMSetInitializer(llvm_global, llvm_of_default);
-      LLVMSetGlobalConstant(llvm_global, false);
-      values[1]  = llvm_global;
+    LLVMValueRef llvm_of_default = llvm_default_of_type(type->array->of_type);
+    LLVMTypeRef llvm_var_type = llvm_of_type(type->array->of_type);
+    LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
+    LLVMSetInitializer(llvm_global, llvm_of_default);
+    LLVMSetGlobalConstant(llvm_global, false);
+    values[1]  = llvm_global;
 
-      result = LLVMConstStructInContext(llvm_gen.context, values, 2, false);
-    }
+    result = LLVMConstStructInContext(llvm_gen.context, values, 2, false);
   } break;
   }
   return result;
@@ -442,22 +439,13 @@ void llvm_ir(Ir* ir) {
         result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
       }
       else if (rec_type->kind == Type_Kind_array) {
+        assert(0);
         assert(ir->name_offset.at == irgen.str_len);
+      }
+      else if (rec_type->kind == Type_Kind_span) {
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
         LLVMTypeRef llvm_type = llvm_of_type(rec_type);
-        if (array_is_static(rec_type->array)) {
-          Type* type_length = type_pointer_to(rec_type->array->length);
-
-          LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
-          LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
-          LLVMValueRef minus_one = LLVMConstInt(llvm_int_type, -8, 0);
-          LLVMValueRef indices[2] = { zero, minus_one };
-          result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_type, ptr, indices, 2, "");
-          result = llvm_default_of_type(type_length);
-        }
-        else {
-          result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
-        }
+        result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
       }
     }
     else if (of_type->kind == Type_Kind_record) {
@@ -553,43 +541,17 @@ void llvm_ir(Ir* ir) {
     Type* type_from = type_of_ir(ir->array_cast);
     assert(type_from->kind == Type_Kind_array);
 
-    // array -> array
+    I32 length = type_to->array->length;
+    result = LLVMGetUndef(llvm_type);
+    for (I32 i = 0; i < length; i++) {
+      Type* type_from_item = type_from->array->types[i];
+      Type* type_to_item = type_to->array->types[i];
+      LLVMValueRef llvm_item = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, i, "");
 
-    if (array_is_static(type_to->array)) {
-      // const array -> const array
-      // [2]I8(I8 10; I8 20) -> [2]I16(I16 10; I16 20)
-      I32 length = array_static_length(type_to->array);
-      result = LLVMGetUndef(llvm_type);
-      for (I32 i = 0; i < length; i++) {
-        Type* type_from_item = type_from->array->types[i];
-        Type* type_to_item = type_to->array->types[i];
-        LLVMValueRef llvm_item = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, i, "");
-
-        if (type_is_same(type_from_item, type_to_item)) {
-          llvm_item = llvm_conversion(llvm_item, type_from_item, type_to_item);
-        }
-        result = LLVMBuildInsertValue(llvm_gen.builder, result, llvm_item, i, "");
+      if (type_is_same(type_from_item, type_to_item)) {
+        llvm_item = llvm_conversion(llvm_item, type_from_item, type_to_item);
       }
-    }
-    else if (array_is_static(type_from->array)) {
-      // const array -> array
-      // [2]I8(I8 10; I8 20) -> []I8(len: I64 2; ptr: @I8)
-      I32 length = array_static_length(type_from->array);
-      LLVMValueRef llvm_len = LLVMConstInt(llvm_type, length, false);
-      LLVMValueRef llvm_ptr;
-      {
-        LLVMTypeRef  llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
-        LLVMValueRef zero          = LLVMConstInt(llvm_int_type, 0, 0);
-        LLVMValueRef indices[2]    = { zero, zero };
-        LLVMTypeRef  llvm_from     = llvm_of_type(type_from);
-                     llvm_ptr      = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_from, llvm_val, indices, 2, "");
-      }
-      LLVMValueRef undef    = LLVMGetUndef(llvm_type);
-      LLVMValueRef with_len = LLVMBuildInsertValue(llvm_gen.builder, undef, llvm_len, 0, "");
-                   result   = LLVMBuildInsertValue(llvm_gen.builder, with_len, llvm_ptr, 1, "");
-    }
-    else {
-      assert(0);
+      result = LLVMBuildInsertValue(llvm_gen.builder, result, llvm_item, i, "");
     }
   } break;
   case Ir_Kind_record: {
