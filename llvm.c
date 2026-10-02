@@ -799,9 +799,10 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");
   // test("a:12; b:I32; c: @12 = @12; b = c@", "");
   // test("a: Str = \"Hi\"; a.len + 4", "");
   // test("a:(x:I32; y:I16); a = (1; 2); a.x + a.x; a.y+a.y; a", "");

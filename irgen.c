@@ -108,7 +108,7 @@ typedef enum Var_Kind {
 struct Var {
   Var_Kind  kind;
   Var_State state;
-  I32   offset;
+  I32   index;
   B8    global;
   B8    is_temp;
   Var*  parent;
@@ -343,7 +343,7 @@ void string_builder_push_var(String_Builder* sb, Var* var) {
     string_builder_push_str(sb, var->name);
   }
   else {
-    string_builder_push_i64(sb, var->offset);
+    string_builder_push_i64(sb, var->index);
   }
 }
 
@@ -1020,12 +1020,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
     }
   } break;
-  case Ast_Kind_subscript: {
-    Ir* lhs = irgen_ast_node(node->binary.lhs);
-    Ir* rhs = irgen_ast_node(node->binary.rhs);
-    Ir* subscript = irgen_push_binary(Ir_Kind_subscript, lhs, rhs);
-    result = irgen_push_unary(Ir_Kind_load, subscript);
-  } break;
   case Ast_Kind_assign: {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_assign(node->binary.lhs, rhs);
@@ -1114,6 +1108,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
       result = irgen_push_var(var);
       irgen_push_binary(Ir_Kind_store, result, unary);
     }
+  } break;
+  case Ast_Kind_subscript: {
+    Ir* lhs = irgen_ast_node(node->binary.lhs);
+    Ir* rhs = irgen_ast_node(node->binary.rhs);
+    Ir* subscript = irgen_push_binary(Ir_Kind_subscript, lhs, rhs);
+    result = irgen_push_unary(Ir_Kind_load, subscript);
   } break;
   case Ast_Kind_type: {
     Ir* unary = irgen_ast_node(node->unary);
@@ -1396,7 +1396,7 @@ void irgen_test(void) {
   // test("a: I32 = 0; if 1 do { a = 1 }; a+a", "");
   // test("1", "");
   // test("a:[2]I32; a[0] = 1; a[0] + 2", "");
-  // test("if 1 do 2 el 3", "");
+  // test("if 1 do 2 else 3", "");
   // test("foo : () -> ()", "");
   // test("foo : (a:I32) -> a+2; foo(1)", "");
   // test("putchar: #c putchar (char:I32) -> I32; a:(x:66; y:I32); putchar(a.x)", "");
@@ -1405,11 +1405,11 @@ void irgen_test(void) {
   // test("a:(x:I32; y:I32); a.x", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A)", "");
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
-  // test("a:I32; a=0; wh a != 10 do {a = a+ 1}", "");
+  // test("a:I32; a=0; while a != 10 do {a = a+ 1}", "");
   // test("foo:(a:I32; b:I32) -> a+b; foo(1)", "");
   // test("foo:(a:I32) -> { re; 1+2 }; foo(1)", "");
-  // test("if 1\\2 do 3 el 4;", "");
-  // test("foo:(a:I32) -> { if 1 re 2 el re 3 }; foo(2)", "");
+  // test("if 1\\2 do 3 else 4;", "");
+  // test("foo:(a:I32) -> { if 1 return 2 else return 3 }; foo(2)", "");
   // test("a : (x:1)", "");
   // test("foo:() -> bar(); bar:()->foo()", "");
   // test("foo:#c foo () -> I32; foo()", "");

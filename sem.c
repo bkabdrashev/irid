@@ -166,7 +166,7 @@ Type* type_of_ir(Ir* ir);
 Type* type_join(Block* block, Type* one, Type* two);
 Type* type_meet(Type* one, Type* two);
 Type* type_pointer_declared(Pointer* pointer);
-Type* sem_declare_var(Var* var);
+Type* sem_var_declare(Var* var);
 B8 ranges_is_single(Ranges* ranges);
 I64 ranges_min(Ranges* ranges);
 Type* type_int(I64 i64);
@@ -1076,13 +1076,21 @@ Field type_record_get_by_name(Record* record, Str* name) {
 }
 
 Var* sem_get_var_by_name(Var* var, Str* name) {
-  sem_declare_var(var);
+  sem_var_declare(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
     I32 position = hash_map_get_i32(&record->position_from_name, name);
     return var->vars[position];
   }
   else if (var->declared->kind == Type_Kind_array) {
+    if (name == irgen.str_len) {
+      return var->vars[-1];
+    }
+    else {
+      assert(0);
+    }
+  }
+  else if (var->declared->kind == Type_Kind_span) {
     if (name == irgen.str_len) {
       return var->vars[0];
     }
@@ -1096,7 +1104,7 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
 }
 
 I32 sem_get_offset_by_name(Var* var, Str* name) {
-  sem_declare_var(var);
+  sem_var_declare(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
     I32 position = hash_map_get_i32(&record->position_from_name, name);
@@ -1110,10 +1118,19 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
       assert(0);
     }
   }
+  else if (var->declared->kind == Type_Kind_span) {
+    if (name == irgen.str_len) {
+      return 0;
+    }
+    else {
+      assert(0);
+    }
+  }
   else {
     assert(0);
   }
 }
+
 Record* type_record_init(I32 length) {
   Record* result = arena_push(sem.perm_arena, sizeof(Record));
   result->length  = length;
@@ -1406,7 +1423,7 @@ Type* type_pointer_var(Var* var) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
            pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
   if (var->is_temp) {
-    pointer->declared = sem_declare_var(var);
+    pointer->declared = sem_var_declare(var);
   }
   else {
     hash_set_put(&pointer->stack_vars, var);
@@ -1426,11 +1443,11 @@ Type* type_pointer_declared(Pointer* pointer) {
     }
     else {
       Var* first_var = stack.list[0];
-      sem_declare_var(first_var);
+      sem_var_declare(first_var);
       Type* declared = first_var->declared;
       for (I32 i = 1; i < stack.len; i++) {
         Var* var = stack.list[i];
-        sem_declare_var(var);
+        sem_var_declare(var);
         declared = type_meet(declared, var->declared);
       }
       pointer->declared = declared;
@@ -2079,7 +2096,7 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
         Array* array = type->array;
         I32 length = array->length;
         for (I32 i = 0; i < length; i++) {
-          type_of_var_put(block, 0, var->vars[i+1], array->types[i]);
+          type_of_var_put(block, 0, var->vars[i], array->types[i]);
         }
       }
       var->block_types[block->id] = type;
@@ -2105,22 +2122,21 @@ void sem_record_declare_fields(Var* var, Type* type) {
       Type* type_field = type_of_field_at(type->record, i);
       type->record->types[i] = type_field;
       Var* var_field = arena_push_zero(sem.perm_arena, sizeof(Var));
-           var_field->offset   = i;
+           var_field->index   = i;
            var_field->name     = type->record->names[i];
            var_field->parent   = var;
            var_field->declared = type_field;
            var_field->state    = Var_State_resolved;
-           var_field->kind     = Var_Kind_declared;
-      var->vars[i] = var_field;
-
-      sem_record_declare_fields(var_field, type_field);
-
       if (type_field->bits_size == 0) {
         var_field->kind = Var_Kind_constant;
       }
       else {
         var_field->kind = Var_Kind_declared;
       }
+      var->vars[i] = var_field;
+
+      sem_record_declare_fields(var_field, type_field);
+
     }
     for (I32 i = 0; i < type->record->length; i++) {
       var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
@@ -2129,25 +2145,33 @@ void sem_record_declare_fields(Var* var, Type* type) {
   else if (type->kind == Type_Kind_array) {
     Array* array = type->array;
     I32 length = array->length;
-    var->vars = arena_push(sem.perm_arena, length * sizeof(Var*));
+    var->vars = arena_push(sem.perm_arena, (length+1) * sizeof(Var*));
+    var->vars += 1; // NOTE: at -1 we have legnth
+    Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
+         var_len->index    = -1;
+         var_len->declared = sem.type_len;
+         var_len->parent   = var;
+         var_len->state    = Var_State_resolved;
+         var_len->kind     = Var_Kind_constant;
+    var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    var->vars[-1] = var_len;
     for (I32 i = 0; i < length; i++) {
       Type* type_item = array->types[i];
       Var* var_item = arena_push_zero(sem.perm_arena, sizeof(Var));
-      var_item->state  = Var_State_resolved;
-      var_item->offset = i;
+      var_item->index    = i;
       var_item->declared = type_item;
+      var_item->parent   = var;
+      var_item->state    = Var_State_resolved;
       if (type_item->bits_size == 0) {
         var_item->kind = Var_Kind_constant;
       }
       else {
         var_item->kind = Var_Kind_declared;
       }
-
       var->vars[i] = var_item;
-      var_item->parent = var;
       sem_record_declare_fields(var->vars[i], type_item);
     }
-    for (I32 i = 0; i < length; i++) {
+    for (I32 i = -1; i < length; i++) {
       var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
     }
   }
@@ -2156,25 +2180,25 @@ void sem_record_declare_fields(Var* var, Type* type) {
     var->vars = arena_push(sem.perm_arena, 2 * sizeof(Var*));
 
     Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
-    var_len->offset = 0;
-    var_len->declared = span->length;
-    var_len->kind  = Var_Kind_declared;
-    var_len->state = Var_State_resolved;
+         var_len->index    = 0;
+         var_len->declared = span->length;
+         var_len->kind     = Var_Kind_declared;
+         var_len->state    = Var_State_resolved;
     var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
     var->vars[0] = var_len;
 
     Var* var_ptr = arena_push_zero(sem.perm_arena, sizeof(Var));
-    var_ptr->offset = 1;
-    var_ptr->declared = type_pointer_to(span->of_type);
-    var_ptr->kind  = Var_Kind_declared;
-    var_ptr->state = Var_State_resolved;
+         var_ptr->index    = 1;
+         var_ptr->declared = type_pointer_to(span->of_type);
+         var_ptr->kind     = Var_Kind_declared;
+         var_ptr->state    = Var_State_resolved;
     var_ptr->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
     var->vars[1] = var_ptr;
   }
   return;
 }
 
-Type* sem_declare_var(Var* var) {
+Type* sem_var_declare(Var* var) {
   if (var->state == Var_State_resolved) return var->declared;
   if (var->state == Var_State_resolving) {
     assert(0);
@@ -2236,7 +2260,7 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_array(str_array);
   } break;
   case Ir_Kind_declare: {
-    result = sem_declare_var(ir->declare.var);
+    result = sem_var_declare(ir->declare.var);
   } break;
   case Ir_Kind_arg: {
     result = type_pointer_var(ir->var);
@@ -2427,12 +2451,10 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else if (of_type->kind == Type_Kind_array) {
-      // foo: (s:[]I8) -> s
-      // a:[]I8
-      // foo(a)[0]
-      if (ir->binary.one->kind == Ir_Kind_load) {
-      }
       result = type_pointer_to(of_type->array->of_type);
+    }
+    else if (of_type->kind == Type_Kind_span) {
+      result = type_pointer_to(of_type->span->of_type);
     }
     else {
       assert(0);
@@ -2513,7 +2535,7 @@ void sem_ir(Block* block, Ir* ir) {
       Hash_Set stack_vars = pointer->stack_vars;
       if (stack_vars.len >= 1) {
         for (I32 i = 0; i < stack_vars.len; i++) {
-          sem_declare_var(stack_vars.list[i]);
+          sem_var_declare(stack_vars.list[i]);
         }
         result = type_of_var(block, stack_vars.list[0]);
         for (I32 i = 1; i < stack_vars.len; i++) {
@@ -2946,7 +2968,7 @@ Type* sem_fun(Fun* fun) {
   printf("fun: %s\n", fun->name->base);
 
   if (fun->kind != Fun_Kind_macro) {
-    sem_declare_var(fun->arg_var->var);
+    sem_var_declare(fun->arg_var->var);
   }
 
   for (I32 b = 0; b < fun->blocks->length; b++) {
@@ -3113,8 +3135,8 @@ void sem_test(void) {
   // test("a: I32 = 3; a+a", "");
   // test("B8: type 8'bits (0\\1); a: B8 = 0; a = 1; if a do {c: B8 = 0; a+c}; a+a", "");
   // test("foo:#c foo () -> 1", "");
-  // test("a:I32 = 0; wh 0\\1 do {a = a+1; a}; a", "");
-  // test("n:I32; i:I32 = 0; wh n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
+  // test("a:I32 = 0; while 0\\1 do {a = a+1; a}; a", "");
+  // test("n:I32; i:I32 = 0; while n > 0 do { n = n / 10; i = i + 1 }; i+n", "");
   // test("a:[2]I32; a[0] = 1; a[0] + a[1]", "");
   // test("a:12\\13 = 12; b:I32; b = a", "");
   // test("a:I32 = 70; c:@a\\@a; a + c@", "");
@@ -3132,8 +3154,8 @@ void sem_test(void) {
   // test("a: (x:0\\1; y:2\\3); a = (x:0; y:2); if 5 do { a = (x:1; y:3) }; if a.x == 1 do {a.x}", "");
   // test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; c @= 1; a+b", "");
   // test("a: 0\\1; b: 1\\2; c: @(0\\1\\2); a = 0; b = 2; c = @a; if 3 do { c = @b }; if c == @a do {c @= 1}; a+b", "");
-  // test("a: 1\\2; wh 2 do { a = 1 }; a+a", "");
-  // test("a: 1\\2\\3; a = 2; wh 2 do { if 3 do { a = 1 } }; a+a", "");
+  // test("a: 1\\2; while 2 do { a = 1 }; a+a", "");
+  // test("a: 1\\2\\3; a = 2; while 2 do { if 3 do { a = 1 } }; a+a", "");
   // test("a: 1\\2; b:@a; b@", "");
   // test("a: 1", "");
   // test("b: a; a: 1", "");
@@ -3145,20 +3167,20 @@ void sem_test(void) {
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
   // test("a:I32; b: B8; a = b; a", "");
-  // test("a:I32; a=0; wh a < 8 do {a = a + 1}; a", "");
-  // test("a:I32; a=0; wh a != 8 do {a = a + 2}; a", "");
-  // test("a:I32; a=0; wh a != 8 do {a = a + 3}; a", "");
-  // test("a:I32; a=5; wh a > 0 do {a = a - 1}; a", "");
-  // test("a:I32; b:I32; a=0; wh a < 8 do {b=0; wh b != 3 do { b = b + 1 }; a = a + 1}; a", "");
-  // test("a:I32; b:I32; a=0; b=0; wh a < 8 do {wh b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
+  // test("a:I32; a=0; while a < 8 do {a = a + 1}; a", "");
+  // test("a:I32; a=0; while a != 8 do {a = a + 2}; a", "");
+  // test("a:I32; a=0; while a != 8 do {a = a + 3}; a", "");
+  // test("a:I32; a=5; while a > 0 do {a = a - 1}; a", "");
+  // test("a:I32; b:I32; a=0; while a < 8 do {b=0; while b != 3 do { b = b + 1 }; a = a + 1}; a", "");
+  // test("a:I32; b:I32; a=0; b=0; while a < 8 do {while b != 3 do { b = b + 1 }; a = a + 3}; a+b", "");
   // test("a:I32; if a != 10 do {a = 1}; a", "");
   // test("I32 = 0; I32", "");
   // test("Vec2 : (x:I32; y:I32); Vec2 = (x:1+2; y:2+3); Vec2.x + Vec2.y", "");
   // test("a:I32 = 2; a=3; a+a", "");
   // test("foo:(a:I32; b:I32) -> a+b; foo(b:1; a:2)", "");
-  // test("foo:(a:I32) -> { if 1\\2 re 2 el re 3 }; foo(2)", "");
+  // test("foo:(a:I32) -> { if 1\\2 return 2 else return 3 }; foo(2)", "");
   // test("foo:() I32 -> I32 bar(); bar:()->foo()", "");
-  // test("if 1\\2 do 3 el 4;", "");
+  // test("if 1\\2 do 3 else 4;", "");
   // test("a:I32; b:@I32; b = @a; b@ = 1", "");
   // test("a:I32; foo:() -> a;", "");
   // test("putchar: #c putchar (char:I32) -> I32", "");
