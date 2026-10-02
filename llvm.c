@@ -420,13 +420,19 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_subscript: {
     // TODO: figure out subscript operator
     Type* of_type = type_of_ir(ir->binary.one);
-    Type* ptr_to = type_pointer_declared(of_type->pointer);
-    LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
-    LLVMTypeRef llvm_ptr_to = llvm_of_type(ptr_to);
-    LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
-    LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
-    LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
-    result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, ptr, indices, 2, "");
+    if (of_type->kind == Type_Kind_array) {
+      Type* ptr    = type;
+      Type* ptr_to = type_pointer_declared(ptr->pointer);
+      LLVMValueRef array = llvm_of_ir(ir->binary.one);
+      LLVMTypeRef llvm_ptr_to = llvm_of_type(ptr_to);
+      LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
+      LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
+      LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
+      result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, array, indices, 2, "");
+    }
+    else if (of_type->kind == Type_Kind_ptr) {
+      assert(0);
+    }
   } break;
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
@@ -801,7 +807,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[0]); putchar 10", "");
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
