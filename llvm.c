@@ -418,33 +418,35 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_subscript: {
+    // TODO: figure out subscript operator
     Type* of_type = type_of_ir(ir->binary.one);
-    Type* arr_type = type_pointer_declared(of_type->pointer);
-    // assert(arr_type->kind == Type_Kind_record);
+    Type* ptr_to = type_pointer_declared(of_type->pointer);
     LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
-    LLVMTypeRef llvm_type = llvm_of_type(arr_type);
+    LLVMTypeRef llvm_ptr_to = llvm_of_type(ptr_to);
     LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
     LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
     LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
-    result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_type, ptr, indices, 2, "");
+    result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, ptr, indices, 2, "");
   } break;
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
     if (of_type->kind == Type_Kind_ptr) {
-      Type* rec_type = type_pointer_declared(of_type->pointer);
-      if (rec_type->kind == Type_Kind_record) {
+      Type* object_type = type_pointer_declared(of_type->pointer);
+      if (object_type->kind == Type_Kind_record) {
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
-        I32 position = hash_map_get_i32(&rec_type->record->position_from_name, ir->name_offset.at);
-        LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+        I32 position = hash_map_get_i32(&object_type->record->position_from_name, ir->name_offset.at);
+        LLVMTypeRef llvm_type = llvm_of_type(object_type);
         result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
       }
-      else if (rec_type->kind == Type_Kind_array) {
-        assert(0);
+      else if (object_type->kind == Type_Kind_array) {
         assert(ir->name_offset.at == irgen.str_len);
-      }
-      else if (rec_type->kind == Type_Kind_span) {
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
-        LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+        LLVMTypeRef llvm_type = llvm_of_type(object_type);
+        result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
+      }
+      else if (object_type->kind == Type_Kind_span) {
+        LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
+        LLVMTypeRef llvm_type = llvm_of_type(object_type);
         result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
       }
     }
@@ -799,7 +801,8 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[0]); putchar 10", "");
+  // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");
