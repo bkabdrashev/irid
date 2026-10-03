@@ -82,9 +82,9 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMArrayType2(llvm_field_type, length);
   } break;
   case Type_Kind_span: {
-    LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
+    LLVMTypeRef llvm_field_type = llvm_of_type(type->span->of_type);
     LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMTypeRef));
-    field_types[0] = LLVMIntTypeInContext(llvm_gen.context, 64);
+    field_types[0] = llvm_of_type(type->span->length);
     field_types[1] = LLVMPointerType(llvm_field_type, 0);
     result = LLVMStructTypeInContext(llvm_gen.context, field_types, 2, false);
   } break;
@@ -263,11 +263,10 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   } break;
   case Type_Kind_span: {
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMValueRef));
-    LLVMTypeRef llvm_type = llvm_of_type(sem.type_len);
-    values[0] = LLVMConstInt(llvm_type, 0, false);
+    values[0] = llvm_default_of_type(type->span->length);
 
-    LLVMValueRef llvm_of_default = llvm_default_of_type(type->array->of_type);
-    LLVMTypeRef llvm_var_type = llvm_of_type(type->array->of_type);
+    LLVMValueRef llvm_of_default = llvm_default_of_type(type->span->of_type);
+    LLVMTypeRef llvm_var_type = llvm_of_type(type->span->of_type);
     LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
     LLVMSetInitializer(llvm_global, llvm_of_default);
     LLVMSetGlobalConstant(llvm_global, false);
@@ -428,18 +427,41 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_ptr_offset: {
-    // TODO: figure out subscript operator
     Type* of_type = type_of_ir(ir->binary.one);
     if (of_type->kind == Type_Kind_ptr) {
       Type* ptr_to = type_pointer_declared(of_type->pointer);
-      LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
-      LLVMTypeRef llvm_ptr_to = llvm_of_type(ptr_to);
-      LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
-      LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
-      LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
-      result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, ptr, indices, 2, "");
+      if (ptr_to->kind == Type_Kind_array) {
+        LLVMValueRef llvm_ptr_to_array = llvm_of_ir(ir->binary.one);
+        LLVMTypeRef  llvm_ptr_to       = llvm_of_type(ptr_to);
+        LLVMTypeRef  llvm_int_type     = LLVMIntTypeInContext(llvm_gen.context, 32);
+        {
+          LLVMValueRef zero       = LLVMConstInt(llvm_int_type, 0, 0);
+          LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
+          result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, llvm_ptr_to_array, indices, 2, "");
+        }
+      }
+      else if (ptr_to->kind == Type_Kind_span) {
+        LLVMTypeRef  llvm_type_span   = llvm_of_type(ptr_to);
+        LLVMValueRef llvm_ptr_to_span = llvm_of_ir(ir->binary.one);
+        LLVMTypeRef  llvm_span_ptr_to = llvm_of_type(ptr_to->span->of_type);
+
+        LLVMValueRef llvm_ptr;
+        {
+          LLVMValueRef llvm_span = LLVMBuildLoad2(llvm_gen.builder, llvm_type_span, llvm_ptr_to_span, "");
+          LLVMDumpModule(llvm_gen.module);
+          llvm_ptr  = LLVMBuildExtractValue(llvm_gen.builder, llvm_span, 1, "__test");
+        }
+
+        {
+          LLVMValueRef indices[1] = { llvm_of_ir(ir->binary.two) };
+          result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_span_ptr_to, llvm_ptr, indices, 1, "");
+        }
+      }
+      else {
+        assert(0);
+      }
     }
-    else if (of_type->kind == Type_Kind_array) {
+    else {
       assert(0);
     }
   } break;
@@ -570,6 +592,28 @@ void llvm_ir(Ir* ir) {
       }
       result = LLVMBuildInsertValue(llvm_gen.builder, result, llvm_item, i, "");
     }
+  } break;
+  case Ir_Kind_span_from_array_cast: {
+    // a: []I8 = "AB"
+    Type* type_to = type;
+    assert(type_to->kind == Type_Kind_span);
+    Type* type_from = type_of_ir(ir->cast_value);
+    assert(type_from->kind == Type_Kind_ptr);
+    Type* declared = type_pointer_declared(type_from->pointer);
+    assert(declared->kind == Type_Kind_array);
+    Array* array = declared->array;
+
+    LLVMTypeRef llvm_type_length  = llvm_of_type(type_to->span->length);
+    LLVMTypeRef llvm_type_of_type = llvm_of_type(type_to->span->of_type);
+    LLVMTypeRef llvm_type_ptr_of_type = LLVMPointerType(llvm_type_of_type, 0);
+
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMValueRef));
+    values[0] = LLVMConstInt(llvm_type_length, array->length, false);
+
+    LLVMValueRef ptr_to_array = llvm_of_ir(ir->cast_value);
+    values[1] = LLVMBuildPointerCast(llvm_gen.builder, ptr_to_array, llvm_type_ptr_of_type, "");
+
+    result = LLVMConstStructInContext(llvm_gen.context, values, 2, false);
   } break;
   case Ir_Kind_record: {
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->rec->length * sizeof(LLVMValueRef));

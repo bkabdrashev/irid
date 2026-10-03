@@ -293,6 +293,7 @@ struct Irgen {
   Ir*         ir_none;
 
   Str*        str_nil;
+  Str*        str_anon;
   Str*        str_len;
   Str*        str_bits;
   Str*        str_foreign;
@@ -1103,7 +1104,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
            var->kind   = Var_Kind_none;
            var->state  = Var_State_unresolved;
            var->global = irgen.scope_stack.length == 1;
-           var->name   = irgen.str_nil;
+           var->name   = irgen.str_anon;
            var->declared_ir = unary;
       result = irgen_push_var(var);
       irgen_push_binary(Ir_Kind_store, result, unary);
@@ -1123,7 +1124,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
            var->kind   = Var_Kind_none;
            var->state  = Var_State_unresolved;
            var->global = irgen.scope_stack.length == 1;
-           var->name   = irgen.str_nil;
+           var->name   = irgen.str_anon;
            var->declared_ir = lhs;
       Ir* ir_var = irgen_push_var(var);
       irgen_push_binary(Ir_Kind_store, ir_var, lhs);
@@ -1214,7 +1215,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
     Var* arg_var = irgen_var_new();
-    fun->name = irgen.str_nil;
+    fun->name = irgen.str_anon;
     Hash_Map scope;
     {
       Ast_Node* lhs = node->binary.lhs;
@@ -1306,6 +1307,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
 
   irgen.irid_nil = 0;
   irgen.str_nil  = str_from_cstr("");
+  irgen.str_anon = str_from_cstr("__anon");
   Ir ir_nil = {0, {0}};
   add(irgen.irs, ir_nil);
 

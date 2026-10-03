@@ -911,49 +911,37 @@ Type* type_function_foreign(Function* function, Str* foreign_name) {
   return type_function(function_foreign);
 }
 
-void sem_push_ir(Block* block, Ir* sem_ir) {
-  fa_add(block->sem_irs, sem_ir);
+Ir* sem_push_ir(Block* block, Ir sem_ir) {
+  Ir* new_ir = &new(irgen.irs);
+  *new_ir = sem_ir;
+  fa_add(block->sem_irs, new_ir);
+  return new_ir;
 }
 
 Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
-  Ir new_ir = { Ir_Kind_int_extend, .int_extend = { .value=value, .bits = bits } };
-  Ir* sem_ir = &new(irgen.irs);
-  *sem_ir = new_ir;
-  sem_push_ir(block, sem_ir);
+  Ir sem_ir = { Ir_Kind_int_extend, .int_extend = { .value=value, .bits = bits } };
+  Ir* new_ir = sem_push_ir(block, sem_ir);
   Type* value_type = type_of_ir(value);
   Type* new_type = &new(sem.types);
   *new_type = *value_type;
   new_type->bits_size = bits;
   new_type->bits_align = align_up(bits, 8);
-  type_of_ir_put(sem_ir, new_type);
-  return sem_ir;
+  type_of_ir_put(new_ir, new_type);
+  return new_ir;
 }
 
 Ir* sem_push_record_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_record_cast, .cast_value = value };
-  Ir* sem_ir = &new(irgen.irs);
-  *sem_ir = new_ir;
-  sem_push_ir(block, sem_ir);
-  type_of_ir_put(sem_ir, type);
-  return sem_ir;
+  Ir sem_ir = { Ir_Kind_record_cast, .cast_value = value };
+  Ir* new_ir = sem_push_ir(block, sem_ir);
+  type_of_ir_put(new_ir, type);
+  return new_ir;
 }
 
 Ir* sem_push_array_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_array_cast, .cast_value = value };
-  Ir* sem_ir = &new(irgen.irs);
-  *sem_ir = new_ir;
-  sem_push_ir(block, sem_ir);
-  type_of_ir_put(sem_ir, type);
-  return sem_ir;
-}
-
-Ir* sem_push_span_from_array_cast(Block* block, Ir* value, Type* type) {
-  Ir new_ir = { Ir_Kind_span_from_array_cast, .cast_value = value };
-  Ir* sem_ir = &new(irgen.irs);
-  *sem_ir = new_ir;
-  sem_push_ir(block, sem_ir);
-  type_of_ir_put(sem_ir, type);
-  return sem_ir;
+  Ir sem_ir = { Ir_Kind_array_cast, .cast_value = value };
+  Ir* new_ir = sem_push_ir(block, sem_ir);
+  type_of_ir_put(new_ir, type);
+  return new_ir;
 }
 
 Type* sem_ranges_reflow(Block* block, Ir* ir, Range range, Type_Pair types) {
@@ -2049,11 +2037,50 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
   else if (to->kind == Type_Kind_span) {
     if (from->kind == Type_Kind_array) {
       Span* span = arena_push(sem.perm_arena, sizeof(Span));
-      span->length = type_int(from->array->length);
+      span->length = type_define_size(64, type_int(from->array->length));
       span->of_type = from->array->of_type;
       result = type_span(span);
+
       if (store) {
-        store->binary.two = sem_push_span_from_array_cast(block, store->binary.two, result);
+        Ir* two = store->binary.two;
+        if (two->kind == Ir_Kind_load) {
+          Ir* ptr_loaded = two->unary;
+          Ir  ir_sem = { Ir_Kind_span_from_array_cast, .cast_value = ptr_loaded };
+          Ir* ir_new = sem_push_ir(block, ir_sem);
+          type_of_ir_put(ir_new, result);
+          store->binary.two = ir_new;
+        }
+        else {
+          Var* var = &new(irgen.vars);
+               var->kind   = Var_Kind_none;
+               var->state  = Var_State_unresolved;
+               var->global = irgen.scope_stack.length == 1;
+               var->name   = irgen.str_anon;
+               var->declared_ir = two;
+
+          sem_var_declare(var);
+          Ir* ir_var = 0;
+          {
+            Ir  ir_sem = { Ir_Kind_var, .var = var };
+            ir_var = sem_push_ir(block, ir_sem);
+            Type* type_var = type_pointer_var(ir_var->var);
+            type_of_ir_put(ir_var, type_var);
+          }
+
+          {
+            Ir  ir_sem = { Ir_Kind_store, .binary = { .one = ir_var, .two = two } };
+            Ir* ir_new = sem_push_ir(block, ir_sem);
+            type_of_ir_put(ir_new, sem.type_none);
+          }
+
+          {
+            Ir  ir_sem = { Ir_Kind_span_from_array_cast, .cast_value = ir_var };
+            Ir* ir_new = sem_push_ir(block, ir_sem);
+            type_of_ir_put(ir_new, result);
+            store->binary.two = ir_new;
+          }
+
+        }
       }
     }
     else {
@@ -2763,7 +2790,7 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   default: assert(0);
   }
-  sem_push_ir(block, ir);
+  fa_add(block->sem_irs, ir);
   type_of_ir_put(ir, result);
   assert(result);
 }
