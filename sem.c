@@ -2121,7 +2121,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
     for (I32 i = 0; i < type->record->length; i++) {
       Type* type_field = type_of_field_at(type->record, i);
       type->record->types[i] = type_field;
-      Var* var_field = arena_push_zero(sem.perm_arena, sizeof(Var));
+      Var* var_field = &new(irgen.vars);
            var_field->index   = i;
            var_field->name     = type->record->names[i];
            var_field->parent   = var;
@@ -2147,7 +2147,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
     I32 length = array->length;
     var->vars = arena_push(sem.perm_arena, (length+1) * sizeof(Var*));
     var->vars += 1; // NOTE: at -1 we have legnth
-    Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
+    Var* var_len = &new(irgen.vars);
          var_len->index    = -1;
          var_len->declared = sem.type_len;
          var_len->parent   = var;
@@ -2157,7 +2157,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
     var->vars[-1] = var_len;
     for (I32 i = 0; i < length; i++) {
       Type* type_item = array->types[i];
-      Var* var_item = arena_push_zero(sem.perm_arena, sizeof(Var));
+      Var* var_item = &new(irgen.vars);
       var_item->index    = i;
       var_item->declared = type_item;
       var_item->parent   = var;
@@ -2179,7 +2179,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
     Span* span = type->span;
     var->vars = arena_push(sem.perm_arena, 2 * sizeof(Var*));
 
-    Var* var_len = arena_push_zero(sem.perm_arena, sizeof(Var));
+    Var* var_len = &new(irgen.vars);
          var_len->index    = 0;
          var_len->declared = span->length;
          var_len->kind     = Var_Kind_declared;
@@ -2187,7 +2187,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
     var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
     var->vars[0] = var_len;
 
-    Var* var_ptr = arena_push_zero(sem.perm_arena, sizeof(Var));
+    Var* var_ptr = &new(irgen.vars);
          var_ptr->index    = 1;
          var_ptr->declared = type_pointer_to(span->of_type);
          var_ptr->kind     = Var_Kind_declared;
@@ -2427,7 +2427,7 @@ void sem_ir(Block* block, Ir* ir) {
       assert(0);
     }
   } break;
-  case Ir_Kind_subscript: {
+  case Ir_Kind_ptr_offset: {
     Type* of_type = type_of_ir(ir->binary.one);
     Type* at_type = type_of_ir(ir->binary.two);
     if (of_type->kind == Type_Kind_ptr) {

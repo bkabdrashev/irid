@@ -22,9 +22,9 @@ typedef enum Ir_Kind {
   Ir_Kind_ge  = Ast_Kind_ge | Ir_Flag_binary,
   Ir_Kind_call = Ast_Kind_call | Ir_Flag_binary,
 
-  Ir_Kind_array     = Ast_Kind_array     | Ir_Flag_binary,
-  Ir_Kind_subscript = Ast_Kind_subscript | Ir_Flag_binary,
-  Ir_Kind_span      = Ast_Kind_span      | Ir_Flag_unary,
+  Ir_Kind_array      = Ast_Kind_array     | Ir_Flag_binary,
+  Ir_Kind_ptr_offset = Ast_Kind_subscript | Ir_Flag_binary,
+  Ir_Kind_span       = Ast_Kind_span      | Ir_Flag_unary,
 
   Ir_Kind_join  = Ast_Kind_join  | Ir_Flag_binary,
   Ir_Kind_meet  = Ast_Kind_meet  | Ir_Flag_binary,
@@ -493,7 +493,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_span:  string_builder_push_cstr(sb, "span "); break;
   case Ir_Kind_type:  string_builder_push_cstr(sb, "type "); break;
   case Ir_Kind_run:   string_builder_push_cstr(sb, "run "); break;
-  case Ir_Kind_subscript: string_builder_push_cstr(sb, "subscript "); break;
+  case Ir_Kind_ptr_offset: string_builder_push_cstr(sb, "ptr offset "); break;
   default: {
     assert(0);
   } break;
@@ -1110,10 +1110,26 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
   } break;
   case Ast_Kind_subscript: {
-    Ir* lhs = irgen_ast_node(node->binary.lhs);
     Ir* rhs = irgen_ast_node(node->binary.rhs);
-    Ir* subscript = irgen_push_binary(Ir_Kind_subscript, lhs, rhs);
-    result = irgen_push_unary(Ir_Kind_load, subscript);
+    Ir* lhs = irgen_ast_node(node->binary.lhs);
+    if (lhs->kind == Ir_Kind_load) {
+      Ir* ptr_loaded = lhs->unary;
+      irgen_pop();
+      Ir* offset = irgen_push_binary(Ir_Kind_ptr_offset, ptr_loaded, rhs);
+      result = irgen_push_unary(Ir_Kind_load, offset);
+    }
+    else {
+      Var* var = irgen_var_new();
+           var->kind   = Var_Kind_none;
+           var->state  = Var_State_unresolved;
+           var->global = irgen.scope_stack.length == 1;
+           var->name   = irgen.str_nil;
+           var->declared_ir = lhs;
+      Ir* ir_var = irgen_push_var(var);
+      irgen_push_binary(Ir_Kind_store, ir_var, lhs);
+      Ir* offset = irgen_push_binary(Ir_Kind_ptr_offset, ir_var, rhs);
+      result = irgen_push_unary(Ir_Kind_load, offset);
+    }
   } break;
   case Ast_Kind_type: {
     Ir* unary = irgen_ast_node(node->unary);
@@ -1388,6 +1404,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  // test("a:[2]I8 = \"AB\"; a[1]", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: 1,2;", "");

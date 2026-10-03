@@ -22,6 +22,7 @@ typedef struct LLVM_Gen LLVM_Gen;
 struct LLVM_Gen {
   Arena*             perm_arena;
   LLVMValueRef*      irs;
+  LLVMValueRef*      vars;
   LLVMBasicBlockRef* blocks;
   LLVMTypeRef*       types;
   LLVMValueRef*      funs;
@@ -131,6 +132,16 @@ LLVMValueRef llvm_of_ir(Ir* ir) {
 void llvm_of_ir_put(Ir* ir, LLVMValueRef val) {
   I32 irid = ir - irgen.irs.base;
   llvm_gen.irs[irid] = val;
+}
+
+LLVMValueRef llvm_of_var(Var* var) {
+  I32 varid = var - irgen.vars.base;
+  return llvm_gen.vars[varid];
+}
+
+void llvm_of_var_put(Var* var, LLVMValueRef val) {
+  I32 varid = var - irgen.vars.base;
+  llvm_gen.vars[varid] = val;
 }
 
 LLVMBasicBlockRef llvm_of_block(Block* block) {
@@ -329,10 +340,7 @@ void llvm_ir(Ir* ir) {
         result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
         // LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
       }
-      // NOTE: declared_ir is used to store llvm value reference, so that pointer can refer to it
-      if (ir->var->declared_ir) {
-        llvm_of_ir_put(ir->var->declared_ir, result);
-      }
+      llvm_of_var_put(ir->var, result);
     }
   } break;
   case Ir_Kind_int: {
@@ -417,20 +425,19 @@ void llvm_ir(Ir* ir) {
       }
     }
   } break;
-  case Ir_Kind_subscript: {
+  case Ir_Kind_ptr_offset: {
     // TODO: figure out subscript operator
     Type* of_type = type_of_ir(ir->binary.one);
-    if (of_type->kind == Type_Kind_array) {
-      Type* ptr    = type;
-      Type* ptr_to = type_pointer_declared(ptr->pointer);
-      LLVMValueRef array = llvm_of_ir(ir->binary.one);
+    if (of_type->kind == Type_Kind_ptr) {
+      Type* ptr_to = type_pointer_declared(of_type->pointer);
+      LLVMValueRef ptr = llvm_of_ir(ir->binary.one);
       LLVMTypeRef llvm_ptr_to = llvm_of_type(ptr_to);
       LLVMTypeRef llvm_int_type = LLVMIntTypeInContext(llvm_gen.context, 32);
       LLVMValueRef zero = LLVMConstInt(llvm_int_type, 0, 0);
       LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
-      result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, array, indices, 2, "");
+      result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, ptr, indices, 2, "");
     }
-    else if (of_type->kind == Type_Kind_ptr) {
+    else if (of_type->kind == Type_Kind_array) {
       assert(0);
     }
   } break;
@@ -651,6 +658,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   llvm_gen.perm_arena = arena;
   llvm_gen.blocks = arena_push(arena, irgen.blocks.length * sizeof(LLVMBasicBlockRef));
   llvm_gen.irs    = arena_push(arena, irgen.irs.length    * sizeof(LLVMValueRef));
+  llvm_gen.vars   = arena_push(arena, irgen.vars.length    * sizeof(LLVMValueRef));
   llvm_gen.types  = arena_push_zero(arena, sem.types.length  * sizeof(LLVMTypeRef));
   llvm_gen.funs   = arena_push_zero(arena, irgen.funs.length * sizeof(LLVMValueRef));
   llvm_gen.foreign_funs = arena_push_zero(arena, sem.foreign_funs->length * sizeof(LLVMValueRef));
@@ -808,6 +816,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 void llvm_test(void) {
   test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
