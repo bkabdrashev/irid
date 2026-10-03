@@ -32,6 +32,8 @@ struct LLVM_Gen {
   LLVMContextRef     context;
   LLVMBuilderRef     builder;
   LLVMValueRef       function;
+
+  LLVMValueRef       none;
 };
 
 LLVM_Gen llvm_gen;
@@ -185,6 +187,8 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   LLVMValueRef result = 0;
   switch (type->kind) {
   case Type_Kind_none: {
+    LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    result = LLVMConstInt(llvm_type, 0, false);
   } break;
   case Type_Kind_ptr: {
     if (type->pointer->stack_vars.len > 0) {
@@ -306,7 +310,7 @@ void llvm_ir(Ir* ir) {
     LLVMValueRef* params = arena_push(llvm_gen.perm_arena, count_params * sizeof(LLVMValueRef));
     LLVMGetParams(llvm_gen.function, params);
     if (count_params == 0) {
-      result = 0;
+      result = llvm_gen.none;
     }
     else if (count_params == 1) {
       LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
@@ -318,30 +322,28 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_var: {
-    if (ir->var->declared->kind != Type_Kind_none) {
-      LLVMValueRef llvm_var_init = llvm_default_of_type(ir->var->declared);
+    LLVMValueRef llvm_var_init = llvm_default_of_type(ir->var->declared);
 
-      if (ir->var->kind == Var_Kind_constant) {
-        result = llvm_var_init;
-      }
-      else if (ir->var->global) {
-        if (ir->var->declared->kind == Type_Kind_fun) {
-          result = llvm_of_fun(ir->var->declared->function->fun);
-        }
-        else {
-          LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
-          result = LLVMAddGlobal(llvm_gen.module, llvm_var_type, ir->var->name->base);
-          LLVMSetInitializer(result, llvm_var_init);
-          LLVMSetGlobalConstant(result, false);
-        }
+    if (ir->var->kind == Var_Kind_constant) {
+      result = llvm_var_init;
+    }
+    else if (ir->var->global) {
+      if (ir->var->declared->kind == Type_Kind_fun) {
+        result = llvm_of_fun(ir->var->declared->function->fun);
       }
       else {
         LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
-        result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
-        // LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
+        result = LLVMAddGlobal(llvm_gen.module, llvm_var_type, ir->var->name->base);
+        LLVMSetInitializer(result, llvm_var_init);
+        LLVMSetGlobalConstant(result, false);
       }
-      llvm_of_var_put(ir->var, result);
     }
+    else {
+      LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
+      result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
+      // LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
+    }
+    llvm_of_var_put(ir->var, result);
   } break;
   case Ir_Kind_int: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
@@ -381,7 +383,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_call: {
     Type* fun_type = type_of_ir(ir->binary.one);
     if (fun_type == sem.fun_bits) {
-      // NOTE: LLVM NOP
+      result = llvm_gen.none;
     }
     else if (fun_type->kind == Type_Kind_fun) {
       LLVMTypeRef llvm_fun_type = llvm_of_type(fun_type);
@@ -580,21 +582,22 @@ void llvm_ir(Ir* ir) {
     assert(0);
   } break;
 
-  case Ir_Kind_declare: break;
-  case Ir_Kind_none:    break;
-  case Ir_Kind_type:    break;
+  case Ir_Kind_declare: result = llvm_gen.none; break;
+  case Ir_Kind_none:    result = llvm_gen.none; break;
+  case Ir_Kind_type:    result = llvm_gen.none; break;
   case Ir_Kind_str: case Ir_Kind_span: case Ir_Kind_array:
   case Ir_Kind_join: case Ir_Kind_meet: case Ir_Kind_range:
   {
     result = llvm_default_of_type(type);
   } break;
-  case Ir_Kind_bits:   break;
-  case Ir_Kind_len:    break;
-  case Ir_Kind_run:    break;
-  case Ir_Kind_foreign:break;
+  case Ir_Kind_bits:    result = llvm_gen.none; break;
+  case Ir_Kind_len:     result = llvm_gen.none; break;
+  case Ir_Kind_run:     result = llvm_gen.none; break;
+  case Ir_Kind_foreign: result = llvm_gen.none; break;
   case Ir_Kind_macro_par: assert(0); break;
   }
 
+  assert(result);
   llvm_of_ir_put(ir, result);
 }
 
@@ -666,6 +669,8 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   llvm_gen.context = LLVMContextCreate();
   llvm_gen.module  = LLVMModuleCreateWithNameInContext("contex_name", llvm_gen.context);
   llvm_gen.builder = LLVMCreateBuilderInContext(llvm_gen.context);
+
+  llvm_gen.none = llvm_default_of_type(sem.type_none);
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
@@ -815,8 +820,9 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
+  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");

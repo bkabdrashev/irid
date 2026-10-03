@@ -2435,11 +2435,14 @@ void sem_ir(Block* block, Ir* ir) {
         Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
         pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
         Type* declared = type_pointer_declared(of_type->pointer);
-        if (declared->kind == Type_Kind_array) {
+        if (declared->kind == Type_Kind_ptr) {
+          pointer->declared = type_pointer_declared(declared->pointer);
+        }
+        else if (declared->kind == Type_Kind_array) {
           pointer->declared = declared->array->of_type;
         }
-        else if (declared->kind == Type_Kind_ptr) {
-          pointer->declared = type_pointer_declared(declared->pointer);
+        else if (declared->kind == Type_Kind_span) {
+          pointer->declared = declared->span->of_type;
         }
         else {
           assert(0);
@@ -3007,6 +3010,32 @@ Type* sem_fun(Fun* fun) {
   assert(ret_type->kind == Type_Kind_ptr);
   ret_type->pointer->declared = function->ret;
   fun->type = type_function(function);
+
+  {
+    Type* type = function->ret;
+    Var* var = fun->ret_ir->var;
+    var->declared = type;
+    if (type->bits_size == 0) {
+      var->kind = Var_Kind_constant;
+    }
+    else {
+      var->kind = Var_Kind_declared;
+    }
+    sem_record_declare_fields(var, type);
+  }
+
+  {
+    Type* type = function->arg;
+    Var* var = fun->arg_var->var;
+    var->declared = type;
+    if (type->bits_size == 0) {
+      var->kind = Var_Kind_constant;
+    }
+    else {
+      var->kind = Var_Kind_declared;
+    }
+    sem_record_declare_fields(var, type);
+  }
 
   arena_release_mark(sem.temp_arena, fun->worklist);
   printf("end: %s\n", fun->name->base);
