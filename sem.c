@@ -2142,6 +2142,17 @@ Type* type_of_fun(Fun* fun) {
 void sem_block(Block* block);
 void sem_init_block_preds(Block* block);
 
+void sem_var_kind(Var* var) {
+  if (var->kind != Var_Kind_none) {
+    if (var->declared->bits_size == 0) {
+      var->kind = Var_Kind_constant;
+    }
+    else {
+      var->kind = Var_Kind_declared;
+    }
+  }
+}
+
 void sem_record_declare_fields(Var* var, Type* type) {
   if (type->kind == Type_Kind_record) {
     var->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
@@ -2149,21 +2160,14 @@ void sem_record_declare_fields(Var* var, Type* type) {
       Type* type_field = type_of_field_at(type->record, i);
       type->record->types[i] = type_field;
       Var* var_field = &new(irgen.vars);
-           var_field->index   = i;
+           var_field->index    = i;
            var_field->name     = type->record->names[i];
            var_field->parent   = var;
            var_field->declared = type_field;
            var_field->state    = Var_State_resolved;
-      if (type_field->bits_size == 0) {
-        var_field->kind = Var_Kind_constant;
-      }
-      else {
-        var_field->kind = Var_Kind_declared;
-      }
+      sem_var_kind(var_field);
       var->vars[i] = var_field;
-
       sem_record_declare_fields(var_field, type_field);
-
     }
     for (I32 i = 0; i < type->record->length; i++) {
       var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
@@ -2189,12 +2193,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
       var_item->declared = type_item;
       var_item->parent   = var;
       var_item->state    = Var_State_resolved;
-      if (type_item->bits_size == 0) {
-        var_item->kind = Var_Kind_constant;
-      }
-      else {
-        var_item->kind = Var_Kind_declared;
-      }
+      sem_var_kind(var_item);
       var->vars[i] = var_item;
       sem_record_declare_fields(var->vars[i], type_item);
     }
@@ -2242,12 +2241,7 @@ Type* sem_var_declare(Var* var) {
   Type* type = type_of_ir(var->declared_ir);
   if (type) {
     var->declared = type;
-    if (type->bits_size == 0) {
-      var->kind = Var_Kind_constant;
-    }
-    else {
-      var->kind = Var_Kind_declared;
-    }
+    sem_var_kind(var);
     sem_record_declare_fields(var, type);
   }
 
@@ -3042,12 +3036,7 @@ Type* sem_fun(Fun* fun) {
     Type* type = function->ret;
     Var* var = fun->ret_ir->var;
     var->declared = type;
-    if (type->bits_size == 0) {
-      var->kind = Var_Kind_constant;
-    }
-    else {
-      var->kind = Var_Kind_declared;
-    }
+    sem_var_kind(var);
     sem_record_declare_fields(var, type);
   }
 
@@ -3055,12 +3044,7 @@ Type* sem_fun(Fun* fun) {
     Type* type = function->arg;
     Var* var = fun->arg_var->var;
     var->declared = type;
-    if (type->bits_size == 0) {
-      var->kind = Var_Kind_constant;
-    }
-    else {
-      var->kind = Var_Kind_declared;
-    }
+    sem_var_kind(var);
     sem_record_declare_fields(var, type);
   }
 
@@ -3178,6 +3162,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  test("a:{ 1 + 2 }", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: Str = \"Hi\"; a.len; a[0]", "");
   // test("a: I32, (x:I32); a = 1; a", "");

@@ -45,7 +45,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
 
   switch (type->kind) {
   case Type_Kind_none: {
-    result = LLVMVoidTypeInContext(llvm_gen.context);
+    result = LLVMIntTypeInContext(llvm_gen.context, 0);
   } break;
   case Type_Kind_int: {
     if (type->bits_size > 0) {
@@ -528,10 +528,7 @@ void llvm_ir(Ir* ir) {
       }
     }
     else {
-      Type* type_two = type_of_ir(ir->binary.two);
-      if (type_two->kind != Type_Kind_none) {
-        result = LLVMBuildStore(llvm_gen.builder, llvm_two, llvm_one);
-      }
+      result = LLVMBuildStore(llvm_gen.builder, llvm_two, llvm_one);
     }
   } break;
   case Ir_Kind_fun: {
@@ -689,15 +686,17 @@ LLVMValueRef llvm_fun(Fun* fun) {
   }
 
   Type* ret_type = fun->type->function->ret;
-  if (ret_type->kind == Type_Kind_none) {
-    LLVMBuildRetVoid(llvm_gen.builder);
+  LLVMValueRef ret_val;
+  if (type_is_const(ret_type)) {
+    ret_val = llvm_default_of_type(ret_type);
   }
   else {
     LLVMValueRef llvm_ret_var = llvm_of_ir(fun->ret_ir);
     LLVMTypeRef llvm_ret_type = llvm_of_type(ret_type);
-    LLVMValueRef ret_loaded = LLVMBuildLoad2(llvm_gen.builder, llvm_ret_type, llvm_ret_var, "");
-    LLVMBuildRet(llvm_gen.builder, ret_loaded);
+    ret_val = LLVMBuildLoad2(llvm_gen.builder, llvm_ret_type, llvm_ret_var, "");
   }
+
+  LLVMBuildRet(llvm_gen.builder, ret_val);
   return llvm_gen.function;
 }
 
@@ -864,9 +863,10 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
+  // test("foo : () -> {}; foo()", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
-  test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
+  // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");

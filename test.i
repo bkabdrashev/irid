@@ -46,12 +46,14 @@ putchar: #foreign.c "putchar" type (char:I32) -> I32
 Vec : (x: I32; y: I32; z: 100)
 v:Vec = (123;)
 
-print_i32(v.x + v.y + v.z)
+print_i32(v.x + v.z)
 
 Window : type 64'#bits (opaque:"SDL_Window")
 window: Window
 
 print_str(window.opaque)
+
+print_str("Hello World!")
 
 // CreateWindow : #foreign.c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
 // import sdl

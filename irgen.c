@@ -289,8 +289,7 @@ struct Irgen {
   Rec_Pool records;
   Ir_Pool     irs;
 
-  Ir*         irid_nil;
-  Ir*         ir_none;
+  Ir*         irid_none;
 
   Str*        str_nil;
   Str*        str_anon;
@@ -327,6 +326,15 @@ Ir_Field irgen_record_get_by_name(Rec* record, Str* name) {
 void string_builder_push_irid(String_Builder* sb, Ir* ir) {
   if (ir == irgen.irid_len) {
     string_builder_push_cstr(sb, "len");
+  }
+  else if (ir == irgen.irid_none) {
+    string_builder_push_cstr(sb, "none");
+  }
+  else if (ir == irgen.irid_bits) {
+    string_builder_push_cstr(sb, "bits");
+  }
+  else if (ir == irgen.irid_foreign) {
+    string_builder_push_cstr(sb, "foreign");
   }
   else {
     string_builder_push_cstr(sb, "r");
@@ -807,7 +815,9 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
     Var* temp_var = temp_fun.vars->base[i];
     Type** types = arena_push_zero(irgen.perm_arena, var->blocks->length * sizeof(Type*));
     temp_var->block_types = types;
-    temp_var->is_temp = true;
+    if (temp_var->kind != Var_Kind_none) {
+      temp_var->is_temp = true;
+    }
   }
   del(irgen.fun_stack);
 }
@@ -1061,7 +1071,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Var* block_var = irgen_var_new();
     block_var->name = str_from_cstr("__block");
     Ir* block_ir = irgen_push_var(block_var);
-    irgen_push_binary(Ir_Kind_store, block_ir, irgen.ir_none);
+    irgen_push_binary(Ir_Kind_store, block_ir, irgen.irid_none);
 
     for (I32 i = 0; i < node->block.list->length; i++) {
       Ast_Node* exp = node->block.list->base[i];
@@ -1069,6 +1079,8 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
 
     result = irgen_push_unary(Ir_Kind_load, block_ir);
+    block_var->declared_ir = result;
+    irgen_push_declare(block_var);
 
     irgen_scope_leave();
     // arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
@@ -1264,7 +1276,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_return: {
     Fun* fun = irgen_fun_top();
-    Ir* none = irgen.ir_none;
+    Ir* none = irgen.irid_none;
     result = irgen_push_binary(Ir_Kind_store, fun->ret_ir, none);
     irgen_block_return();
   } break;
@@ -1305,11 +1317,8 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.scope_stack.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
 
-  irgen.irid_nil = 0;
   irgen.str_nil  = str_from_cstr("");
   irgen.str_anon = str_from_cstr("__anon");
-  Ir ir_nil = {0, {0}};
-  add(irgen.irs, ir_nil);
 
   irgen.builtins = hash_map_init(irgen.perm_arena, 3);
   {
@@ -1356,7 +1365,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     irgen_var_declare(arg_var, node);
     irgen_push_declare(arg_var);
   }
-  irgen.ir_none = irgen_push_none();
+  irgen.irid_none = irgen_push_none();
 
   irgen_scope_enter(ast.scope);
   for (I32 i = 0; i < ast.list->length; i++) {
@@ -1406,6 +1415,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("a:{ 1 + 2 }", "");
   // test("a:[2]I8 = \"AB\"; a[1]", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
