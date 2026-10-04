@@ -395,7 +395,7 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->is_size_defined) { // NOTE: bits function
+      if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
         result = llvm_default_of_type(type);
       }
       else if (fun_type->str) {

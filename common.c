@@ -42,6 +42,8 @@ typedef intptr_t  Smp; //   signed memory pointer
 #define GB(a) (MB(a)*1024llu)
 #define TB(a) (GB(a)*1024llu)
 
+#define has_flag(value, flag) ((value & flag) != 0)
+
 void* xmalloc(Umi num_bytes) {
   void* ptr = malloc(num_bytes);
   if (!ptr) {

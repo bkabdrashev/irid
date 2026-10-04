@@ -27,35 +27,34 @@ print_i32:(n:I32) -> {
   }
   putchar 10
   while i > 0 do {
-    putchar(i + 48)
     i = i - 1
     putchar(buf[i] + 48)
   }
   putchar 10
 }
 
-// print_str:(str: Str) -> {
-//   i:I32 = 0
-//   while i < str.len do {
-//     putchar(str[i])
-//     i = i + 1
-//   }
-//   putchar 10
-// }
+print_str:(str: Str) -> {
+  i:I32 = 0
+  while i < str.len do {
+    putchar(str[i])
+    i = i + 1
+  }
+  putchar 10
+}
 
 putchar: #foreign.c "putchar" type (char:I32) -> I32
 
-// Vec : (x: I32; y: I32; z: 100)
-// v:Vec = (123;)
+Vec : (x: I32; y: I32; z: 100)
+v:Vec = (123;)
 
-print_i32(456)
+print_i32(v.x + v.z)
 
-// Window : type 64'#bits (opaque:"SDL_Window")
-// window: Window
+Window : type 64'#bits (opaque:"SDL_Window")
+window: Window
 
-// print_str(window.opaque)
+print_str(window.opaque)
 
-// print_str("Hello World!")
+print_str("Hello World!")
 
 // CreateWindow : #foreign.c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
 // import sdl

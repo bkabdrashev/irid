@@ -203,7 +203,7 @@ void string_builder_push_ranges(String_Builder* sb, Ranges* ranges) {
 void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   if (!type) return;
   string_builder_push_i64(sb, type->bits_size);
-  if (type->flag & Type_Flag_size_defined) {
+  if (has_flag(type->flag, Type_Flag_size_defined)) {
     string_builder_push_cstr(sb, "'");
   }
   else {
@@ -971,8 +971,8 @@ Type* sem_ranges_reflow_binary(Block* block, Ir* ir, Range range, Type_Pair type
   Type* result = sem.type_none;
   I16 bits_size = bits_needed(range.lo, range.hi);
   I16 res_bits_size = max(types.one->bits_size, types.two->bits_size);
-  if ((types.one->flag & Type_Flag_size_defined) || (types.two->is_size_defined & Type_Flag_size_defined)) {
-    if (!types.two->is_size_defined) {
+  if (has_flag(types.one->flag, Type_Flag_size_defined) || has_flag(types.two->flag, Type_Flag_size_defined)) {
+    if (!has_flag(types.two->flag, Type_Flag_size_defined)) {
       if (types.one->bits_size >= types.two->bits_size) {
         ir->binary.two = sem_push_int_extend(block, ir->binary.two, types.one->bits_size);
       }
@@ -980,7 +980,7 @@ Type* sem_ranges_reflow_binary(Block* block, Ir* ir, Range range, Type_Pair type
         assert(0);
       }
     }
-    else if (!types.one->is_size_defined) {
+    else if (!has_flag(types.one->flag, Type_Flag_size_defined)) {
       if (types.two->bits_size >= types.one->bits_size) {
         ir->binary.one = sem_push_int_extend(block, ir->binary.one, types.two->bits_size);
       }
@@ -1232,7 +1232,7 @@ Type* type_record(Record* record) {
 
     Type* type = &new(sem.types);
     type->kind = Type_Kind_record;
-    type->is_size_defined = false;
+    type->flag = 0;
     type->bits_size  = bits_size;
     type->bits_align = bits_align;
     type->record = record;
@@ -1277,7 +1277,7 @@ Type* type_array(Array* array) {
 
     Type* type = &new(sem.types);
     type->kind = Type_Kind_array;
-    type->is_size_defined = false;
+    type->flag = 0;
     I32 length = array->length;
     type->bits_size  = array->of_type->bits_size  * length;
     type->bits_align = array->of_type->bits_align * length;
@@ -1313,7 +1313,7 @@ Type* type_span(Span* span) {
 
     Type* type = &new(sem.types);
     type->kind = Type_Kind_span;
-    type->is_size_defined = false;
+    type->flag = 0;
     type->bits_size  = 64 + 64;
     type->bits_align = 64;
     type->span = span;
@@ -1429,7 +1429,7 @@ Type* type_pointer(Pointer* pointer) {
           type->kind         = Type_Kind_ptr;
           type->bits_size    = 64;
           type->bits_align   = 64;
-          type->is_size_defined = true;
+          type->flag         = Type_Flag_size_defined;
           type->pointer      = pointer;
     result = type_in_set(type);
   }
@@ -1656,7 +1656,7 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     for (I32 i = 0; i < ptr->stack_vars.len; i++) {
       Var* var = ptr->stack_vars.list[i];
       Type* old_type = var->block_types[tasks->block->id];
-      new_type->is_size_defined = old_type->is_size_defined;
+      new_type->flag = old_type->flag;
       new_type->bits_size = old_type->bits_size;
       new_type->bits_align = old_type->bits_align;
       if (old_type) {
@@ -1985,9 +1985,9 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       else {
         result = &new(sem.types);
         *result = *from;
-        result->is_size_defined = to->is_size_defined;
-        result->bits_size    = to->bits_size;
-        result->bits_align   = align_up(to->bits_size, 8);
+        result->flag       = to->flag;
+        result->bits_size  = to->bits_size;
+        result->bits_align = align_up(to->bits_size, 8);
       }
     } break;
     case Type_Kind_record: {
@@ -2159,7 +2159,7 @@ void sem_init_block_preds(Block* block);
 
 void sem_var_kind(Var* var) {
   if (var->kind != Var_Kind_none) {
-    if (var->declared->is_comptime_const) {
+    if (has_flag(var->declared->flag, Type_Flag_comptime_const)) {
       var->kind = Var_Kind_constant;
     }
     else {
@@ -2413,7 +2413,7 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
       Type* unsized = type_range(-limits.hi, -limits.lo);
-      if (one->is_size_defined) {
+      if (has_flag(one->flag, Type_Flag_size_defined)) {
         result = type_define_size(one->bits_size, unsized);
       }
       else {
@@ -2661,7 +2661,7 @@ void sem_ir(Block* block, Ir* ir) {
           if (val < I16_MAX) {
             Type* type = &new(sem.types);
             type->kind = Type_Kind_none;
-            type->is_size_defined = true;
+            type->flag = Type_Flag_size_defined;
             type->bits_size = val;
             type->bits_align = align_up(val, 8);
             type->value = 0;
@@ -2753,7 +2753,7 @@ void sem_ir(Block* block, Ir* ir) {
       assert(0); // TODO
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->is_size_defined) { // NOTE: bits function
+      if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
         result = type_define_size(fun_type->bits_size, arg_type);
       }
       else if (fun_type->str) {
