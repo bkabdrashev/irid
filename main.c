@@ -2,7 +2,7 @@
 #include "includes.h"
 
 const char *__asan_default_options() {
-  return "abort_on_error=1";
+  return "abort_on_error=1 poison_history_size=2048";
 }
 
 int main(void) {

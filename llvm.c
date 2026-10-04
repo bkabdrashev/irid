@@ -48,15 +48,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
     result = LLVMIntTypeInContext(llvm_gen.context, 0);
   } break;
   case Type_Kind_int: {
-    if (type->bits_size > 0) {
-      result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
-    }
-    else {
-      I64 min = ranges_min(type->ranges);
-      I64 max = ranges_max(type->ranges);
-      I16 bits_size = bits_needed_non_zero(min, max);
-      result = LLVMIntTypeInContext(llvm_gen.context, bits_size);
-    }
+    result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
   } break;
   case Type_Kind_ptr: {
     Type* declared = type_pointer_declared(type->pointer);
@@ -226,7 +218,7 @@ LLVMValueRef llvm_default_of_type(Type* type) {
       result = llvm_of_foreign_fun(type->function->foreign_id);
     }
     else {
-      result = llvm_fun(type->function->fun);
+      result = llvm_of_fun(type->function->fun);
     }
     llvm_gen.function = save_function;
     LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
@@ -352,17 +344,6 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
   {
-    Type_Pair pair = type_of_ir_binary(ir);
-    if (pair.one->bits_size < pair.two->bits_size) {
-      llvm_one = llvm_conversion(llvm_one, pair.one, pair.two);
-    }
-    else if (pair.one->bits_size > pair.two->bits_size) {
-      llvm_two = llvm_conversion(llvm_two, pair.two, pair.one);
-    }
-    if (pair.one->bits_size < type->bits_size || pair.two->bits_size < type->bits_size) {
-      llvm_one = llvm_conversion(llvm_one, pair.one, type);
-      llvm_two = llvm_conversion(llvm_two, pair.two, type);
-    }
     switch (ir->kind) {
       case Ir_Kind_add: result = LLVMBuildAdd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
       case Ir_Kind_sub: result = LLVMBuildSub(llvm_gen.builder, llvm_one, llvm_two, ""); break;
@@ -414,7 +395,7 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->size_defined) { // NOTE: bits function
+      if (fun_type->is_size_defined) { // NOTE: bits function
         result = llvm_default_of_type(type);
       }
       else if (fun_type->str) {
@@ -448,7 +429,6 @@ void llvm_ir(Ir* ir) {
         LLVMValueRef llvm_ptr;
         {
           LLVMValueRef llvm_span = LLVMBuildLoad2(llvm_gen.builder, llvm_type_span, llvm_ptr_to_span, "");
-          LLVMDumpModule(llvm_gen.module);
           llvm_ptr  = LLVMBuildExtractValue(llvm_gen.builder, llvm_span, 1, "__test");
         }
 
@@ -534,12 +514,12 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_fun: {
     LLVMValueRef save_function = llvm_gen.function;
     LLVMBasicBlockRef save_block = LLVMGetInsertBlock(llvm_gen.builder);
-    result = llvm_fun(ir->fun);
+    result = llvm_of_fun(ir->fun);
     llvm_gen.function = save_function;
     LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
   } break;
-  case Ir_Kind_int_extend: {
-    LLVMValueRef llvm_val = llvm_of_ir(ir->int_extend.value);
+  case Ir_Kind_int_cast: {
+    LLVMValueRef llvm_val = llvm_of_ir(ir->int_cast.value);
     LLVMTypeRef llvm_to = llvm_of_type(type);
     result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
   } break;

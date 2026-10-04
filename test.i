@@ -1,11 +1,11 @@
-BLOCK_SIZE_IN_PIXELS : 24
-WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * Game.width
-WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * Game.height
+// BLOCK_SIZE_IN_PIXELS : 24
+// WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * Game.width
+// WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * Game.height
 
-Game : (
-  width : 12
-  height: 12
-)
+// Game : (
+//   width : 12
+//   height: 12
+// )
 
 print_i32:(n:I32) -> {
   if n == 0 do {
@@ -25,35 +25,37 @@ print_i32:(n:I32) -> {
     n = n / 10
     i = i + 1
   }
+  putchar 10
   while i > 0 do {
+    putchar(i + 48)
     i = i - 1
-    putchar (buf[i] + 48)
+    putchar(buf[i] + 48)
   }
   putchar 10
 }
 
-print_str:(str: Str) -> {
-  i:I32 = 0
-  while i < str.len do {
-    putchar(str[i])
-    i = i + 1
-  }
-  putchar 10
-}
+// print_str:(str: Str) -> {
+//   i:I32 = 0
+//   while i < str.len do {
+//     putchar(str[i])
+//     i = i + 1
+//   }
+//   putchar 10
+// }
 
 putchar: #foreign.c "putchar" type (char:I32) -> I32
 
-Vec : (x: I32; y: I32; z: 100)
-v:Vec = (123;)
+// Vec : (x: I32; y: I32; z: 100)
+// v:Vec = (123;)
 
-print_i32(v.x + v.z) // FIX: broken beyond believes
+print_i32(456)
 
-Window : type 64'#bits (opaque:"SDL_Window")
-window: Window
+// Window : type 64'#bits (opaque:"SDL_Window")
+// window: Window
 
-print_str(window.opaque)
+// print_str(window.opaque)
 
-print_str("Hello World!")
+// print_str("Hello World!")
 
 // CreateWindow : #foreign.c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
 // import sdl

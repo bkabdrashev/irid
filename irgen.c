@@ -48,7 +48,7 @@ typedef enum Ir_Kind {
   Ir_Kind_arg  = 137,
   Ir_Kind_macro_par  = 138,
 
-  Ir_Kind_int_extend  = 140,
+  Ir_Kind_int_cast  = 140,
   Ir_Kind_record_cast = 141,
   Ir_Kind_array_cast  = 142,
   Ir_Kind_span_from_array_cast = 143,
@@ -133,7 +133,7 @@ struct Ir {
     Position_Offset position;
     Name_Offset     name_offset;
     Declare         declare;
-    Int_Extend      int_extend;
+    Int_Extend      int_cast;
     Ir*             cast_value;
   };
 };
@@ -436,11 +436,11 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, ".");
     string_builder_push_str(sb, ir->name_offset.at);
   break;
-  case Ir_Kind_int_extend:
-    string_builder_push_cstr(sb, "int extend ");
-    string_builder_push_irid(sb, ir->int_extend.value);
+  case Ir_Kind_int_cast:
+    string_builder_push_cstr(sb, "int cast ");
+    string_builder_push_irid(sb, ir->int_cast.value);
     string_builder_push_cstr(sb, " to ");
-    string_builder_push_i64(sb, ir->int_extend.bits);
+    string_builder_push_i64(sb, ir->int_cast.bits);
   break;
   case Ir_Kind_record_cast:
     string_builder_push_cstr(sb, "record cast ");
@@ -1415,7 +1415,6 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a:{ 1 + 2 }", "");
   // test("a:[2]I8 = \"AB\"; a[1]", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
