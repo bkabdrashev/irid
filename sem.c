@@ -2290,10 +2290,45 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_str: {
     Array* str_array = type_array_init(ir->str->length);
     str_array->of_type = sem.bytes_range;
+    I32 length = 0;
     for (I32 i = 0; i < ir->str->length; i++) {
-      Type* int_type = type_int(ir->str->base[i]);
-      str_array->types[i] = type_define_size(8, int_type);
+      C8 raw = ir->str->base[i];
+      C8 val = 0;
+      if (raw == '\\') {
+        i++;
+        raw = ir->str->base[i];
+        if (raw == 'x') {
+          assert(0);
+        }
+        else {
+          C8 escape_to_char[256] = {
+            ['0'] = '\0',
+            ['\''] = '\'',
+            ['"'] = '"',
+            ['\\'] = '\\',
+            ['n'] = '\n',
+            ['r'] = '\r',
+            ['t'] = '\t',
+            ['v'] = '\v',
+            ['b'] = '\b',
+            ['a'] = '\a',
+          };
+          I8 index = raw;
+          val = escape_to_char[index];
+          if (val == 0 && raw != '0') {
+            printf("Invalid string literal escape '\\%c'\n", raw);
+            assert(0);
+          }
+        }
+      }
+      else {
+        val = raw;
+      }
+      Type* int_type = type_int(val);
+      str_array->types[length++] = type_define_size(8, int_type);
     }
+
+    str_array->length = length;
     result = type_array(str_array);
   } break;
   case Ir_Kind_declare: {

@@ -57,7 +57,7 @@ Window : type 64'#bits (opaque:"SDL_Window")
 print_str("Hello World!")
 
 CreateWindow : #foreign.c "SDL_CreateWindow" type (title: @I8; w: I32; h: I32; flags: WindowFlags) -> @Window
-window: @Window = CreateWindow(@("Shy SDL3 Snake\0"[0]); WINDOW_WIDTH; WINDOW_HEIGHT; 0)
+window: @Window = CreateWindow(@("Title\0"[0]); WINDOW_WIDTH; WINDOW_HEIGHT; 0)
 
 // import sdl
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
