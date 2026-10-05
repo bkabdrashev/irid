@@ -1,11 +1,11 @@
-// BLOCK_SIZE_IN_PIXELS : 24
-// WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * Game.width
-// WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * Game.height
+BLOCK_SIZE_IN_PIXELS : 24
+WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * Game.width
+WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * Game.height
 
-// Game : (
-//   width : 12
-//   height: 12
-// )
+Game : (
+  width : 12
+  height: 12
+)
 
 print_i32:(n:I32) -> {
   if n == 0 do {
@@ -49,18 +49,19 @@ v:Vec = (123;)
 
 print_i32(v.x + v.z)
 
+WindowFlags : I64
 Window : type 64'#bits (opaque:"SDL_Window")
-window: Window
 
-print_str(window.opaque)
+// print_str(window@.opaque)
 
 print_str("Hello World!")
 
-// CreateWindow : #foreign.c SDL_CreateWindow (title: Str; w: I32; h: I32; flags: WindowFlags) -> @Window
+CreateWindow : #foreign.c "SDL_CreateWindow" type (title: @I8; w: I32; h: I32; flags: WindowFlags) -> @Window
+window: @Window = CreateWindow(@("Shy SDL3 Snake\0"[0]); WINDOW_WIDTH; WINDOW_HEIGHT; 0)
+
 // import sdl
 // sdl.init(sdl.INIT_VIDEO | sdl.INIT_JOYSTICK)
-// window := sdl.CreateWindow("Shy SDL3 Snake", WINDOW_WIDTH, WINDOW_HEIGHT, 0)
 //
 // Renderer : type 64'bits (opaque:"SDL_Renderer")
-// CreateRenderer : #foreign.c SDL_CreateRenderer (window: @Window; name: Cstr) -> @Renderer
+// CreateRenderer : #foreign.c "SDL_CreateRenderer" type (window: @Window; name: Cstr) -> @Renderer
 // GetTicks : #foreign.c SDL_GetTicks () -> U64

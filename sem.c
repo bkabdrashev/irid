@@ -514,6 +514,7 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
       result = false;
     }
     else {
+      result = true;
       for (I32 i = 0; i < one->record->length; i++) {
         Field field_one = type_record_get_by_position(one->record, i);
         Field field_two;
@@ -528,7 +529,6 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
           break;
         }
       }
-      result = true;
     }
   } break;
   case Type_Kind_ptr: {
@@ -537,6 +537,7 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
     }
     subtype_visited_push(visited, one->pointer, two->pointer);
     // TODO: need to check whether pointer is global/stack/
+    result = true;
     if (two->pointer->stack_vars.len > 0) {
       for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
         Var* var = one->pointer->stack_vars.list[i];
@@ -552,7 +553,6 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
         result = false;
       }
     }
-    result = true;
   } break;
   case Type_Kind_fun: {
     result = false;
@@ -1446,7 +1446,8 @@ Type* type_pointer_to(Type* type) {
 Type* type_pointer_var(Var* var) {
   Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
            pointer->stack_vars = hash_set_init(sem.perm_arena, 1);
-  if (var->is_temp) {
+           pointer->declared   = 0;
+  if (var->kind == Var_Kind_pointee) {
     pointer->declared = sem_var_declare(var);
   }
   else {
@@ -2113,7 +2114,7 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
     printf("cannot assign a constant '%s'\n", var->name->base);
     assert(0);
   }
-  if (var->kind == Var_Kind_none) {
+  if (var->kind == Var_Kind_none || var->kind == Var_Kind_pointee) {
     var->declared = type_join(block, var->declared, type);
     var->block_types[block->id] = type;
   }

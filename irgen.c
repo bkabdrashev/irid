@@ -99,6 +99,7 @@ typedef enum Var_State {
 
 typedef enum Var_Kind {
   Var_Kind_none,
+  Var_Kind_pointee,
   Var_Kind_constant,
   Var_Kind_assigned,
   Var_Kind_declared,
@@ -110,7 +111,6 @@ struct Var {
   Var_State state;
   I32   index;
   B8    global;
-  B8    is_temp;
   Var*  parent;
   Str*  name;
   Ir*     declared_ir;
@@ -815,9 +815,6 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
     Var* temp_var = temp_fun.vars->base[i];
     Type** types = arena_push_zero(irgen.perm_arena, var->blocks->length * sizeof(Type*));
     temp_var->block_types = types;
-    if (temp_var->kind != Var_Kind_none) {
-      temp_var->is_temp = true;
-    }
   }
   del(irgen.fun_stack);
 }
@@ -976,6 +973,22 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   }
 }
 
+void irgen_use_var(Var* var) {
+  if (var->declared_ir->kind == Ir_Kind_record) {
+    Rec* rec = var->declared_ir->rec;
+    for (I32 i = 0; i < rec->length; i++) {
+      Str* name = rec->names[i];
+      Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+      sym->kind = Symbol_Kind_variable;
+      sym->ir = irgen_push_position_offset(var->declared_ir, i);;
+      irgen_sym_put(name, sym);
+    }
+  }
+  else {
+    assert(0);
+  }
+}
+
 Ir* irgen_ast_node(Ast_Node* node) {
   Ir* result = 0;
   switch (node->kind) {
@@ -1113,7 +1126,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     }
     else {
       Var* var = irgen_var_new();
-           var->kind   = Var_Kind_none;
+           var->kind   = Var_Kind_pointee;
            var->state  = Var_State_unresolved;
            var->global = irgen.scope_stack.length == 1;
            var->name   = irgen.str_anon;
@@ -1238,7 +1251,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
         irgen_push_declare(arg_var);
-        irgen_assign(lhs, fun->arg_var);
+        irgen_use_var(arg_var);
       }
       else if (lhs->kind == Ast_Kind_declare) {
         scope = hash_map_init(irgen.perm_arena, 1);

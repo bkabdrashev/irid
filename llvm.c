@@ -367,8 +367,8 @@ void llvm_ir(Ir* ir) {
     }
     else if (fun_type->kind == Type_Kind_fun) {
       LLVMTypeRef llvm_fun_type = llvm_of_type(fun_type);
-      Ir*   arg_ir   = ir->binary.two;
-      Type* arg_type = type_of_ir(arg_ir);
+      Ir*   ir_arg   = ir->binary.two;
+      Type* arg_type = type_of_ir(ir_arg);
       LLVMValueRef* llvm_args;
       I32 llvm_arg_count = 0;
       if (arg_type->kind == Type_Kind_none) {
@@ -376,17 +376,18 @@ void llvm_ir(Ir* ir) {
         llvm_arg_count = 0;
       }
       else if (fun_type->function->foreign_name != irgen.str_nil && arg_type->kind == Type_Kind_record) {
-        if (arg_ir->kind == Ir_Kind_record) {
-          Rec* rec = arg_ir->rec;
-          llvm_args = arena_push(llvm_gen.perm_arena, rec->length * sizeof(LLVMValueRef));
-          for (I32 i = 0; i < rec->length; i++) {
-            llvm_args[i] = llvm_of_ir(rec->irs[i]);
+        if (arg_type->kind == Type_Kind_record) {
+          Record* record = arg_type->record;
+          LLVMValueRef llvm_arg = llvm_of_ir(ir_arg);
+          llvm_args = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMValueRef));
+          for (I32 i = 0; i < record->length; i++) {
+            llvm_args[i] = LLVMBuildExtractValue(llvm_gen.builder, llvm_arg, i, "");
           }
-          llvm_arg_count = rec->length;
+          llvm_arg_count = record->length;
         }
       }
       else {
-        LLVMValueRef llvm_arg = llvm_of_ir(arg_ir);
+        LLVMValueRef llvm_arg = llvm_of_ir(ir_arg);
         llvm_arg = llvm_conversion(llvm_arg, arg_type, fun_type->function->arg);
         llvm_args = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMValueRef));
         llvm_args[0] = llvm_arg;
@@ -429,7 +430,7 @@ void llvm_ir(Ir* ir) {
         LLVMValueRef llvm_ptr;
         {
           LLVMValueRef llvm_span = LLVMBuildLoad2(llvm_gen.builder, llvm_type_span, llvm_ptr_to_span, "");
-          llvm_ptr  = LLVMBuildExtractValue(llvm_gen.builder, llvm_span, 1, "__test");
+          llvm_ptr  = LLVMBuildExtractValue(llvm_gen.builder, llvm_span, 1, "");
         }
 
         {
@@ -786,6 +787,19 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     LLVMContextDispose(llvm_gen.context);
     return 1;
   }
+
+  LLVMOrcDefinitionGeneratorRef sdl_generator = NULL;
+  Cstr sdl_lib_path = "libSDL3.so";
+  LLVMErrorRef gen_error = LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(&sdl_generator, sdl_lib_path, '\0', NULL, NULL);
+
+  if (gen_error) {
+    char *errMsg = LLVMGetErrorMessage(gen_error);
+    fprintf(stderr, "Failed to create SDL3 search generator: %s\n", errMsg);
+    LLVMDisposeErrorMessage(errMsg);
+    return 1;
+  }
+
+  LLVMOrcJITDylibAddGenerator(LLVMOrcLLJITGetMainJITDylib(jit), sdl_generator);
 
   LLVMOrcJITTargetAddress addr;
   if (LLVMOrcLLJITLookup(jit, &addr, "main")) {
