@@ -418,7 +418,8 @@ void llvm_ir(Ir* ir) {
         LLVMTypeRef  llvm_int_type     = LLVMIntTypeInContext(llvm_gen.context, 32);
         {
           LLVMValueRef zero       = LLVMConstInt(llvm_int_type, 0, 0);
-          LLVMValueRef indices[2] = { zero, llvm_of_ir(ir->binary.two) };
+          LLVMValueRef index      = llvm_of_ir(ir->binary.two);
+          LLVMValueRef indices[2] = { zero, index };
           result = LLVMBuildInBoundsGEP2(llvm_gen.builder, llvm_ptr_to, llvm_ptr_to_array, indices, 2, "");
         }
       }
@@ -594,11 +595,12 @@ void llvm_ir(Ir* ir) {
     result = LLVMConstStructInContext(llvm_gen.context, values, 2, false);
   } break;
   case Ir_Kind_record: {
-    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, ir->rec->length * sizeof(LLVMValueRef));
+    LLVMTypeRef llvm_type = llvm_of_type(type);
+    result = LLVMGetUndef(llvm_type);
     for (I32 i = 0; i < ir->rec->length; i++) {
-      values[i] =  llvm_of_ir(ir->rec->irs[i]);
+      LLVMValueRef value = llvm_of_ir(ir->rec->irs[i]);
+      result = LLVMBuildInsertValue(llvm_gen.builder, result, value, i, "");
     }
-    result = LLVMConstStructInContext(llvm_gen.context, values, ir->rec->length, false);
   } break;
   case Ir_Kind_ptr: {
     assert(0);

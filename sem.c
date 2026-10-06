@@ -490,7 +490,7 @@ B8 subtype_visited_contains(Subtype_Visited* v, Pointer* one, Pointer* two) {
 }
 
 void subtype_visited_push(Subtype_Visited* v, Pointer* one, Pointer* two) {
-  arena_push(sem.temp_arena, sizeof(Pointer_Pair));
+  arena_extend(sem.temp_arena, v->base, (v->length + 1) * sizeof(Pointer_Pair));
   v->base[v->length].one = one;
   v->base[v->length].two = two;
   v->length++;
@@ -535,22 +535,24 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
     if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
       result = true;
     }
-    subtype_visited_push(visited, one->pointer, two->pointer);
-    // TODO: need to check whether pointer is global/stack/
-    result = true;
-    if (two->pointer->stack_vars.len > 0) {
-      for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
-        Var* var = one->pointer->stack_vars.list[i];
-        if (!hash_set_exists(&two->pointer->stack_vars, var)) {
-          result = false;
+    else {
+      subtype_visited_push(visited, one->pointer, two->pointer);
+      // TODO: need to check whether pointer is global/stack/
+      result = true;
+      if (two->pointer->stack_vars.len > 0) {
+        for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
+          Var* var = one->pointer->stack_vars.list[i];
+          if (!hash_set_exists(&two->pointer->stack_vars, var)) {
+            result = false;
+          }
         }
       }
-    }
-    Type* one_declared = type_pointer_declared(one->pointer);
-    Type* two_declared = type_pointer_declared(two->pointer);
-    if (one_declared && two_declared) {
-      if (!type_is_same_rec(one_declared, two_declared, visited)) {
-        result = false;
+      Type* one_declared = type_pointer_declared(one->pointer);
+      Type* two_declared = type_pointer_declared(two->pointer);
+      if (one_declared && two_declared) {
+        if (!type_is_same_rec(one_declared, two_declared, visited)) {
+          result = false;
+        }
       }
     }
   } break;
@@ -602,28 +604,31 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
       if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
         result = true;
       }
-      subtype_visited_push(visited, one->pointer, two->pointer);
-      // TODO: need to check whether pointer is global/stack/
-      if (two->pointer->stack_vars.len > 0) {
-        for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
-          Var* var = one->pointer->stack_vars.list[i];
-          if (!hash_set_exists(&two->pointer->stack_vars, var)) {
+      else {
+        result = true;
+        subtype_visited_push(visited, one->pointer, two->pointer);
+        // TODO: need to check whether pointer is global/stack/
+        if (two->pointer->stack_vars.len > 0) {
+          for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
+            Var* var = one->pointer->stack_vars.list[i];
+            if (!hash_set_exists(&two->pointer->stack_vars, var)) {
+              assert(0);
+              result = false;
+            }
+          }
+        }
+        Type* one_declared = type_pointer_declared(one->pointer);
+        Type* two_declared = type_pointer_declared(two->pointer);
+        if (one_declared && two_declared) {
+          if (!type_is_subtype_rec(one_declared, two_declared, visited)) {
             assert(0);
             result = false;
           }
         }
       }
-      Type* one_declared = type_pointer_declared(one->pointer);
-      Type* two_declared = type_pointer_declared(two->pointer);
-      if (one_declared && two_declared) {
-        if (!type_is_subtype_rec(one_declared, two_declared, visited)) {
-          assert(0);
-          result = false;
-        }
-      }
-      result = true;
     } break;
     case Type_Kind_record: {
+      result = true;
       for (I32 i = 0; i < one->record->length; i++) {
         Field field_one = type_record_get_by_position(one->record, i);
         Field field_two;
@@ -638,7 +643,6 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
           result = false;
         }
       }
-      result = true;
     } break;
     case Type_Kind_array: {
       // TODO: should [2]I8 be subtype of [4]I8?
