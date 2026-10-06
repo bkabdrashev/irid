@@ -41,61 +41,74 @@ LLVM_Gen llvm_gen;
 LLVMTypeRef llvm_of_type(Type* type) {
   I32 typeid = type - sem.types.base;
   LLVMTypeRef result = llvm_gen.types[typeid];
-  if (result) return result;
-
-  switch (type->kind) {
-  case Type_Kind_none: {
-    result = LLVMIntTypeInContext(llvm_gen.context, 0);
-  } break;
-  case Type_Kind_int: {
-    result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
-  } break;
-  case Type_Kind_ptr: {
-    Type* declared = type_pointer_declared(type->pointer);
-    LLVMTypeRef pointer_to = llvm_of_type(declared);
-    result = LLVMPointerType(pointer_to, 0);
-  } break;
-  case Type_Kind_record: {
-    LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
-    for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_type = type_of_field_at(type->record, i);
-      if (field_type->bits_size == 0) {
-        field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
-      }
-      else {
-        field_types[i] = llvm_of_type(field_type);
-      }
-    }
-    result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
-  } break;
-  case Type_Kind_array: {
-    LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
-    I32 length = type->array->length;
-    result = LLVMArrayType2(llvm_field_type, length);
-  } break;
-  case Type_Kind_span: {
-    LLVMTypeRef llvm_field_type = llvm_of_type(type->span->of_type);
-    LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMTypeRef));
-    field_types[0] = llvm_of_type(type->span->length);
-    field_types[1] = LLVMPointerType(llvm_field_type, 0);
-    result = LLVMStructTypeInContext(llvm_gen.context, field_types, 2, false);
-  } break;
-  case Type_Kind_fun: {
-    LLVMTypeRef* arg_types;
-    I32 arg_count = 0;
-    if (type->function->arg->kind == Type_Kind_none) {
-      arg_types = 0;
-      arg_count = 0;
-    }
-    else if (type->function->foreign_name != irgen.str_nil) {
-      if (type->function->arg->kind == Type_Kind_record) {
-        Record* record = type->function->arg->record;
-        arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
-        for (I32 i = 0; i < record->length; i++) {
-          Type* arg_type = record->types[i];
-          arg_types[i] = llvm_of_type(arg_type);
+  if (result) {
+    return result;
+  }
+  // else if (has_flag(type->flag, Type_Flag_comptime_const)) {
+  //   FIX: introduces asan crashes
+  //   result = LLVMIntTypeInContext(llvm_gen.context, 0);
+  // }
+  else {
+    switch (type->kind) {
+    case Type_Kind_none: {
+      result = LLVMIntTypeInContext(llvm_gen.context, 0);
+    } break;
+    case Type_Kind_int: {
+      result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    } break;
+    case Type_Kind_ptr: {
+      Type* declared = type_pointer_declared(type->pointer);
+      LLVMTypeRef pointer_to = llvm_of_type(declared);
+      result = LLVMPointerType(pointer_to, 0);
+    } break;
+    case Type_Kind_record: {
+      LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
+      for (I32 i = 0; i < type->record->length; i++) {
+        Type* field_type = type_of_field_at(type->record, i);
+        if (field_type->bits_size == 0) {
+          field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
         }
-        arg_count = record->length;
+        else {
+          field_types[i] = llvm_of_type(field_type);
+        }
+      }
+      result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
+    } break;
+    case Type_Kind_array: {
+      LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
+      I32 length = type->array->length;
+      result = LLVMArrayType2(llvm_field_type, length);
+    } break;
+    case Type_Kind_span: {
+      LLVMTypeRef llvm_field_type = llvm_of_type(type->span->of_type);
+      LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, 2 * sizeof(LLVMTypeRef));
+      field_types[0] = llvm_of_type(type->span->length);
+      field_types[1] = LLVMPointerType(llvm_field_type, 0);
+      result = LLVMStructTypeInContext(llvm_gen.context, field_types, 2, false);
+    } break;
+    case Type_Kind_fun: {
+      LLVMTypeRef* arg_types;
+      I32 arg_count = 0;
+      if (type->function->arg->kind == Type_Kind_none) {
+        arg_types = 0;
+        arg_count = 0;
+      }
+      else if (type->function->foreign_name != irgen.str_nil) {
+        if (type->function->arg->kind == Type_Kind_record) {
+          Record* record = type->function->arg->record;
+          arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
+          for (I32 i = 0; i < record->length; i++) {
+            Type* arg_type = record->types[i];
+            arg_types[i] = llvm_of_type(arg_type);
+          }
+          arg_count = record->length;
+        }
+        else {
+          LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
+          arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
+          arg_types[0] = arg_type;
+          arg_count = 1;
+        }
       }
       else {
         LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
@@ -103,18 +116,13 @@ LLVMTypeRef llvm_of_type(Type* type) {
         arg_types[0] = arg_type;
         arg_count = 1;
       }
+      LLVMTypeRef ret_type = llvm_of_type(type->function->ret);
+      result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
+    } break;
     }
-    else {
-      LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
-      arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
-      arg_types[0] = arg_type;
-      arg_count = 1;
-    }
-    LLVMTypeRef ret_type = llvm_of_type(type->function->ret);
-    result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
-  } break;
+
+    llvm_gen.types[typeid] = result;
   }
-  llvm_gen.types[typeid] = result;
   return result;
 }
 
