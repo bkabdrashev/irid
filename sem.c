@@ -967,7 +967,7 @@ Type* type_define_size(I32 bits_size, Type* bits_of) {
        *type = *bits_of;
         type->flag |= Type_Flag_size_defined;
         type->bits_size    = bits_size;
-        type->bits_align   = align_up(bits_size, 8);
+        // type->bits_align   = align_up(bits_size, 8);
   return type_in_set(type);
 }
 
@@ -1101,6 +1101,13 @@ Field type_record_get_by_position(Record* record, I32 position) {
 Field type_record_get_by_name(Record* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
   return type_record_get_by_position(record, position);
+}
+
+I32 type_record_bits_nopad(Record* record, I32 alignment) {
+  Type* type_last   = record->types[record->length - 1];
+  I32   offset_last = record->offsets[record->length - 1];
+  I32   result      = align_up(offset_last + type_last->bits_size, alignment);
+  return result;
 }
 
 Var* sem_get_var_by_name(Var* var, Str* name) {

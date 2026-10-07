@@ -62,8 +62,9 @@ LLVMTypeRef llvm_of_type(Type* type) {
       result = LLVMPointerType(pointer_to, 0);
     } break;
     case Type_Kind_record: {
-      LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMTypeRef));
-      for (I32 i = 0; i < type->record->length; i++) {
+      I32 length = type->record->length;
+      LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, (length + 1) * sizeof(LLVMTypeRef));
+      for (I32 i = 0; i < length; i++) {
         Type* field_type = type_of_field_at(type->record, i);
         if (field_type->bits_size == 0) {
           field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
@@ -72,7 +73,12 @@ LLVMTypeRef llvm_of_type(Type* type) {
           field_types[i] = llvm_of_type(field_type);
         }
       }
-      result = LLVMStructTypeInContext(llvm_gen.context, field_types, type->record->length, false);
+      I32 bits_nopad = type_record_bits_nopad(type->record, type->bits_align);
+      if (bits_nopad < type->bits_size) {
+        LLVMTypeRef int_pad = LLVMIntTypeInContext(llvm_gen.context, type->bits_size - bits_nopad);
+        field_types[length++] = int_pad;
+      }
+      result = LLVMStructTypeInContext(llvm_gen.context, field_types, length, false);
     } break;
     case Type_Kind_array: {
       LLVMTypeRef llvm_field_type = llvm_of_type(type->array->of_type);
@@ -232,7 +238,8 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     LLVMPositionBuilderAtEnd(llvm_gen.builder, save_block);
   } break;
   case Type_Kind_record: {
-    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, type->record->length * sizeof(LLVMValueRef));
+    I32 length = type->record->length;
+    LLVMValueRef* values = arena_push(llvm_gen.perm_arena, (length+1) * sizeof(LLVMValueRef));
     for (I32 i = 0; i < type->record->length; i++) {
       Type* field_type = type_of_field_at(type->record, i);
       if (field_type->bits_size == 0) {
@@ -243,7 +250,12 @@ LLVMValueRef llvm_default_of_type(Type* type) {
         values[i] = llvm_default_of_type(field_type);
       }
     }
-    result = LLVMConstStructInContext(llvm_gen.context, values, type->record->length, false);
+    I32 bits_nopad = type_record_bits_nopad(type->record, type->bits_align);
+    if (bits_nopad < type->bits_size) {
+      LLVMTypeRef int_pad = LLVMIntTypeInContext(llvm_gen.context, type->bits_size - bits_nopad);
+      values[length++] = LLVMConstInt(int_pad, 0, false);
+    }
+    result = LLVMConstStructInContext(llvm_gen.context, values, length, false);
   } break;
   case Type_Kind_array: {
     I32 length = type->array->length;

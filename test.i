@@ -53,7 +53,7 @@ Renderer       : type 64'#bits (opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
 EventKind      : type 32'#bits (QUIT\KEY_DOWN)
-Event          : type (8*128)'#bits (kind: EventKind) // TODO: c-style union
+Event          : type 1024'#bits (kind: EventKind) // TODO: c-style union
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
@@ -91,24 +91,21 @@ print_str("Hello World!")
 init(INIT_VIDEO)
 window:   @Window   = CreateWindow(@("Title\0"[0]); WINDOW_WIDTH; WINDOW_HEIGHT; 0)
 renderer: @Renderer = CreateRenderer(window; @("\0"[0]))
-last_step: U64 = GetTicks()
-event: Event
+event:     Event
 
-t: U64 = GetTicks()
 running: B8 = 1
 while running do {
   while PollEvent(@event) do {
     if event.kind == QUIT do {
       print_str("Quit")
       running = 0
+      print_i32(running)
     }
   }
-  now: U64 = GetTicks()
-  dt:  U64 = now - t
-  t = now
   RenderPresent(renderer)
   Delay(10)
 }
+
 DestroyRenderer(renderer)
 DestroyWindow(window)
 Quit()
