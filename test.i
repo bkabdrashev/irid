@@ -46,14 +46,14 @@ putchar: #foreign.c "putchar" type (char:I32) -> I32
 
 INIT_VIDEO     : 0x00000020
 INIT_EVENTS    : 0x00004000
-InitFlags      : 32'#bits (INIT_VIDEO\INIT_EVENTS)
+InitFlags      : U32
 WindowFlags    : I64
 Window         : type 64'#bits (opaque:"SDL_Window")
 Renderer       : type 64'#bits (opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
 EventKind      : type 32'#bits (QUIT\KEY_DOWN)
-Event          : type 1024'#bits (kind: EventKind) // TODO: c-style union
+Event          : type (128*8)'#bits (kind: EventKind) // TODO: c-style union
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
@@ -88,7 +88,7 @@ RenderPresent   : #foreign.c "SDL_RenderPresent"   type (renderer: @Renderer) ->
 
 print_str("Hello World!")
 
-init(INIT_VIDEO)
+init(INIT_VIDEO | INIT_EVENTS)
 window:   @Window   = CreateWindow(@("Title\0"[0]); WINDOW_WIDTH; WINDOW_HEIGHT; 0)
 renderer: @Renderer = CreateRenderer(window; @("\0"[0]))
 event:     Event
@@ -99,7 +99,6 @@ while running do {
     if event.kind == QUIT do {
       print_str("Quit")
       running = 0
-      print_i32(running)
     }
   }
   RenderPresent(renderer)

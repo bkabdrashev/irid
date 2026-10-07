@@ -48,6 +48,9 @@ typedef enum Token_Kind {
   Token_Kind_slash              = 53,
   Token_Kind_percent            = 55,
   Token_Kind_dot_dot            = 57,
+  Token_Kind_pipe               = 59,
+  Token_Kind_pike               = 61,
+  Token_Kind_ampersand          = 63,
 
   Token_Kind_name               = String_Kind_name,
   Token_Kind_if                 = String_Kind_if,
@@ -204,6 +207,18 @@ Tokens lex_source(Arena* arena, Cstr source) {
       }
       token.str = str_from_range(start, lexer.stream);
       token.kind  = (Token_Kind)token.str->kind;
+    } break;
+    case '|': {
+      token.kind = Token_Kind_pipe;
+      lexer.stream++;
+    } break;
+    case '^': {
+      token.kind = Token_Kind_pike;
+      lexer.stream++;
+    } break;
+    case '&': {
+      token.kind = Token_Kind_ampersand;
+      lexer.stream++;
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
@@ -372,6 +387,8 @@ Tokens lex_source(Arena* arena, Cstr source) {
       }
     } break;
     default: {
+      printf("unknown character '%c'\n", *lexer.stream);
+      assert(0);
       lexer.stream++;
     } break;
     }
@@ -436,6 +453,15 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_percent:
       string_builder_push_cstr(&sb, "%");
+    break;
+    case Token_Kind_pipe:
+      string_builder_push_cstr(&sb, "|");
+    break;
+    case Token_Kind_pike:
+      string_builder_push_cstr(&sb, "|");
+    break;
+    case Token_Kind_ampersand:
+      string_builder_push_cstr(&sb, "&");
     break;
     case Token_Kind_equal_equal:
       string_builder_push_cstr(&sb, "==");

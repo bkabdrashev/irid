@@ -45,7 +45,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
     return result;
   }
   // else if (has_flag(type->flag, Type_Flag_comptime_const)) {
-  //   FIX: introduces asan crashes
+  //   // FIX: introduces asan crashes
   //   result = LLVMIntTypeInContext(llvm_gen.context, 0);
   // }
   else {
@@ -362,6 +362,7 @@ void llvm_ir(Ir* ir) {
   } break;
 
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
+  case Ir_Kind_or: case Ir_Kind_xor: case Ir_Kind_and:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
   {
     switch (ir->kind) {
@@ -370,6 +371,11 @@ void llvm_ir(Ir* ir) {
       case Ir_Kind_mul: result = LLVMBuildMul(llvm_gen.builder, llvm_one, llvm_two, ""); break;
       case Ir_Kind_div: result = LLVMBuildSDiv(llvm_gen.builder, llvm_one, llvm_two, ""); break;
       case Ir_Kind_rem: result = LLVMBuildSRem(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+
+      case Ir_Kind_or:  result = LLVMBuildOr(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_xor: result = LLVMBuildXor(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_and: result = LLVMBuildAnd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+
       case Ir_Kind_eq: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntEQ, llvm_one, llvm_two, ""); break;
       case Ir_Kind_ne: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_one, llvm_two, ""); break;
       case Ir_Kind_lt: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSLT, llvm_one, llvm_two, ""); break;
@@ -836,6 +842,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   void (*jit_main)() = (void (*)())addr;
   jit_main();
 
+  // LLVMOrcDisposeDefinitionGenerator(sdl_generator);
   LLVMDisposeMessage(triple);
   LLVMOrcDisposeLLJIT(jit);
   LLVMDisposeBuilder(llvm_gen.builder);

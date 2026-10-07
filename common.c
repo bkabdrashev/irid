@@ -108,11 +108,27 @@ I16 bits_needed(I64 min, I64 max) {
     return bit_width(x - 1) + 1;
   }
 
-  unsigned a = (unsigned)max;
-  unsigned b = (unsigned)(-min);
-  unsigned w = bit_width(a);
-  unsigned v = bit_width(b - 1);
+  U64 a = (U64)max;
+  U64 b = (U64)(-min);
+  U64 w = bit_width(a);
+  U64 v = bit_width(b - 1);
   return (w > v ? w : v) + 1;
+}
+
+U64 bits_or_range(U64 lo, U64 hi) {
+  if (lo == hi) return lo;
+
+  U64 diff = lo ^ hi;
+  U64 width = bit_width(diff);
+
+  U64 mask;
+  if (width == 64) {
+    mask = ~0ULL;
+  } else {
+    mask = (1ULL << width) - 1;
+  }
+
+  return hi | mask;
 }
 
 Umi power_of_2_up(Umi v) {

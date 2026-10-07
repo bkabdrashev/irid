@@ -2423,6 +2423,31 @@ void sem_ir(Block* block, Ir* ir) {
       result = sem_ranges_reflow_binary(block, ir, range, types);
     }
   } break;
+  case Ir_Kind_or: {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+      if (ranges_is_single(types.one->ranges) && ranges_is_single(types.two->ranges)) {
+        I64 one = ranges_min(types.one->ranges);
+        I64 two = ranges_min(types.two->ranges);
+        result = type_int(one | two);
+      }
+      else {
+        Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+        Range one = ranges_limits(pair.one);
+        Range two = ranges_limits(pair.two);
+        I64   or_one = bits_or_range(one.lo, one.hi);
+        I64   or_two = bits_or_range(two.lo, two.hi);
+        Range range  = { .lo = 0, .hi = or_one | or_two };
+        result = sem_ranges_reflow_binary(block, ir, range, types);
+      }
+    }
+  } break;
+  case Ir_Kind_xor: {
+    assert(0);
+  } break;
+  case Ir_Kind_and: {
+    assert(0);
+  } break;
   case Ir_Kind_eq: case Ir_Kind_ne:
   case Ir_Kind_lt: case Ir_Kind_le:
   case Ir_Kind_gt: case Ir_Kind_ge: {
