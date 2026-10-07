@@ -52,16 +52,21 @@ Window         : type 64'#bits (opaque:"SDL_Window")
 Renderer       : type 64'#bits (opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
-EventKind      : type 32'#bits (QUIT\KEY_DOWN)
-Event          : type (128*8)'#bits (kind: EventKind) // TODO: c-style union
+Event          : type (128*8)'#bits QuitEvent \ KeyboardEvent // TODO: c-style union
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
 Keymod         : U16
 Scancode       : U16 // TODO: real scancodes
 
+QuitEvent : type (
+  kind      : U32 QUIT
+  reserved  : U32
+  timestamp : U64   /**< In nanoseconds, populated using SDL_GetTicksNS() */
+)
+
 KeyboardEvent : type (
-  kind      : EventKind   /**< SDL_EVENT_KEY_DOWN or SDL_EVENT_KEY_UP */
+  kind      : U32 KEY_DOWN /**< SDL_EVENT_KEY_DOWN or SDL_EVENT_KEY_UP */
   reserved  : U32
   timestamp : U64         /**< In nanoseconds, populated using SDL_GetTicksNS() */
   windowID  : WindowID     /**< The window with keyboard focus, if any */
