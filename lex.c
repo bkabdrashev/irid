@@ -60,7 +60,6 @@ typedef enum Token_Kind {
   Token_Kind_return             = String_Kind_return,
   Token_Kind_break              = String_Kind_break,
   Token_Kind_while              = String_Kind_while,
-  Token_Kind_type               = String_Kind_type | Token_Kind_Flag_call_rhs,
 } Token_Kind;
 
 typedef struct {
@@ -566,9 +565,6 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_break:
       string_builder_push_cstr(&sb, "break");
-    break;
-    case Token_Kind_type:
-      string_builder_push_cstr(&sb, "type");
     break;
     case Token_Kind_sharp:
       string_builder_push_cstr(&sb, "#");

@@ -42,7 +42,6 @@ typedef enum Ir_Kind {
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
-  Ir_Kind_type      = Ast_Kind_type | Ir_Flag_unary,
   Ir_Kind_store     = 128 | Ir_Flag_binary,
 
   Ir_Kind_record          = 131,
@@ -61,6 +60,7 @@ typedef enum Ir_Kind {
   Ir_Kind_foreign = 150,
   Ir_Kind_bits    = 151,
   Ir_Kind_len     = 152,
+  Ir_Kind_type    = 153,
 
 } Ir_Kind;
 
@@ -300,11 +300,13 @@ struct Irgen {
   Str*        str_anon;
   Str*        str_len;
   Str*        str_bits;
+  Str*        str_type;
   Str*        str_foreign;
 
   Hash_Map    builtins;
   Ir*         irid_len;
   Ir*         irid_bits;
+  Ir*         irid_type;
   Ir*         irid_foreign;
 
   Fun_Stack   fun_stack;
@@ -1157,13 +1159,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
       result = irgen_push_unary(Ir_Kind_load, offset);
     }
   } break;
-  case Ast_Kind_type: {
-    Ir* unary = irgen_ast_node(node->unary);
-    if (unary->kind == Ir_Kind_fun) {
-      unary->fun->kind = Fun_Kind_type;
-    }
-    result = irgen_push_unary(Ir_Kind_type, unary);
-  } break;
   case Ast_Kind_span:
   case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg:
@@ -1334,7 +1329,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.str_nil  = str_from_cstr("");
   irgen.str_anon = str_from_cstr("__anon");
 
-  irgen.builtins = hash_map_init(irgen.perm_arena, 3);
+  irgen.builtins = hash_map_init(irgen.perm_arena, 4);
   {
     irgen.irid_len = &new(irgen.irs);
     irgen.irid_len->kind = Ir_Kind_len;
@@ -1353,6 +1348,16 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     sym->kind = Symbol_Kind_constant;
     sym->ir = irgen.irid_bits;
     hash_map_put(&irgen.builtins, irgen.str_bits, sym);
+  }
+
+  {
+    irgen.irid_type = &new(irgen.irs);
+    irgen.irid_type->kind = Ir_Kind_type;
+    irgen.str_type = str_from_cstr("type");
+    Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+    sym->kind = Symbol_Kind_constant;
+    sym->ir = irgen.irid_type;
+    hash_map_put(&irgen.builtins, irgen.str_type, sym);
   }
 
   {
@@ -1429,7 +1434,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("c: type a \\ b; a:type 3; b:type 4", "");
+  // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: 1,2;", "");

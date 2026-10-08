@@ -53,6 +53,9 @@ LLVMTypeRef llvm_of_type(Type* type) {
     case Type_Kind_none: {
       result = LLVMIntTypeInContext(llvm_gen.context, 0);
     } break;
+    case Type_Kind_type: {
+      result = LLVMIntTypeInContext(llvm_gen.context, 0);
+    } break;
     case Type_Kind_int: {
       result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
     } break;
@@ -193,6 +196,10 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   LLVMValueRef result = 0;
   switch (type->kind) {
   case Type_Kind_none: {
+    LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    result = LLVMConstInt(llvm_type, 0, false);
+  } break;
+  case Type_Kind_type: {
     LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
     result = LLVMConstInt(llvm_type, 0, false);
   } break;

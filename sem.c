@@ -76,6 +76,7 @@ struct Span {
 
 typedef enum Type_Kind {
   Type_Kind_none,
+  Type_Kind_type,
   Type_Kind_int,
   Type_Kind_ptr,
   Type_Kind_array,
@@ -96,6 +97,7 @@ struct Type {
   I16 bits_size;
   union {
     U64       value;
+    Type*     type;
     Ranges*   ranges;
     Pointer*  pointer;
     Array*    array;
@@ -130,6 +132,7 @@ struct Sem {
   Type_Pool types;
 
   Hash_Set  type_set;
+  Hash_Set  type_type_set;
   Hash_Set  record_set;
   Hash_Set  pointer_set;
   Hash_Set  ranges_set;
@@ -140,8 +143,9 @@ struct Sem {
   Type* type_none;
   Type* type_zero;
   Type* type_len;
-  Type* fun_bits;
   Type* fun_len;
+  Type* fun_bits;
+  Type* fun_type;
   Type* rec_foreign;
   Type* fun_foreign_c;
   Type* bytes_range;
@@ -213,6 +217,10 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   switch (type->kind) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "none");
+  break;
+  case Type_Kind_type:
+    string_builder_push_cstr(sb, "type ");
+    string_builder_push_type(sb, block, type->type);
   break;
   case Type_Kind_fun: {
     string_builder_push_type(sb, block, type->function->arg);
@@ -505,6 +513,9 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
   case Type_Kind_none: {
     result = true;
   } break;
+  case Type_Kind_type: {
+    result = true;
+  } break;
   case Type_Kind_int: {
     B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
     result = size_equal;
@@ -595,6 +606,9 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
   if (one->kind == two->kind) {
     switch (one->kind) {
     case Type_Kind_none: {
+      result = true;
+    } break;
+    case Type_Kind_type: {
       result = true;
     } break;
     case Type_Kind_int: {
@@ -729,6 +743,9 @@ B8 type_is_const(Type* type) {
   case Type_Kind_none: {
     result = true;
   } break;
+  case Type_Kind_type: {
+    result = true;
+  } break;
   case Type_Kind_int: {
     result = ranges_is_single(type->ranges);
   } break;
@@ -821,6 +838,34 @@ B8 sem_ranges_is_equal(Ranges* one, Ranges* two) {
       }
     }
   }
+  return result;
+}
+
+Type* type_type(Type* type) {
+  Type* result = sem.type_none;
+  I32 i = 0;
+  for (;;) {
+    i &= sem.type_type_set.cap - 1;
+    Type* key = sem.type_type_set.keys[i];
+    if (!key) {
+      sem.type_type_set.keys[i] = key;
+      break;
+    }
+    else {
+      if (key == type) {
+        type = key;
+        break;
+      }
+    }
+    i++;
+  }
+  Type* new_type = &new(sem.types);
+  new_type->kind = Type_Kind_type;
+  new_type->bits_align = 0;
+  new_type->bits_size  = 0;
+  new_type->flag = Type_Flag_comptime_const;
+  new_type->type = type;
+  result = type_in_set(new_type);
   return result;
 }
 
@@ -1351,6 +1396,9 @@ Type* type_meet(Type* one, Type* two) {
   else {
     switch (one->kind) {
     case Type_Kind_none: break;
+    case Type_Kind_type: {
+      result = type_meet(one->type, two->type);
+    } break;
     case Type_Kind_int: {
       result = type_ranges_meet(one->ranges, two->ranges);
     } break;
@@ -1752,7 +1800,6 @@ Ir_Kind sem_cmp_negate(Ir_Kind op) {
   }
 }
 
-// narrows both operands of `ir` assuming `one op two` holds
 void sem_type_narrow_int_cmp(Sem_Tasks* tasks, Ir* ir, Ir_Kind op) {
   Type_Pair pair = type_of_ir_binary(ir);
   Ranges* ra = pair.one->ranges;
@@ -2267,6 +2314,9 @@ Type* sem_var_declare(Var* var) {
   }
   Type* type = type_of_ir(var->declared_ir);
   if (type) {
+    if (type->kind == Type_Kind_type) {
+      // TODO: need to figure out how to handle type declarations
+    }
     var->declared = type;
     sem_var_kind(var);
     sem_record_declare_fields(var, type);
@@ -2413,6 +2463,9 @@ void sem_ir(Block* block, Ir* ir) {
       Range range = { .lo = min, .hi = max };
       result = sem_ranges_reflow_binary(block, ir, range, types);
     }
+    else {
+      assert(0);
+    }
   } break;
   case Ir_Kind_rem: {
     Type_Pair types = type_of_ir_binary(ir);
@@ -2421,6 +2474,9 @@ void sem_ir(Block* block, Ir* ir) {
       I64 max_two = ranges_max(pair.two);
       Range range  = { .lo = 0, .hi = max_two-1 };
       result = sem_ranges_reflow_binary(block, ir, range, types);
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ir_Kind_or: {
@@ -2440,6 +2496,9 @@ void sem_ir(Block* block, Ir* ir) {
         Range range  = { .lo = 0, .hi = or_one | or_two };
         result = sem_ranges_reflow_binary(block, ir, range, types);
       }
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ir_Kind_xor: {
@@ -2474,6 +2533,9 @@ void sem_ir(Block* block, Ir* ir) {
         Range range = { .lo = 0, .hi = 1 };
         result = sem_ranges_reflow_binary(block, ir, range, types);
       }
+    }
+    else {
+      assert(0);
     }
   } break;
   case Ir_Kind_neg: {
@@ -2794,6 +2856,13 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
     }
+    else if (fun_type == sem.fun_type) {
+      Type* type = type_of_ir(ir->unary);
+      result = type_type(type);
+    }
+    else if (fun_type->kind == Type_Kind_type) {
+      result = type_auto_cast(block, 0, arg_type, fun_type->type);
+    }
     else if (fun_type->kind == Type_Kind_fun) {
       if (fun_type->function->fun->kind == Fun_Kind_macro) {
         Fun*   fun         = fun_type->function->fun;
@@ -2872,9 +2941,6 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       assert(0);
     }
-  } break;
-  case Ir_Kind_type: {
-    result = type_of_ir(ir->unary);
   } break;
   default: assert(0);
   }
@@ -3162,13 +3228,14 @@ void sem_funs(Arena* arena, Funs funs) {
   fa_init(sem.perm_arena, sem.foreign_funs, irgen.irs.length);
   fa_add(sem.foreign_funs, 0);
 
-  sem.type_set     = hash_set_init(arena, irgen.irs.length);
-  sem.record_set   = hash_set_init(arena, irgen.irs.length);
-  sem.ranges_set   = hash_set_init(arena, irgen.irs.length);
-  sem.pointer_set  = hash_set_init(arena, irgen.irs.length);
-  sem.function_set = hash_set_init(arena, irgen.irs.length);
-  sem.array_set    = hash_set_init(arena, irgen.irs.length);
-  sem.span_set     = hash_set_init(arena, irgen.irs.length);
+  sem.type_set      = hash_set_init(arena, irgen.irs.length);
+  sem.type_type_set = hash_set_init(arena, irgen.irs.length);
+  sem.record_set    = hash_set_init(arena, irgen.irs.length);
+  sem.ranges_set    = hash_set_init(arena, irgen.irs.length);
+  sem.pointer_set   = hash_set_init(arena, irgen.irs.length);
+  sem.function_set  = hash_set_init(arena, irgen.irs.length);
+  sem.array_set     = hash_set_init(arena, irgen.irs.length);
+  sem.span_set      = hash_set_init(arena, irgen.irs.length);
 
   sem.type_none = &new(sem.types);
   sem.type_none->kind = Type_Kind_none;
@@ -3180,6 +3247,10 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.fun_len = &new(sem.types);
   sem.fun_len->kind = Type_Kind_none;
   type_of_ir_put(irgen.irid_len, sem.fun_len);
+
+  sem.fun_type = &new(sem.types);
+  sem.fun_type->kind = Type_Kind_none;
+  type_of_ir_put(irgen.irid_type, sem.fun_type);
 
   {
     sem.str_c = str_from_cstr("c");
@@ -3300,7 +3371,7 @@ void sem_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
-  // test("a:I32; b: B8; a = b; a", "");
+  test("a:I32; b: B8; a = b; a", "");
   // test("a:I32; a=0; while a < 8 do {a = a + 1}; a", "");
   // test("a:I32; a=0; while a != 8 do {a = a + 2}; a", "");
   // test("a:I32; a=0; while a != 8 do {a = a + 3}; a", "");

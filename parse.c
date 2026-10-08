@@ -56,7 +56,6 @@ typedef enum Ast_Kind {
   Ast_Kind_break_value = Token_Kind_break | Ast_Flag_value,
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
-  Ast_Kind_type        = (Token_Kind_type & 0xff) + 1,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
   Ast_Kind_span,
@@ -263,10 +262,6 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     }
     string_builder_push_cstr(sb, ")");
   break;
-  case Ast_Kind_type:
-    string_builder_push_cstr(sb, "type ");
-    string_builder_push_ast_node(sb, node->unary);
-  break;
   case Ast_Kind_return:
     string_builder_push_cstr(sb, "return");
   break;
@@ -389,8 +384,6 @@ typedef struct {
 
 I32 parse_right_precedence(Ast_Kind kind) {
   switch (kind) {
-  case Ast_Kind_type:
-    return 0;
   case Ast_Kind_fun:
     return 3;
   case Ast_Kind_meet:
@@ -694,7 +687,6 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
   case Token_Kind_at_prefix:    case Token_Kind_at:
-  case Token_Kind_type:
   {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind);
@@ -702,7 +694,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = ast_new_node(parser->perm_arena, kind);
     node->unary = unary;
   } break;
-  case Token_Kind_str: case Token_Kind_int: case Token_Kind_name: {
+  case Token_Kind_str: case Token_Kind_int: case Token_Kind_name:
+  {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
     node = ast_new_node(parser->perm_arena, kind);
     node->bits = token.bits;
@@ -950,7 +943,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("type (128*8)'#bits QuitEvent \\ KeyboardEvent",     "(bits 32)");
+  test("type a(b)",     "(bits 32)");
   return;
   test("foo \"Hi\"",     "(bits 32)");
   test("[]1",     "(bits 32)");
