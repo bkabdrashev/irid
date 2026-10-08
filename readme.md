@@ -25,8 +25,6 @@ for i in arr.len do
 arr[arr.len++] = 0
 ```
 
-- [ ] Ranges `..`
-
 - [ ] For loop
 
 - [ ] Bits, bytes, align specifiers:
@@ -322,13 +320,6 @@ span: []I8 = "ab"
 'a+b'foo
 ```
 
-- [ ] Operator precedence non ordered
-```irid
-2+3..4*5 // (2+3)..(4*5)
-8'bits 0..10 // 32'bits (0..10)
-8'bits 2 + 3 // (8'bits 2) + 3
-```
-
 - [ ] Static single assignment
 ```irid
 b = 10 // b is a ssa variable
@@ -383,3 +374,5 @@ A : (xy:Vec2)
 b = B(1; 2)
 B : (x:I32; y:I32)
 ```
+
+- [x] Ranges `..`

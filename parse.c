@@ -347,8 +347,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->declare.node);
   } break;
   case Ast_Kind_run: {
+    string_builder_push_cstr(sb, "(");
     string_builder_push_cstr(sb, "# ");
     string_builder_push_ast_node(sb, node->unary);
+    string_builder_push_cstr(sb, ")");
   } break;
   }
 }
@@ -390,40 +392,40 @@ I32 parse_right_precedence(Ast_Kind kind) {
   case Ast_Kind_type:
     return 0;
   case Ast_Kind_fun:
-    return 1;
+    return 3;
   case Ast_Kind_meet:
-    return 4;
-  case Ast_Kind_or:
     return 6;
-  case Ast_Kind_xor:
+  case Ast_Kind_or:
     return 8;
-  case Ast_Kind_and:
+  case Ast_Kind_xor:
     return 10;
+  case Ast_Kind_and:
+    return 12;
   case Ast_Kind_ne: case Ast_Kind_eq:
   case Ast_Kind_lt: case Ast_Kind_le:
   case Ast_Kind_gt: case Ast_Kind_ge:
-    return 12;
+    return 14;
   case Ast_Kind_join:
   case Ast_Kind_range:
-    return 14;
+    return 16;
   case Ast_Kind_sub:
   case Ast_Kind_add:
-    return 18;
+    return 20;
   case Ast_Kind_mul:
   case Ast_Kind_div: case Ast_Kind_rem:
-    return 20;
+    return 22;
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:
   case Ast_Kind_array:
   case Ast_Kind_span:
-    return 22;
-  case Ast_Kind_load:
     return 24;
+  case Ast_Kind_load:
+    return 26;
   case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
-    return 26;
+    return 28;
   default :
     return -1;
   }
@@ -432,34 +434,34 @@ I32 parse_right_precedence(Ast_Kind kind) {
 I32 parse_left_precedence(Ast_Kind kind) {
   switch (kind) {
   case Ast_Kind_fun:
-    return 1;
-  case Ast_Kind_meet:
     return 3;
-  case Ast_Kind_or:
+  case Ast_Kind_meet:
     return 5;
-  case Ast_Kind_xor:
+  case Ast_Kind_or:
     return 7;
-  case Ast_Kind_and:
+  case Ast_Kind_xor:
     return 9;
+  case Ast_Kind_and:
+    return 11;
   case Ast_Kind_ne: case Ast_Kind_eq:
   case Ast_Kind_lt: case Ast_Kind_le:
   case Ast_Kind_gt: case Ast_Kind_ge:
-    return 11;
+    return 13;
   case Ast_Kind_join:
   case Ast_Kind_range:
-    return 13;
+    return 15;
   case Ast_Kind_sub:
   case Ast_Kind_add:
-    return 17;
+    return 19;
   case Ast_Kind_mul:
   case Ast_Kind_div: case Ast_Kind_rem:
-    return 19;
+    return 21;
   case Ast_Kind_load:
-    return 23;
+    return 25;
   case Ast_Kind_subscript:
   case Ast_Kind_call:
   case Ast_Kind_dot:
-    return 25;
+    return 27;
   default :
     return -1;
   }
@@ -620,12 +622,22 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     } break;
     default: {
       parser->tok--;
-      if ((token.kind & Token_Kind_Flag_call_rhs) && !(token.flag & Token_Flag_wasnewline)) {
+      if (has_flag(token.kind, Token_Kind_Flag_call_rhs) && !has_flag(token.flag, Token_Flag_wasnewline)) {
         Ast_Kind kind = Ast_Kind_call;
-        I32 precedence = parse_left_precedence(kind);
+        I32 precedence = 0;
+        if (!has_flag(token.flag, Token_Flag_wasspace)) {
+          precedence = parse_left_precedence(kind);
+        }
         if (precedence >= precedence_to_match) {
           lhs = node;
-          node = parse_new_infix(parser, kind, lhs);
+          I32 right_precedence = 1;
+          if (!has_flag(token.flag, Token_Flag_wasspace)) {
+            right_precedence = parse_right_precedence(kind);
+          }
+          Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+          node = ast_new_node(parser->perm_arena, Ast_Kind_call);
+          node->binary.lhs = lhs;
+          node->binary.rhs = rhs;
         }
         else {
           return node;
@@ -938,8 +950,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("32'#bits (0..5)",     "(bits 32)");
-  // test("#foreign.c \"putchar\" (char:I32) -> I32",     "(bits 32)");
+  test("type (128*8)'#bits QuitEvent \\ KeyboardEvent",     "(bits 32)");
   return;
   test("foo \"Hi\"",     "(bits 32)");
   test("[]1",     "(bits 32)");

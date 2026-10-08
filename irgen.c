@@ -843,25 +843,15 @@ void irgen_scope_enter(Hash_Map* scope) {
     var->global = irgen.scope_stack.length == 1;
     var->name = key;
     sym->kind = Symbol_Kind_variable;
-    if (sym->ast->kind == Ast_Kind_type) {
-      sym->kind = Symbol_Kind_constant;
-    }
-    else {
-      sym->ir = irgen_push_var(var);
-    }
+    sym->ir = irgen_push_var(var);
   }
   add(irgen.scope_stack, scope);
 
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Symbol* sym = hash_map_get(scope, key);
-    if (sym->kind != Symbol_Kind_constant) {
-      irgen_var_declare(sym->ir->var, sym->ast);
-      irgen_push_declare(sym->ir->var);
-    }
-    else {
-      sym->ir = irgen_ast_node(sym->ast->unary);
-    }
+    irgen_var_declare(sym->ir->var, sym->ast);
+    irgen_push_declare(sym->ir->var);
   }
 }
 
@@ -1439,7 +1429,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a:[2]I8 = \"AB\"; a[1]", "");
+  test("c: type a \\ b; a:type 3; b:type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: 1,2;", "");

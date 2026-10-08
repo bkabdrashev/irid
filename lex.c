@@ -1,7 +1,8 @@
 typedef enum {
   Token_Flag_wasnewline  = 1 << 0,
   Token_Flag_willnewline = 1 << 1,
-  Token_Flag_willspace   = 1 << 2,
+  Token_Flag_wasspace    = 1 << 2,
+  Token_Flag_willspace   = 1 << 3,
 } Token_Flag;
 
 typedef enum Token_Kind_Flag {
@@ -33,7 +34,7 @@ typedef enum Token_Kind {
   Token_Kind_semicolon          = 25,
   Token_Kind_comma              = 26,
   Token_Kind_arrow              = 33,
-  Token_Kind_bang               = 35,
+  Token_Kind_bang               = 35 | Token_Kind_Flag_call_rhs,
   Token_Kind_bang_equal         = 40,
   Token_Kind_equal_equal        = 41,
   Token_Kind_less_equal         = 42,
@@ -52,14 +53,14 @@ typedef enum Token_Kind {
   Token_Kind_pike               = 61,
   Token_Kind_ampersand          = 63,
 
-  Token_Kind_name               = String_Kind_name,
-  Token_Kind_if                 = String_Kind_if,
+  Token_Kind_name               = String_Kind_name | Token_Kind_Flag_call_rhs,
+  Token_Kind_if                 = String_Kind_if | Token_Kind_Flag_call_rhs,
   Token_Kind_do                 = String_Kind_do,
   Token_Kind_else               = String_Kind_else,
   Token_Kind_return             = String_Kind_return,
   Token_Kind_break              = String_Kind_break,
   Token_Kind_while              = String_Kind_while,
-  Token_Kind_type               = String_Kind_type,
+  Token_Kind_type               = String_Kind_type | Token_Kind_Flag_call_rhs,
 } Token_Kind;
 
 typedef struct {
@@ -82,6 +83,7 @@ typedef struct {
   Cstr source;
   Cstr stream;
   B8   wasnewline;
+  B8   wasspace;
   I16  indent;
 } Lexer;
 
@@ -118,9 +120,11 @@ Tokens lex_source(Arena* arena, Cstr source) {
     switch (*lexer.stream) {
     case ' ':
       lexer.stream++;
+      lexer.wasspace = true;
     continue;
     case '\t':
       lexer.stream++;
+      lexer.wasspace = true;
     continue;
     case '\n': case '\r':
       lexer.indent = 0;
@@ -397,10 +401,20 @@ Tokens lex_source(Arena* arena, Cstr source) {
       Token* top = tokens_top(&slice_token);
       top->flag |= Token_Flag_willnewline;
     }
+    if (lexer.wasspace) {
+      token.flag |= Token_Flag_wasspace;
+      Token* top = tokens_top(&slice_token);
+      top->flag |= Token_Flag_willspace;
+    }
     token.indent = lexer.indent;
 
-    // NOTE: checks whether rhs should be disabled
+    // NOTE: wasnewline checks whether rhs should be disabled
     lexer.wasnewline = false;
+
+    // NOTE: wasspace is used to determine function call precedence.
+    //       foo (a).x == foo(a.x)
+    //       foo(a).x == (foo(a)).x
+    lexer.wasspace   = false;
     tokens_push(&slice_token, token);
   }
   Token* top = tokens_top(&slice_token);
