@@ -330,8 +330,13 @@ Ir_Field irgen_record_get_by_name(Rec* record, Str* name) {
   return field;
 }
 
+void string_builder_push_var(String_Builder* sb, Var* var);
 void string_builder_push_irid(String_Builder* sb, Ir* ir) {
-  if (ir == irgen.irid_len) {
+  if (ir->kind == Ir_Kind_var) {
+    string_builder_push_cstr(sb, "@");
+    string_builder_push_var(sb, ir->var);
+  }
+  else if (ir == irgen.irid_len) {
     string_builder_push_cstr(sb, "len");
   }
   else if (ir == irgen.irid_none) {
@@ -339,6 +344,9 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
   }
   else if (ir == irgen.irid_bits) {
     string_builder_push_cstr(sb, "bits");
+  }
+  else if (ir == irgen.irid_type) {
+    string_builder_push_cstr(sb, "type");
   }
   else if (ir == irgen.irid_foreign) {
     string_builder_push_cstr(sb, "foreign");

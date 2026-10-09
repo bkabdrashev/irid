@@ -145,7 +145,7 @@ struct Sem {
   Type* type_len;
   Type* fun_len;
   Type* fun_bits;
-  Type* fun_type;
+  Type* fun_type_type;
   Type* rec_foreign;
   Type* fun_foreign_c;
   Type* bytes_range;
@@ -2314,9 +2314,6 @@ Type* sem_var_declare(Var* var) {
   }
   Type* type = type_of_ir(var->declared_ir);
   if (type) {
-    if (type->kind == Type_Kind_type) {
-      // TODO: need to figure out how to handle type declarations
-    }
     var->declared = type;
     sem_var_kind(var);
     sem_record_declare_fields(var, type);
@@ -2730,6 +2727,12 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       assert(0);
     }
+    if (result->kind == Type_Kind_type) {
+       // TODO: is this correct?
+       // A: #type 0..4
+       // a: A
+      result = result->type;
+    }
   } break;
   case Ir_Kind_store: {
     Type* lhs = type_of_ir(ir->binary.one);
@@ -2762,6 +2765,7 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       assert(0);
     }
+    result = rhs;
   } break;
   case Ir_Kind_ptr: {
     Type* type = type_of_ir(ir->unary);
@@ -2856,9 +2860,8 @@ void sem_ir(Block* block, Ir* ir) {
         assert(0);
       }
     }
-    else if (fun_type == sem.fun_type) {
-      Type* type = type_of_ir(ir->unary);
-      result = type_type(type);
+    else if (fun_type == sem.fun_type_type) {
+      result = type_type(arg_type);
     }
     else if (fun_type->kind == Type_Kind_type) {
       result = type_auto_cast(block, 0, arg_type, fun_type->type);
@@ -3248,9 +3251,9 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.fun_len->kind = Type_Kind_none;
   type_of_ir_put(irgen.irid_len, sem.fun_len);
 
-  sem.fun_type = &new(sem.types);
-  sem.fun_type->kind = Type_Kind_none;
-  type_of_ir_put(irgen.irid_type, sem.fun_type);
+  sem.fun_type_type = &new(sem.types);
+  sem.fun_type_type->kind = Type_Kind_none;
+  type_of_ir_put(irgen.irid_type, sem.fun_type_type);
 
   {
     sem.str_c = str_from_cstr("c");
