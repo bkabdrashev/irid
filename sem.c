@@ -1462,6 +1462,7 @@ Type* type_join(Block* block, Type* one, Type* two) {
     assert(0);
   }
   else {
+    // TODO: record unions
     assert(0);
   }
   return result;
