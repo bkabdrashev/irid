@@ -42,17 +42,17 @@ print_str:(str: Str) -> {
   putchar 10
 }
 
-putchar: #foreign.c "putchar" #type (char:I32) -> I32
+putchar: #foreign.c "putchar" (char:I32) -> I32
 
 INIT_VIDEO     : 0x00000020
 INIT_EVENTS    : 0x00004000
 InitFlags      : U32
 WindowFlags    : I64
-Window         : #type 64'#bits (opaque:"SDL_Window")
-Renderer       : #type 64'#bits (opaque:"SDL_Renderer")
+Window         : #type 64'#bits(opaque:"SDL_Window")
+Renderer       : #type 64'#bits(opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
-Event          : #type (128*8)'#bits QuitEvent \ KeyboardEvent // TODO: c-style union
+Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent)// TODO: c-style union
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
@@ -79,17 +79,17 @@ KeyboardEvent : #type (
   repeat    : B8           /**< true if this is a key repeat */
 )
 
-init            : #foreign.c "SDL_Init"            #type (flags: InitFlags) -> B8
-CreateWindow    : #foreign.c "SDL_CreateWindow"    #type (title: @I8; w: I32; h: I32; flags: WindowFlags) -> @Window
-CreateRenderer  : #foreign.c "SDL_CreateRenderer"  #type (window: @Window; name: @I8) -> @Renderer
-GetTicks        : #foreign.c "SDL_GetTicks"        #type () -> U64
-PollEvent       : #foreign.c "SDL_PollEvent"       #type (event: @Event) -> B8
-Delay           : #foreign.c "SDL_Delay"           #type (ms: U32) -> ()
-DestroyRenderer : #foreign.c "SDL_DestroyRenderer" #type (renderer: @Renderer) -> ()
-DestroyWindow   : #foreign.c "SDL_DestroyWindow"   #type (window: @Window) -> ()
-Quit            : #foreign.c "SDL_Quit"            #type () -> ()
+init            : #foreign.c "SDL_Init"            (flags: InitFlags) -> B8
+CreateWindow    : #foreign.c "SDL_CreateWindow"    (title: @I8; w: I32; h: I32; flags: WindowFlags) -> @Window
+CreateRenderer  : #foreign.c "SDL_CreateRenderer"  (window: @Window; name: @I8) -> @Renderer
+GetTicks        : #foreign.c "SDL_GetTicks"        () -> U64
+PollEvent       : #foreign.c "SDL_PollEvent"       (event: @Event) -> B8
+Delay           : #foreign.c "SDL_Delay"           (ms: U32) -> ()
+DestroyRenderer : #foreign.c "SDL_DestroyRenderer" (renderer: @Renderer) -> ()
+DestroyWindow   : #foreign.c "SDL_DestroyWindow"   (window: @Window) -> ()
+Quit            : #foreign.c "SDL_Quit"            () -> ()
 
-RenderPresent   : #foreign.c "SDL_RenderPresent"   #type (renderer: @Renderer) -> B8
+RenderPresent   : #foreign.c "SDL_RenderPresent"   (renderer: @Renderer) -> B8
 
 print_str("Hello World!")
 

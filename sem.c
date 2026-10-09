@@ -509,83 +509,85 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
   if (one->kind != two->kind) {
     result = false;
   }
-  switch (one->kind) {
-  case Type_Kind_none: {
-    result = true;
-  } break;
-  case Type_Kind_type: {
-    result = true;
-  } break;
-  case Type_Kind_int: {
-    B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
-    result = size_equal;
-  } break;
-  case Type_Kind_record: {
-    if (one->record->length != two->record->length) {
-      result = false;
-    }
-    else {
+  else {
+    switch (one->kind) {
+    case Type_Kind_none: {
       result = true;
-      for (I32 i = 0; i < one->record->length; i++) {
-        Field field_one = type_record_get_by_position(one->record, i);
-        Field field_two;
-        if (field_one.name) {
-          field_two = type_record_get_by_name(two->record, field_one.name);
-        }
-        else {
-          field_two = type_record_get_by_position(two->record, i);
-        }
-        if (!type_is_same_rec(field_one.type, field_two.type, visited)) {
-          result = false;
-          break;
+    } break;
+    case Type_Kind_type: {
+      result = true;
+    } break;
+    case Type_Kind_int: {
+      B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
+      result = size_equal;
+    } break;
+    case Type_Kind_record: {
+      if (one->record->length != two->record->length) {
+        result = false;
+      }
+      else {
+        result = true;
+        for (I32 i = 0; i < one->record->length; i++) {
+          Field field_one = type_record_get_by_position(one->record, i);
+          Field field_two;
+          if (field_one.name) {
+            field_two = type_record_get_by_name(two->record, field_one.name);
+          }
+          else {
+            field_two = type_record_get_by_position(two->record, i);
+          }
+          if (!type_is_same_rec(field_one.type, field_two.type, visited)) {
+            result = false;
+            break;
+          }
         }
       }
-    }
-  } break;
-  case Type_Kind_ptr: {
-    if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
-      result = true;
-    }
-    else {
-      subtype_visited_push(visited, one->pointer, two->pointer);
-      // TODO: need to check whether pointer is global/stack/
-      result = true;
-      if (two->pointer->stack_vars.len > 0) {
-        for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
-          Var* var = one->pointer->stack_vars.list[i];
-          if (!hash_set_exists(&two->pointer->stack_vars, var)) {
+    } break;
+    case Type_Kind_ptr: {
+      if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
+        result = true;
+      }
+      else {
+        subtype_visited_push(visited, one->pointer, two->pointer);
+        // TODO: need to check whether pointer is global/stack/
+        result = true;
+        if (two->pointer->stack_vars.len > 0) {
+          for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
+            Var* var = one->pointer->stack_vars.list[i];
+            if (!hash_set_exists(&two->pointer->stack_vars, var)) {
+              result = false;
+            }
+          }
+        }
+        Type* one_declared = type_pointer_declared(one->pointer);
+        Type* two_declared = type_pointer_declared(two->pointer);
+        if (one_declared && two_declared) {
+          if (!type_is_same_rec(one_declared, two_declared, visited)) {
             result = false;
           }
         }
       }
-      Type* one_declared = type_pointer_declared(one->pointer);
-      Type* two_declared = type_pointer_declared(two->pointer);
-      if (one_declared && two_declared) {
-        if (!type_is_same_rec(one_declared, two_declared, visited)) {
-          result = false;
-        }
+    } break;
+    case Type_Kind_fun: {
+      result = false;
+    } break;
+    case Type_Kind_array: {
+      if (one->array->length == two->array->length) {
+        result = type_is_same_rec(one->array->of_type, two->array->of_type, visited);
       }
+      else {
+        result = false;
+      }
+    } break;
+    case Type_Kind_span: {
+      if (type_is_same_rec(one->span->length, two->span->length, visited)) {
+        result = type_is_same_rec(one->span->of_type, two->span->of_type, visited);
+      }
+      else {
+        result = false;
+      }
+    } break;
     }
-  } break;
-  case Type_Kind_fun: {
-    result = false;
-  } break;
-  case Type_Kind_array: {
-    if (one->array->length == two->array->length) {
-      result = type_is_same_rec(one->array->of_type, two->array->of_type, visited);
-    }
-    else {
-      result = false;
-    }
-  } break;
-  case Type_Kind_span: {
-    if (type_is_same_rec(one->span->length, two->span->length, visited)) {
-      result = type_is_same_rec(one->span->of_type, two->span->of_type, visited);
-    }
-    else {
-      result = false;
-    }
-  } break;
   }
   return result;
 }
@@ -1452,6 +1454,10 @@ Type* type_join(Block* block, Type* one, Type* two) {
       assert(0);
     }
   }
+  else if (one->kind == Type_Kind_type && two->kind == Type_Kind_type) {
+    Type* join = type_join(block, one->type, two->type);
+    result = type_type(join);
+  }
   else if (one->kind == Type_Kind_array && two->kind == Type_Kind_array) {
     assert(0);
   }
@@ -2314,6 +2320,9 @@ Type* sem_var_declare(Var* var) {
   }
   Type* type = type_of_ir(var->declared_ir);
   if (type) {
+    if (type->kind == Type_Kind_type) {
+      type = type->type;
+    }
     var->declared = type;
     sem_var_kind(var);
     sem_record_declare_fields(var, type);
@@ -2574,6 +2583,9 @@ void sem_ir(Block* block, Ir* ir) {
     Type* unary = type_of_ir(ir->unary);
     Span* span = arena_push(sem.perm_arena, sizeof(Span));
     span->length = sem.type_len;
+    if (unary->kind == Type_Kind_type) {
+      unary = unary->type;
+    }
     span->of_type = unary;
     result = type_span(span);
   } break;
@@ -2584,6 +2596,9 @@ void sem_ir(Block* block, Ir* ir) {
       if (ranges_is_single(one_type->ranges)) {
         I64 length = ranges_min(one_type->ranges);
         Array* array = type_array_init(length);
+        if (two_type->kind == Type_Kind_type) {
+          two_type = two_type->type;
+        }
         array->of_type = two_type;
         for (I32 i = 0; i < length; i++) {
           array->types[i] = two_type;
@@ -2727,12 +2742,6 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       assert(0);
     }
-    if (result->kind == Type_Kind_type) {
-       // TODO: is this correct?
-       // A: #type 0..4
-       // a: A
-      result = result->type;
-    }
   } break;
   case Ir_Kind_store: {
     Type* lhs = type_of_ir(ir->binary.one);
@@ -2769,6 +2778,9 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_ptr: {
     Type* type = type_of_ir(ir->unary);
+    if (type->kind == Type_Kind_type) {
+      type = type->type;
+    }
     result = type_pointer_to(type);
   } break;
   case Ir_Kind_fun: {
@@ -2861,7 +2873,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else if (fun_type == sem.fun_type_type) {
-      result = type_type(arg_type);
+      result = type_type(type_type(arg_type));
     }
     else if (fun_type->kind == Type_Kind_type) {
       result = type_auto_cast(block, 0, arg_type, fun_type->type);
@@ -2901,7 +2913,7 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_define_size(fun_type->bits_size, arg_type);
       }
       else if (fun_type->str) {
-        if (arg_type->kind == Type_Kind_fun) {
+        if (arg_type->kind == Type_Kind_fun) { // NOTE: foreign.c "c_name"
           result = type_function_foreign(arg_type->function, fun_type->str);
         }
       }
@@ -3374,7 +3386,8 @@ void sem_test(void) {
   // test("A: (val:1; next:@B); B: (val:2; next:@A); a: A; b: B; a.next = @b; a.next@.val", "");
   // test("A: (val:1; next:@A); a: A; a.next = @a; a.next@.val", "");
   // test("a: 1\\2\\3; a = 1; if 0 do { a=2; if 1 do { a+a } }; a+a", "");
-  test("a:I32; b: B8; a = b; a", "");
+  // test("a:I32; b: B8; a = b; a", "");
+  // test("str: Str; str[0]", "");
   // test("a:I32; a=0; while a < 8 do {a = a + 1}; a", "");
   // test("a:I32; a=0; while a != 8 do {a = a + 2}; a", "");
   // test("a:I32; a=0; while a != 8 do {a = a + 3}; a", "");
