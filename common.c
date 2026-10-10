@@ -403,6 +403,15 @@ Hash_Set hash_set_exclude(Arena* arena, Hash_Set* set, void* key) {
   return new_set;
 }
 
+Hash_Set hash_set_include(Arena* arena, Hash_Set* set, void* key) {
+  Hash_Set new_set = hash_set_init(arena, set->len + 1);
+  for (I32 i = 0; i < set->len; i++) {
+    hash_set_put(&new_set, set->list[i]);
+  }
+  hash_set_put(&new_set, key);
+  return new_set;
+}
+
 B8 hash_set_is_equal(Hash_Set one, Hash_Set two) {
   if (one.len != two.len) return false;
   for (I32 i = 0; i < one.len; i++) {
