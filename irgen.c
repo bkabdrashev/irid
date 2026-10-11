@@ -122,6 +122,7 @@ struct Var {
   Blocks* blocks;
   Type*   declared;
   Var**   vars;
+  Hash_Map var_from_offset;
   Type**  block_types;
 };
 
