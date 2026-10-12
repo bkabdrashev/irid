@@ -51,8 +51,10 @@ struct Record {
   I32      length;
   Str**    names;
   Type**   types;
+  // NOTE: computed below
   I32*     offsets;
   Hash_Map position_from_name;
+  Hash_Map position_from_offset;
 };
 
 typedef struct Join Join;
@@ -955,7 +957,8 @@ Record* type_record_init(I32 length) {
   result->names   = arena_push(sem.perm_arena, length * sizeof(Str*));
   result->types   = arena_push(sem.perm_arena, length * sizeof(Type*));
   result->offsets = arena_push(sem.perm_arena, length * sizeof(I32));
-  result->position_from_name = hash_map_init(sem.perm_arena, length);
+  result->position_from_name   = hash_map_init(sem.perm_arena, length);
+  result->position_from_offset = hash_map_init(sem.perm_arena, length);
   return result;
 }
 
@@ -1013,6 +1016,7 @@ Type* type_record(Record* record) {
       else {
         record->offsets[j] = -1;
       }
+      hash_map_i32_put_i32(&record->position_from_offset, record->offsets[j], j);
       bits_size = align_up(bits_size, bits_align);
     }
 
@@ -1362,7 +1366,7 @@ void sem_var_kind(Var* var) {
 }
 
 void sem_record_declare_fields(Var* var, Type* type);
-Var* sem_get_var_by_name(Var* var, Str* name) {
+Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   sem_var_declare(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
@@ -1371,7 +1375,7 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     // INVARIANT: offsets are equal for each record in the join
-    Join* join = var->declared->join;
+    Join* join = type_of_var(block, var)->join;
     I32 offset_join; Type* type_joined; B8 is_size_defined; I16 bits_size;
     {
       Record* record = join->records.list[0];
@@ -1404,7 +1408,7 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
       }
 
       Var* var_element = &new(irgen.vars);
-           var_element->index    = -1;
+           var_element->index    = offset_join;
            var_element->declared = type_joined;
            var_element->parent   = var;
            var_element->state    = Var_State_resolved;
@@ -1437,7 +1441,7 @@ Var* sem_get_var_by_name(Var* var, Str* name) {
   }
 }
 
-I32 sem_get_offset_by_name(Var* var, Str* name) {
+I32 sem_get_offset_by_name(Block* block, Var* var, Str* name) {
   sem_var_declare(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
@@ -1445,7 +1449,7 @@ I32 sem_get_offset_by_name(Var* var, Str* name) {
     return record->offsets[position];
   }
   else if (var->declared->kind == Type_Kind_join_records) {
-    Join* join = var->declared->join;
+    Join* join = type_of_var(block, var)->join;
     I32 offset = 0;
     { // NOTE: first record in the set
       Record* record = join->records.list[0];
@@ -1944,9 +1948,29 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
       new_type->flag = old_type->flag;
       new_type->bits_size = old_type->bits_size;
       new_type->bits_align = old_type->bits_align;
-      if (old_type) {
-        var->block_types[tasks->block->id] = new_type;
+      // if (old_type) {
+      var->block_types[tasks->block->id] = new_type;
+      if (var->parent) {
+        Var*  parent = var->parent;
+        Type* type_parent_old = parent->block_types[tasks->block->id];
+        if (type_parent_old->kind == Type_Kind_join_records) {
+          Join* join_old = parent->declared->join;
+          Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
+                join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
+          for (I32 r = 0; r < join_old->records.len; r++) {
+            Record* record = join_old->records.list[r];
+            I32     pos    = hash_map_i32_get_i32(&record->position_from_offset, var->index);
+            Type*   meet   = type_meet(new_type, record->types[pos]);
+            if (meet != sem.type_none) {
+              hash_set_put(&join_new->records, record);
+            }
+          }
+          Type* type_parent_new = type_join_records(join_new);
+          parent->block_types[tasks->block->id] = type_parent_new;
+          // TODO: recursive
+        }
       }
+      // }
     }
   }
 }
@@ -2086,6 +2110,7 @@ Type* type_narrow_nez(Type* type) {
 }
 
 void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
+  // cond_ir != 0
   Ir* cond_ir = block->branch.cond;
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
@@ -2100,7 +2125,6 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
     }
   } break;
   case Ir_Kind_ne: {
-    Type_Pair types = type_of_ir_binary(cond_ir);
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
       sem_type_narrow_int_ne(tasks, cond_ir);
     }
@@ -2800,7 +2824,8 @@ void sem_ir(Block* block, Ir* ir) {
       }
       new_record->types[i] = type;
     }
-    new_record->position_from_name = ir->rec->position_from_name;
+    new_record->position_from_name   = ir->rec->position_from_name;
+    new_record->position_from_offset = hash_map_init(sem.perm_arena, new_record->length);
 
     result = type_record(new_record);
   } break;
@@ -2925,18 +2950,18 @@ void sem_ir(Block* block, Ir* ir) {
       assert(of_type->pointer->stack_vars.len > 0);
       pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
       Var* first_var = of_type->pointer->stack_vars.list[0];
-      I32  first_offset = sem_get_offset_by_name(first_var, ir->name_offset.at);
-      Var* first_var_field = sem_get_var_by_name(first_var, ir->name_offset.at);
+      I32  first_offset = sem_get_offset_by_name(block, first_var, ir->name_offset.at);
+      Var* first_var_field = sem_get_var_by_name(block, first_var, ir->name_offset.at);
       pointer->declared = first_var_field->declared;
       hash_set_put(&pointer->stack_vars, first_var_field);
       for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
         Var* var = of_type->pointer->stack_vars.list[i];
-        I32  offset = sem_get_offset_by_name(var, ir->name_offset.at);
+        I32  offset = sem_get_offset_by_name(block, var, ir->name_offset.at);
         if (offset != first_offset) {
           printf("field offsets don't match\n");
           assert(0);
         }
-        Var* field_var = sem_get_var_by_name(var, ir->name_offset.at);
+        Var* field_var = sem_get_var_by_name(block, var, ir->name_offset.at);
         pointer->declared = type_meet(pointer->declared, field_var->declared);
         hash_set_put(&pointer->stack_vars, field_var);
       }
@@ -3561,6 +3586,12 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   fa_add(ast.list, node);
 
   Funs funs            = irgen_ast(&arena, ast, length);
+  {
+    C8* buffer           = arena_push(&arena, 64 * length);
+    Cstr result          = cstr_from_funs(funs, buffer);
+    printf("\n%s", result);
+  }
+
                          sem_funs(&arena, funs);
   {
     C8* buffer           = arena_push(&arena, 64 * length);
@@ -3573,7 +3604,8 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("A:(a:I32 0; b:I32); B:(a:I32 1; c:I32); ab: A\\B; if ab.a == 1 do ab.c ", "");
+  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", ""); // TODO
+  test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
   // test("A:(a:I32; b:I32); ab: A; ab.a ", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: Str = \"Hi\"; a.len; a[0]", "");

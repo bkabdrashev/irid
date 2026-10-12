@@ -532,14 +532,25 @@ I32 hash_map_get_i32(Hash_Map* map, void* key) {
 }
 
 void* hash_map_i32_get(Hash_Map* map, I32 key) {
-  I64 cast = key;
+  I64 cast = key+1;
   void* val = hash_map_get(map, (void*)cast);
   return val;
 }
 
 void hash_map_i32_put(Hash_Map* map, I32 key, void* val) {
-  I64 cast = key;
+  I64 cast = key+1;
   hash_map_put(map, (void*)cast, val);
+}
+
+I32 hash_map_i32_get_i32(Hash_Map* map, I32 key) {
+  I64 cast = key+1;
+  I32 val  = hash_map_get_i32(map, (void*)cast);
+  return val;
+}
+
+void hash_map_i32_put_i32(Hash_Map* map, I32 key, I32 val) {
+  I64 cast = key+1;
+  hash_map_put_i32(map, (void*)cast, val);
 }
 
 B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
