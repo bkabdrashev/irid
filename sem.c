@@ -1736,6 +1736,7 @@ Type* type_pointer_to(Type* type) {
 }
 
 Type* type_pointer_var(Var* var) {
+  // FIX: @I32
   if (var->kind == Var_Kind_pointee) {
     sem_var_declare(var);
   }
@@ -2248,7 +2249,6 @@ Type* type_of_var_rec(Block* block, Var* var) {
         tasks.length = 0;
         tasks.var = var;
         tasks.type = var->block_types[pred->id];
-        // TODO: join records narrowing
         { // condition is not equal to zero branch
           Jump jump = pred->branch.nez;
           if (jump.to_block == block) {
@@ -3623,7 +3623,8 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
+  test("a:@I32; b:I32; a = @b", ""); // FIX: @I32 is a pointer to type
+  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
   // test("A:(a:I32; b:I32); ab: A; ab.a ", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
