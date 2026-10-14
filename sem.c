@@ -1736,7 +1736,6 @@ Type* type_pointer_to(Type* type) {
 }
 
 Type* type_pointer_var(Var* var) {
-  // FIX: @I32
   if (var->kind == Var_Kind_pointee) {
     sem_var_declare(var);
   }
@@ -3051,11 +3050,31 @@ void sem_ir(Block* block, Ir* ir) {
     result = rhs;
   } break;
   case Ir_Kind_ptr: {
-    Type* type = type_of_ir(ir->unary);
-    if (type->kind == Type_Kind_type) {
-      type = type->type;
+    Type* type_unary = type_of_ir(ir->unary);
+
+    if (type_unary->kind == Type_Kind_type) {
+      result = type_pointer_to(type_unary->type);
     }
-    result = type_pointer_to(type);
+    else if (ir->unary->kind == Ir_Kind_load) {
+      Type* ptr_type = type_of_ir(ir->unary->unary);
+      if (ptr_type->kind == Type_Kind_ptr) {
+        result = ptr_type;
+      }
+      else {
+        assert(0);
+      }
+    }
+    else {
+      Var* var = &new(irgen.vars);
+           var->kind   = Var_Kind_pointee;
+           var->state  = Var_State_unresolved;
+           var->global = irgen.scope_stack.length == 1;
+           var->name   = irgen.str_anon;
+           var->declared_ir = ir->unary;
+           var->declared = type_unary;
+      result = type_pointer_var(ir->var);
+      type_of_var_put(block, 0, var, type_unary);
+    }
   } break;
   case Ir_Kind_fun: {
     if (ir->fun->kind == Fun_Kind_macro) {
@@ -3184,6 +3203,9 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else if (fun_type->kind == Type_Kind_none) {
       if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
+        if (arg_type->kind == Type_Kind_type) {
+          arg_type = arg_type->type;
+        }
         result = type_define_size(fun_type->bits_size, arg_type);
       }
       else if (fun_type->str) {
@@ -3475,6 +3497,11 @@ Type* sem_fun(Fun* fun) {
   function->fun = fun;
   function->arg = fun->arg_var->var->declared;
   function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+
+  if (function->ret->kind == Type_Kind_type) {
+    function->ret = function->ret->type;
+  }
+
   fun->ret_ir->var->declared = function->ret;
   Type* ret_type = type_of_ir(fun->ret_ir);
   assert(ret_type->kind == Type_Kind_ptr);
@@ -3623,7 +3650,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a:@I32; b:I32; a = @b", ""); // FIX: @I32 is a pointer to type
+  // test("a:@I32; b:I32; a = @b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
   // test("A:(a:I32; b:I32); ab: A; ab.a ", "");

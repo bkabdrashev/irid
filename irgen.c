@@ -1125,27 +1125,33 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_ptr: {
     Ir* unary = irgen_ast_node(node->unary);
-    if (unary->kind == Ir_Kind_load) {
-      result = unary->unary;
-      if (result->kind == Ir_Kind_var) {
-        if (result->var->kind == Var_Kind_assigned) {
-          printf("Identifier without declared type is not addressable\n");
-          assert(0);
-        }
-      }
-      irgen_pop();
-    }
-    else {
-      Var* var = irgen_var_new();
-           var->kind   = Var_Kind_pointee;
-           var->state  = Var_State_unresolved;
-           var->global = irgen.scope_stack.length == 1;
-           var->name   = irgen.str_anon;
-           var->declared_ir = unary;
-      result = irgen_push_var(var);
-      irgen_push_binary(Ir_Kind_store, result, unary);
-    }
+    result = irgen_push_unary(Ir_Kind_ptr, unary);
   } break;
+
+  // case Ast_Kind_ptr: {
+  //   Ir* unary = irgen_ast_node(node->unary);
+  //   if (unary->kind == Ir_Kind_load) {
+  //     result = unary->unary;
+  //     if (result->kind == Ir_Kind_var) {
+  //       if (result->var->kind == Var_Kind_assigned) {
+  //         printf("Identifier without declared type is not addressable\n");
+  //         assert(0);
+  //       }
+  //     }
+  //     irgen_pop();
+  //   }
+  //   else {
+  //     Var* var = irgen_var_new();
+  //          var->kind   = Var_Kind_pointee;
+  //          var->state  = Var_State_unresolved;
+  //          var->global = irgen.scope_stack.length == 1;
+  //          var->name   = irgen.str_anon;
+  //          var->declared_ir = unary;
+  //     result = irgen_push_var(var);
+  //     irgen_push_binary(Ir_Kind_store, result, unary);
+  //   }
+  // } break;
+
   case Ast_Kind_subscript: {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     Ir* lhs = irgen_ast_node(node->binary.lhs);
