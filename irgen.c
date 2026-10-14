@@ -984,14 +984,14 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   }
 }
 
-void irgen_use_var(Var* var) {
-  if (var->declared_ir->kind == Ir_Kind_record) {
-    Rec* rec = var->declared_ir->rec;
+void irgen_use_var(Ir* ir) {
+  if (ir->var->declared_ir->kind == Ir_Kind_record) {
+    Rec* rec = ir->var->declared_ir->rec;
     for (I32 i = 0; i < rec->length; i++) {
       Str* name = rec->names[i];
       Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
       sym->kind = Symbol_Kind_variable;
-      sym->ir = irgen_push_position_offset(var->declared_ir, i);;
+      sym->ir = irgen_push_position_offset(ir, i);;
       irgen_sym_put(name, sym);
     }
   }
@@ -1262,7 +1262,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
         irgen_push_declare(arg_var);
-        irgen_use_var(arg_var);
+        irgen_use_var(fun->arg_var);
       }
       else if (lhs->kind == Ast_Kind_declare) {
         scope = hash_map_init(irgen.perm_arena, 1);

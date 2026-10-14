@@ -52,21 +52,26 @@ Window         : #type 64'#bits(opaque:"SDL_Window")
 Renderer       : #type 64'#bits(opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
-Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent)// TODO: c-style union
+MOUSE_MOTION   : 0x400
+Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent \ UnknownEvent) // TODO: c-style union
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
 Keymod         : U16
 Scancode       : U16 // TODO: real scancodes
 
+UnknownEvent : #type (
+  type      : U32
+)
+
 QuitEvent : #type (
-  kind      : U32 QUIT
+  type      : U32 QUIT
   reserved  : U32
   timestamp : U64   /**< In nanoseconds, populated using SDL_GetTicksNS() */
 )
 
 KeyboardEvent : #type (
-  kind      : U32 KEY_DOWN /**< SDL_EVENT_KEY_DOWN or SDL_EVENT_KEY_UP */
+  type      : U32 KEY_DOWN /**< SDL_EVENT_KEY_DOWN or SDL_EVENT_KEY_UP */
   reserved  : U32
   timestamp : U64         /**< In nanoseconds, populated using SDL_GetTicksNS() */
   windowID  : WindowID     /**< The window with keyboard focus, if any */
@@ -77,6 +82,22 @@ KeyboardEvent : #type (
   raw       : U16          /**< The platform dependent scancode for this event */
   down      : B8           /**< true if the key is pressed */
   repeat    : B8           /**< true if this is a key repeat */
+)
+
+MouseButtonFlags: U32
+MouseID: U32
+
+MouseMotionEvent : #type (
+  type: U32 MOUSE_MOTION         /**< SDL_EVENT_MOUSE_MOTION */
+  reserved: U32
+  timestamp: U64                /**< In nanoseconds, populated using SDL_GetTicksNS() */
+  windowID: WindowID            /**< The window with mouse focus, if any */
+  which: MouseID                /**< The mouse instance id in relative mode, SDL_TOUCH_MOUSEID for touch events, SDL_PEN_MOUSEID for pen events, or 0 */
+  state: MouseButtonFlags       /**< The current button state */
+  // x:    F32                    /**< X coordinate, relative to window */
+  // y:    F32                    /**< Y coordinate, relative to window */
+  // xrel: F32                    /**< The relative motion in the X direction */
+  // yrel: F32                    /**< The relative motion in the Y direction */
 )
 
 init            : #foreign.c "SDL_Init"            (flags: InitFlags) -> B8
@@ -101,9 +122,17 @@ event:     Event
 running: B8 = 1
 while running do {
   while PollEvent(@event) do {
-    if event.kind == QUIT do {
+    if event.type == QUIT do {
       print_str("Quit")
       running = 0
+    }
+    else if event.type == KEY_DOWN do {
+      // print_i32(event.scancode) // TODO: llvm generator doesn't know the correct offset for scancode
+      print_i32(event.type)
+    }
+    else if event.type == MOUSE_MOTION do {
+      // print_i32(event.scancode) // TODO: llvm generator doesn't know the correct offset for scancode
+      print_i32(event.type)
     }
   }
   RenderPresent(renderer)

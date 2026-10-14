@@ -45,7 +45,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
     return result;
   }
   // else if (has_flag(type->flag, Type_Flag_comptime_const)) {
-  //   // FIX: introduces asan crashes
+  //   // TODO: introduces asan crashes
   //   result = LLVMIntTypeInContext(llvm_gen.context, 0);
   // }
   else {
@@ -63,6 +63,9 @@ LLVMTypeRef llvm_of_type(Type* type) {
       Type* declared = type_pointer_declared(type->pointer);
       LLVMTypeRef pointer_to = llvm_of_type(declared);
       result = LLVMPointerType(pointer_to, 0);
+    } break;
+    case Type_Kind_join_records: {
+      result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
     } break;
     case Type_Kind_record: {
       I32 length = type->record->length;
@@ -201,6 +204,10 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   } break;
   case Type_Kind_type: {
     LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    result = LLVMConstInt(llvm_type, 0, false);
+  } break;
+  case Type_Kind_join_records: {
+    LLVMTypeRef llvm_type = llvm_of_type(type);
     result = LLVMConstInt(llvm_type, 0, false);
   } break;
   case Type_Kind_ptr: {
@@ -501,19 +508,39 @@ void llvm_ir(Ir* ir) {
         LLVMTypeRef llvm_type = llvm_of_type(object_type);
         result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
       }
+      else if (object_type->kind == Type_Kind_join_records) {
+        Join* join = object_type->join;
+        I32 offset = 0;
+        {
+          Record* record = join->records.list[0];
+          I32 position = hash_map_get_i32(&record->position_from_name, ir->name_offset.at);
+          offset = record->offsets[position];
+        }
+        LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
+        LLVMTypeRef llvm_type = llvm_of_type(object_type);
+        result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, offset, "");
+      }
     }
     else if (of_type->kind == Type_Kind_record) {
-      // FIX:
-      result = llvm_default_of_type(type);
+      LLVMValueRef of = llvm_of_ir(ir->position.of);
+      I32 position = hash_map_get_i32(&of_type->record->position_from_name, ir->name_offset.at);
+      result = LLVMBuildExtractValue(llvm_gen.builder, of, position, "");
     }
   } break;
   case Ir_Kind_position_offset: {
     Type* of_type = type_of_ir(ir->position.of);
-    I32 at = ir->position.at;
-    Type* rec_type = type_pointer_declared(of_type->pointer);
-    LLVMValueRef ptr = llvm_of_ir(ir->position.of);
-    LLVMTypeRef llvm_type = llvm_of_type(rec_type);
-    result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, at, "");
+
+    if (of_type->kind == Type_Kind_ptr) {
+      I32 at = ir->position.at;
+      Type* rec_type = type_pointer_declared(of_type->pointer);
+      LLVMValueRef ptr = llvm_of_ir(ir->position.of);
+      LLVMTypeRef llvm_type = llvm_of_type(rec_type);
+      result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, at, "");
+    }
+    else {
+      LLVMValueRef of = llvm_of_ir(ir->position.of);
+      result = LLVMBuildExtractValue(llvm_gen.builder, of, ir->position.at, "");
+    }
   } break;
   case Ir_Kind_load: {
     if (type_is_const(type)) {
@@ -525,26 +552,7 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_store: {
-    if (ir->binary.two->kind == Ir_Kind_record) {
-      Type*       type_ptr    = type_of_ir(ir->binary.one);
-      Type*       record_type = type_pointer_declared(type_ptr->pointer);
-      LLVMTypeRef llvm_type   = llvm_of_type(record_type);
-      Rec*        rec_one     = ir->binary.two->rec;
-      Record*     record_two  = record_type->record;
-      for (I32 i = 0; i < rec_one->length; i++) {
-        Str* name = rec_one->names[i];
-        LLVMValueRef llvm_assigned = llvm_of_ir(rec_one->irs[i]);
-        I32 position = i;
-        if (name) {
-          position = hash_map_get_i32(&record_two->position_from_name, name);
-        }
-        LLVMValueRef llvm_gep = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, llvm_one, position, "");
-        LLVMBuildStore(llvm_gen.builder, llvm_assigned, llvm_gep);
-      }
-    }
-    else {
-      result = LLVMBuildStore(llvm_gen.builder, llvm_two, llvm_one);
-    }
+    result = LLVMBuildStore(llvm_gen.builder, llvm_two, llvm_one);
   } break;
   case Ir_Kind_fun: {
     LLVMValueRef save_function = llvm_gen.function;
@@ -636,7 +644,21 @@ void llvm_ir(Ir* ir) {
     }
   } break;
   case Ir_Kind_ptr: {
-    assert(0);
+    Type* type_unary = type_of_ir(ir->unary);
+
+    if (type_unary->kind == Type_Kind_type) {
+      result = llvm_of_ir(ir->unary);
+    }
+    else if (ir->unary->kind == Ir_Kind_load) {
+      result = llvm_of_ir(ir->unary->unary);
+    }
+    else {
+      LLVMTypeRef llvm_var_type = llvm_of_type(type_unary);
+      LLVMValueRef var = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, "__pointee");
+      LLVMValueRef val = llvm_of_ir(ir->unary);
+      LLVMBuildStore(llvm_gen.builder, val, var);
+      result = var;
+    }
   } break;
 
   case Ir_Kind_declare: result = llvm_gen.none; break;

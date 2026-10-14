@@ -1057,6 +1057,7 @@ Type* type_join_records(Join* join) {
 
     I16 bits_align = 0;
     I16 bits_size = 0;
+    // FIX: size calculation
 
     Type* new_type = &new(sem.types);
     new_type->kind = Type_Kind_join_records;
