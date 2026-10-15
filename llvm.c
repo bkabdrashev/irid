@@ -509,16 +509,16 @@ void llvm_ir(Ir* ir) {
         result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, 0, "");
       }
       else if (object_type->kind == Type_Kind_join_records) {
-        Join* join = object_type->join;
-        I32 offset = 0;
-        {
-          Record* record = join->records.list[0];
-          I32 position = hash_map_get_i32(&record->position_from_name, ir->name_offset.at);
-          offset = record->offsets[position];
-        }
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
-        LLVMTypeRef llvm_type = llvm_of_type(object_type);
-        result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, offset, "");
+
+        Type* element = sem_element_of_join(ir);
+        I32 position = hash_map_get_i32(&element->record->position_from_name, ir->name_offset.at);
+
+        LLVMTypeRef llvm_ptr_record = LLVMPointerType(llvm_of_type(element), 0);
+        LLVMValueRef casted = LLVMBuildBitCast(llvm_gen.builder, ptr, llvm_ptr_record, "");
+
+        LLVMTypeRef llvm_type = llvm_of_type(element);
+        result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, casted, position, "");
       }
     }
     else if (of_type->kind == Type_Kind_record) {

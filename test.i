@@ -25,7 +25,6 @@ print_i32:(n:I32) -> {
     n = n / 10
     i = i + 1
   }
-  putchar 10
   while i > 0 do {
     i = i - 1
     putchar(buf[i] + 48)
@@ -53,15 +52,21 @@ Renderer       : #type 64'#bits(opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
 MOUSE_MOTION   : 0x400
-Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent \ UnknownEvent) // TODO: c-style union
+Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent \ MouseMotionEvent \ UnknownEvent) // TODO: c-style union
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
 Keymod         : U16
-Scancode       : U16 // TODO: real scancodes
+
+SCANCODE_RETURN    : 40
+SCANCODE_ESCAPE    : 41
+SCANCODE_BACKSPACE : 42
+SCANCODE_TAB       : 43
+SCANCODE_SPACE     : 44
+Scancode : U16 // TODO: enum
 
 UnknownEvent : #type (
-  type      : U32
+  type      : U32 0
 )
 
 QuitEvent : #type (
@@ -123,15 +128,18 @@ running: B8 = 1
 while running do {
   while PollEvent(@event) do {
     if event.type == QUIT do {
-      print_str("Quit")
+      print_str("Event Quit")
       running = 0
     }
     else if event.type == KEY_DOWN do {
-      // print_i32(event.scancode) // TODO: llvm generator doesn't know the correct offset for scancode
+      print_i32(event.scancode) // TODO: llvm generator doesn't know the correct offset for scancode
       print_i32(event.type)
+      if event.scancode == SCANCODE_ESCAPE do {
+        print_str("Escape")
+        running = 0
+      }
     }
     else if event.type == MOUSE_MOTION do {
-      // print_i32(event.scancode) // TODO: llvm generator doesn't know the correct offset for scancode
       print_i32(event.type)
     }
   }

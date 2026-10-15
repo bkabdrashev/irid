@@ -160,6 +160,8 @@ struct Sem {
   Type* fun_foreign_c;
   Type* bytes_range;
 
+  Type** elements;
+
   Str*  str_ptr;
   Str*  str_c;
   Fun*  str_from_i8_array;
@@ -314,30 +316,8 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "join ");
     string_builder_push_cstr(sb, "(");
     for (I32 i = 0; i < join->records.len; i++) {
-      Record* record = join->records.list[i];
-      string_builder_push_cstr(sb, "record");
-      string_builder_push_cstr(sb, "(");
-      for (I32 pos = 0; pos < record->length; pos++) {
-        Field field = {};
-        field.name = record->names[pos];
-        field.type = record->types[pos];
-
-        if (field.name) {
-          string_builder_push_str(sb, field.name);
-          string_builder_push_cstr(sb, "'");
-          string_builder_push_i64(sb, field.offset);
-          string_builder_push_cstr(sb, ":");
-          string_builder_push_type(sb, block, field.type);
-        }
-        else {
-          string_builder_push_type(sb, block, field.type);
-        }
-        if (pos+1 < record->length) {
-          string_builder_push_cstr(sb, ", ");
-        }
-      }
-      string_builder_push_cstr(sb, ")");
-
+      Type* element = join->records.list[i];
+      string_builder_push_type(sb, block, element);
       if (i+1 < join->records.len) {
         string_builder_push_cstr(sb, " \\ ");
       }
@@ -636,8 +616,8 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
       if (one->join->records.len == two->join->records.len) {
         result = true;
         for (I32 i = 0; i < one->join->records.len; i++) {
-          Record* record = one->join->records.list[i];
-          B8 is_exists = hash_set_exists(&two->join->records, record);
+          Type* element = one->join->records.list[i];
+          B8 is_exists = hash_set_exists(&two->join->records, element);
           if (!is_exists) {
             result = false;
             break;
@@ -750,8 +730,8 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
       if (one->join->records.len <= two->join->records.len) {
         result = true;
         for (I32 i = 0; i < one->join->records.len; i++) {
-          Record* record = one->join->records.list[i];
-          B8 is_exists = hash_set_exists(&two->join->records, record);
+          Type* element = one->join->records.list[i];
+          B8 is_exists = hash_set_exists(&two->join->records, element);
           if (!is_exists) {
             result = false;
             break;
@@ -808,6 +788,16 @@ B8 type_is_true(Type* type) {
   default: assert(0);
   }
   return result;
+}
+
+Type* sem_element_of_join(Ir* ir) {
+  I32 irid = ir - irgen.irs.base;
+  return sem.elements[irid];
+}
+
+void sem_element_of_join_put(Ir* ir, Type* element) {
+  I32 irid = ir - irgen.irs.base;
+  sem.elements[irid] = element;
 }
 
 Type* type_of_field_at(Record* record, I32 position) {
@@ -1057,7 +1047,12 @@ Type* type_join_records(Join* join) {
 
     I16 bits_align = 0;
     I16 bits_size = 0;
-    // FIX: size calculation
+
+    for (I32 e = 0; e < join->records.len; e++) {
+      Type* element = join->records.list[e];
+      bits_size  = max(bits_size,  element->bits_size);
+      bits_align = max(bits_align, element->bits_align);
+    }
 
     Type* new_type = &new(sem.types);
     new_type->kind = Type_Kind_join_records;
@@ -1380,7 +1375,8 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
     Join* join = type_of_var(block, var)->join;
     I32 offset_join; Type* type_joined; B8 is_size_defined; I16 bits_size;
     {
-      Record* record = join->records.list[0];
+      Type* element = join->records.list[0];
+      Record* record = element->record;
       I32 position = hash_map_get_i32(&record->position_from_name, name);
       offset_join = record->offsets[position];
       type_joined = record->types[position];
@@ -1393,7 +1389,8 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
     }
     else {
       for (I32 i = 1; i < join->records.len; i++) {
-        Record* record = join->records.list[i];
+        Type* element = join->records.list[i];
+        Record* record = element->record;
         I32 position = hash_map_get_i32(&record->position_from_name, name);
         Type* type = record->types[position];
         is_size_defined |= has_flag(type->flag, Type_Flag_size_defined);
@@ -1444,41 +1441,42 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   }
 }
 
-I32 sem_get_offset_by_name(Block* block, Var* var, Str* name) {
+I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
   sem_var_declare(var);
+  I32 result = -1;
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
     I32 position = hash_map_get_i32(&record->position_from_name, name);
-    return record->offsets[position];
+    result = record->offsets[position];
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     Join* join = type_of_var(block, var)->join;
-    I32 offset = 0;
     { // NOTE: first record in the set
-      Record* record = join->records.list[0];
-      I32 position = hash_map_get_i32(&record->position_from_name, name);
+      Type* element = join->records.list[0];
+      sem_element_of_join_put(ir, element);
+      I32 position = hash_map_get_i32(&element->record->position_from_name, name);
       if (position >= 0) {
-        offset = record->offsets[position];
+        result = element->record->offsets[position];
       }
       else {
         assert(0);
       }
     }
     for (I32 i = 1; i < join->records.len; i++) {
-      Record* record = join->records.list[i];
+      Type* element = join->records.list[i];
+      Record* record = element->record;
       I32 position = hash_map_get_i32(&record->position_from_name, name);
       if (position < 0) {
         assert(0);
       }
-      if (offset != record->offsets[position]) {
+      if (result != record->offsets[position]) {
         assert(0);
       }
     }
-    return offset;
   }
   else if (var->declared->kind == Type_Kind_array) {
     if (name == irgen.str_len) {
-      return -8;
+      result = -8;
     }
     else {
       assert(0);
@@ -1486,7 +1484,7 @@ I32 sem_get_offset_by_name(Block* block, Var* var, Str* name) {
   }
   else if (var->declared->kind == Type_Kind_span) {
     if (name == irgen.str_len) {
-      return 0;
+      result = 0;
     }
     else {
       assert(0);
@@ -1495,6 +1493,8 @@ I32 sem_get_offset_by_name(Block* block, Var* var, Str* name) {
   else {
     assert(0);
   }
+
+  return result;
 }
 
 Array* type_array_init(I32 length) {
@@ -1667,8 +1667,8 @@ Type* type_join(Type* one, Type* two) {
   else if (one->kind == Type_Kind_record && two->kind == Type_Kind_record) {
     Join* join = arena_push(sem.perm_arena, sizeof(Join));
     join->records = hash_set_init(sem.perm_arena, 2);
-    hash_set_put(&join->records, one->record);
-    hash_set_put(&join->records, two->record);
+    hash_set_put(&join->records, one);
+    hash_set_put(&join->records, two);
     result = type_join_records(join);
   }
   else if (one->kind == Type_Kind_join_records && two->kind == Type_Kind_join_records) {
@@ -1678,12 +1678,12 @@ Type* type_join(Type* one, Type* two) {
   }
   else if (one->kind == Type_Kind_join_records && two->kind == Type_Kind_record) {
     Join* join = arena_push(sem.perm_arena, sizeof(Join));
-    join->records = hash_set_include(sem.perm_arena, &one->join->records, two->record);
+    join->records = hash_set_include(sem.perm_arena, &one->join->records, two);
     result = type_join_records(join);
   }
   else if (one->kind == Type_Kind_record && two->kind == Type_Kind_join_records) {
     Join* join = arena_push(sem.perm_arena, sizeof(Join));
-    join->records = hash_set_include(sem.perm_arena, &two->join->records, one->record);
+    join->records = hash_set_include(sem.perm_arena, &two->join->records, one);
     result = type_join_records(join);
   }
   else if (one->kind == Type_Kind_array && two->kind == Type_Kind_array) {
@@ -1968,12 +1968,13 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
             Join* join_old = parent->declared->join;
             Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
                   join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
-            for (I32 r = 0; r < join_old->records.len; r++) {
-              Record* record = join_old->records.list[r];
+            for (I32 e = 0; e < join_old->records.len; e++) {
+              Type* element = join_old->records.list[e];
+              Record* record = element->record;
               I32     pos    = hash_map_i32_get_i32(&record->position_from_offset, var->index);
               Type*   meet   = type_meet(new_type, record->types[pos]);
               if (meet != sem.type_none) {
-                hash_set_put(&join_new->records, record);
+                hash_set_put(&join_new->records, element);
               }
             }
             Type* type_parent_new = type_join_records(join_new);
@@ -2499,16 +2500,12 @@ void sem_record_declare_fields(Var* var, Type* type) {
   }
   else if (type->kind == Type_Kind_join_records) {
     Join* join = type->join;
-    I32 smallest_record_length;
-    {
-      Record* record = join->records.list[0];
-      smallest_record_length = record->length;
+    I32 total_length = 0;
+    for (I32 i = 0; i < join->records.len; i++) {
+      Type* element = join->records.list[i];
+      total_length += element->record->length;
     }
-    for (I32 i = 1; i < join->records.len; i++) {
-      Record* record = join->records.list[i];
-      smallest_record_length = min(smallest_record_length, record->length);
-    }
-    var->var_from_offset = hash_map_init(sem.perm_arena, smallest_record_length);
+    var->var_from_offset = hash_map_init(sem.perm_arena, total_length);
   }
   // TODO: refactor this crap
   else if (type->kind == Type_Kind_array) {
@@ -2960,11 +2957,11 @@ void sem_ir(Block* block, Ir* ir) {
     Type* of_type = type_of_ir(ir->name_offset.of);
     if (of_type->kind == Type_Kind_ptr) {
       Var* first_var = of_type->pointer->stack_vars.list[0];
-      I32  first_offset = sem_get_offset_by_name(block, first_var, ir->name_offset.at);
+      I32  first_offset = sem_get_offset_by_name(block, ir, first_var, ir->name_offset.at);
       Var* first_var_field = sem_get_var_by_name(block, first_var, ir->name_offset.at);
       for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
         Var* var = of_type->pointer->stack_vars.list[i];
-        I32  offset = sem_get_offset_by_name(block, var, ir->name_offset.at);
+        I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
         if (offset != first_offset) {
           printf("field offsets don't match\n");
           assert(0);
@@ -3538,9 +3535,11 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.sccid = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
-  sem.type_of_irs = hash_map_init(arena, irgen.irs.length*3);
+  sem.type_of_irs = hash_map_init(arena, 3 * irgen.irs.length);
   sem.types.base = arena_push(arena, irgen.irs.length * sizeof(Type));
   sem.types.length = 0;
+
+  sem.elements = arena_push(arena, 3 * irgen.irs.length * sizeof(I32));
 
   fa_init(sem.perm_arena, sem.foreign_funs, irgen.irs.length);
   fa_add(sem.foreign_funs, 0);
