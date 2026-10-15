@@ -41,8 +41,9 @@ print_str:(str: Str) -> {
   putchar 10
 }
 
-putchar: #foreign.c "putchar" (char:I32) -> I32
+putchar: #foreign.c "putchar" (char:I32)->I32
 
+// TODO: namespace sdl
 INIT_VIDEO     : 0x00000020
 INIT_EVENTS    : 0x00004000
 InitFlags      : U32
@@ -99,28 +100,28 @@ MouseMotionEvent : #type (
   windowID: WindowID            /**< The window with mouse focus, if any */
   which: MouseID                /**< The mouse instance id in relative mode, SDL_TOUCH_MOUSEID for touch events, SDL_PEN_MOUSEID for pen events, or 0 */
   state: MouseButtonFlags       /**< The current button state */
-  // x:    F32                    /**< X coordinate, relative to window */
+  // x:    F32                    /**< X coordinate, relative to window */ // TODO: floats
   // y:    F32                    /**< Y coordinate, relative to window */
   // xrel: F32                    /**< The relative motion in the X direction */
   // yrel: F32                    /**< The relative motion in the Y direction */
 )
 
-init            : #foreign.c "SDL_Init"            (flags: InitFlags) -> B8
-CreateWindow    : #foreign.c "SDL_CreateWindow"    (title: @I8; w: I32; h: I32; flags: WindowFlags) -> @Window
-CreateRenderer  : #foreign.c "SDL_CreateRenderer"  (window: @Window; name: @I8) -> @Renderer
-GetTicks        : #foreign.c "SDL_GetTicks"        () -> U64
-PollEvent       : #foreign.c "SDL_PollEvent"       (event: @Event) -> B8
-Delay           : #foreign.c "SDL_Delay"           (ms: U32) -> ()
-DestroyRenderer : #foreign.c "SDL_DestroyRenderer" (renderer: @Renderer) -> ()
-DestroyWindow   : #foreign.c "SDL_DestroyWindow"   (window: @Window) -> ()
-Quit            : #foreign.c "SDL_Quit"            () -> ()
+init            : #foreign.c "SDL_Init"            (flags: InitFlags)->B8
+CreateWindow    : #foreign.c "SDL_CreateWindow"    (title: @I8; w: I32; h: I32; flags: WindowFlags)->@Window
+CreateRenderer  : #foreign.c "SDL_CreateRenderer"  (window: @Window; name: @I8)->@Renderer
+GetTicks        : #foreign.c "SDL_GetTicks"        ()->U64
+PollEvent       : #foreign.c "SDL_PollEvent"       (event: @Event)->B8
+Delay           : #foreign.c "SDL_Delay"           (ms: U32)->()
+DestroyRenderer : #foreign.c "SDL_DestroyRenderer" (renderer: @Renderer)->()
+DestroyWindow   : #foreign.c "SDL_DestroyWindow"   (window: @Window)->()
+Quit            : #foreign.c "SDL_Quit"            ()->()
 
-RenderPresent   : #foreign.c "SDL_RenderPresent"   (renderer: @Renderer) -> B8
+RenderPresent   : #foreign.c "SDL_RenderPresent"   (renderer: @Renderer)->B8
 
 print_str("Hello World!")
 
 init(INIT_VIDEO | INIT_EVENTS)
-window:   @Window   = CreateWindow(@("Title\0"[0]); WINDOW_WIDTH; WINDOW_HEIGHT; 0)
+window:   @Window   = CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
 renderer: @Renderer = CreateRenderer(window; @("\0"[0]))
 event:     Event
 
@@ -132,7 +133,7 @@ while running do {
       running = 0
     }
     else if event.type == KEY_DOWN do {
-      print_i32(event.scancode) // TODO: llvm generator doesn't know the correct offset for scancode
+      print_i32(event.scancode)
       print_i32(event.type)
       if event.scancode == SCANCODE_ESCAPE do {
         print_str("Escape")

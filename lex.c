@@ -45,7 +45,6 @@ typedef enum Token_Kind {
   Token_Kind_quote              = 47,
   Token_Kind_str                = 48 | Token_Kind_Flag_call_rhs,
   Token_Kind_sharp              = 49 | Token_Kind_Flag_call_rhs,
-  Token_Kind_sharp_late         = 51 | Token_Kind_Flag_call_rhs,
   Token_Kind_slash              = 53,
   Token_Kind_percent            = 55,
   Token_Kind_dot_dot            = 57,
@@ -385,9 +384,6 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case '#': {
       token.kind = Token_Kind_sharp;
       lexer.stream++;
-      if (isspace(*lexer.stream)) {
-        token.kind = Token_Kind_sharp_late;
-      }
     } break;
     default: {
       printf("unknown character '%c'\n", *lexer.stream);
@@ -567,9 +563,6 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
       string_builder_push_cstr(&sb, "break");
     break;
     case Token_Kind_sharp:
-      string_builder_push_cstr(&sb, "#");
-    break;
-    case Token_Kind_sharp_late:
       string_builder_push_cstr(&sb, "#");
     break;
     }
