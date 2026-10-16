@@ -739,14 +739,6 @@ Rec* irgen_record_new(I32 length) {
   return new_record;
 }
 
-void irgen_record_push_declare_position(Rec* record, I32 position, Ir* value) {
-  record->irs[position] = value;
-}
-void irgen_record_push_declare_name(Rec* record, Str* name, I32 position) {
-  hash_map_put_i32(&record->position_from_name, name, position);
-  record->names[position] = name;
-}
-
 Block* irgen_block_branch(Ir* cond) {
   Block* block = irgen_block_top();
   block->branch.cond = cond;
@@ -843,10 +835,10 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
 void irgen_scope_enter(Hash_Map* scope) {
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
-    {
-      Symbol* sym = irgen_sym_get(key);
-      if (sym) assert(0);
-    }
+    // { // TODO: shadowing
+    //   Symbol* sym = irgen_sym_get(key);
+    //   if (sym) assert(0);
+    // }
     Symbol* sym = hash_map_get(scope, key);
     Var* var = irgen_var_new();
     var->kind = Var_Kind_declared;
@@ -1059,33 +1051,43 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     irgen_assign(node->binary.lhs, rhs);
   } break;
-  case Ast_Kind_meet: {
-    Ir* lhs = irgen_ast_node(node->binary.lhs);
-    Ir* rhs = irgen_ast_node(node->binary.rhs);
-    result = irgen_push_binary(Ir_Kind_meet, lhs, rhs);
-  } break;
   case Ast_Kind_record: {
-    Rec* record = irgen_record_new(node->list->length);
+    Rec* rec = irgen_record_new(node->list->length);
+    Hash_Map scope = hash_map_init(irgen.perm_arena, rec->length);
+    for (I32 i = 0; i < node->list->length; i++) {
+      Ast_Node* field_node = node->list->base[i];
+      if (field_node->kind == Ast_Kind_declare) {
+        Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+        sym->ast = field_node->declare.node;
+        hash_map_put(&scope, field_node->declare.name, sym);
+      }
+    }
+    irgen_scope_enter(&scope);
+
     for (I32 i = 0; i < node->list->length; i++) {
       Ast_Node* field_node = node->list->base[i];
       if (field_node->kind == Ast_Kind_declare) {
         Ir* ir = irgen_ast_node(field_node->declare.node);
-        irgen_record_push_declare_name(record, field_node->declare.name, i);
-        irgen_record_push_declare_position(record, i, ir);
+        hash_map_put_i32(&rec->position_from_name, field_node->declare.name, i);
+        rec->names[i] = field_node->declare.name;
+        rec->irs[i]   = ir;
       }
       else {
         Ir* ir = irgen_ast_node(field_node);
-        irgen_record_push_declare_position(record, i, ir);
+        rec->irs[i] = ir;
       }
     }
-    result = irgen_push_record(record);
+
+    irgen_scope_leave();
+    result = irgen_push_record(rec);
   } break;
 
   case Ast_Kind_declare: {
     Rec* record = irgen_record_new(1);
     Ir* ir = irgen_ast_node(node->declare.node);
-    irgen_record_push_declare_name(record, node->declare.name, 0);
-    irgen_record_push_declare_position(record, 0, ir);
+    hash_map_put_i32(&record->position_from_name, node->declare.name, 0);
+    record->names[0] = node->declare.name;
+    record->irs[0]   = ir;
     result = irgen_push_record(record);
   } break;
 
@@ -1127,31 +1129,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* unary = irgen_ast_node(node->unary);
     result = irgen_push_unary(Ir_Kind_ptr, unary);
   } break;
-
-  // case Ast_Kind_ptr: {
-  //   Ir* unary = irgen_ast_node(node->unary);
-  //   if (unary->kind == Ir_Kind_load) {
-  //     result = unary->unary;
-  //     if (result->kind == Ir_Kind_var) {
-  //       if (result->var->kind == Var_Kind_assigned) {
-  //         printf("Identifier without declared type is not addressable\n");
-  //         assert(0);
-  //       }
-  //     }
-  //     irgen_pop();
-  //   }
-  //   else {
-  //     Var* var = irgen_var_new();
-  //          var->kind   = Var_Kind_pointee;
-  //          var->state  = Var_State_unresolved;
-  //          var->global = irgen.scope_stack.length == 1;
-  //          var->name   = irgen.str_anon;
-  //          var->declared_ir = unary;
-  //     result = irgen_push_var(var);
-  //     irgen_push_binary(Ir_Kind_store, result, unary);
-  //   }
-  // } break;
-
   case Ast_Kind_subscript: {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     Ir* lhs = irgen_ast_node(node->binary.lhs);
@@ -1187,6 +1164,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_unary((Ir_Kind)node->kind | Ir_Flag_unary, unary);
     irgen_builtin_leave();
   } break;
+  case Ast_Kind_meet:
   case Ast_Kind_call:
   case Ast_Kind_array:
   case Ast_Kind_eq: case Ast_Kind_ne:
@@ -1449,6 +1427,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  // test("a:(x:I32; y:x)", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");

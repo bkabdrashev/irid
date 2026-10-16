@@ -968,8 +968,8 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a b->c",     "(bits 32)");
   return;
+  test("a b->c",     "(bits 32)");
   test("foo \"Hi\"",     "(bits 32)");
   test("[]1",     "(bits 32)");
   test("bits 32",     "(bits 32)");

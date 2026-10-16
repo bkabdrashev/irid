@@ -1,13 +1,6 @@
-BLOCK_SIZE_IN_PIXELS : 24
-WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * Game.width
-WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * Game.height
+putchar: #foreign.c "putchar" (char:I32)->I32
 
-Game : (
-  width : 12
-  height: 12
-)
-
-print_i32:(n:I32) -> {
+print_i64:(n:I64) -> {
   if n == 0 do {
     putchar 48
     putchar 10
@@ -17,8 +10,8 @@ print_i32:(n:I32) -> {
     putchar 45 // -
     n = -1 * n
   }
-  buf: [10](0..9)
-  i:I32 = 0
+  buf: [20](0..9)
+  i:I8 = 0
   while n > 0 do {
     digit := n % 10
     buf[i] = digit
@@ -41,7 +34,12 @@ print_str:(str: Str) -> {
   putchar 10
 }
 
-putchar: #foreign.c "putchar" (char:I32)->I32
+// TODO: recursion
+// factorial : (n: I32) -> {
+//   if n < 2 return 1
+//   return n * factorial(n-1)
+// }
+// print_i64(factorial(5))
 
 // TODO: namespace sdl
 INIT_VIDEO     : 0x00000020
@@ -116,34 +114,87 @@ DestroyRenderer : #foreign.c "SDL_DestroyRenderer" (renderer: @Renderer)->()
 DestroyWindow   : #foreign.c "SDL_DestroyWindow"   (window: @Window)->()
 Quit            : #foreign.c "SDL_Quit"            ()->()
 
-RenderPresent   : #foreign.c "SDL_RenderPresent"   (renderer: @Renderer)->B8
+ALPHA_OPAQUE : -127
+// FRect : #type (
+//   x: I32
+//   y: I32
+//   w: I32
+//   h: I32
+// )
+
+SetRenderDrawColor : #foreign.c "SDL_SetRenderDrawColor" (renderer: @Renderer; r: I8; g: I8; b: I8; a: I8)->B8
+RenderClear        : #foreign.c "SDL_RenderClear"        (renderer: @Renderer)->B8
+// RenderFillRect     : #foreign.c "SDL_RenderFillRect"     (renderer: @Renderer; rect: @FRect)->B8
+RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->B8
 
 print_str("Hello World!")
+
+BLOCK_SIZE_IN_PIXELS : 24
+WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * game.width
+WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * game.height
+
+Vec2 : #type (
+  x: I32
+  y: I32
+)
+
+game : (
+  width   : 12
+  height  : 12
+  size    : width * height
+
+  snake_p : [size]Vec2
+  snake_n : I32
+  running : B8
+  time    : I32
+)
 
 init(INIT_VIDEO | INIT_EVENTS)
 window:   @Window   = CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
 renderer: @Renderer = CreateRenderer(window; @("\0"[0]))
-event:     Event
 
-running: B8 = 1
-while running do {
+game.running = 1
+while game.running do {
+  event: Event
   while PollEvent(@event) do {
     if event.type == QUIT do {
       print_str("Event Quit")
-      running = 0
+      print_i64(event.timestamp)
+      game.running = 0
     }
     else if event.type == KEY_DOWN do {
-      print_i32(event.scancode)
-      print_i32(event.type)
+      print_i64(event.scancode)
+      print_i64(event.type)
       if event.scancode == SCANCODE_ESCAPE do {
         print_str("Escape")
-        running = 0
+        game.running = 0
       }
     }
     else if event.type == MOUSE_MOTION do {
-      print_i32(event.type)
+      print_i64(event.type)
     }
   }
+  SetRenderDrawColor(renderer; 127; 0; 0; ALPHA_OPAQUE)
+  RenderClear(renderer)
+
+  // for i in 0..game.food_n-1 do {
+  //   r.x = game.food[i].x * (r.w + 2)
+  //   r.y = game.food[i].y * (r.h + 2)
+  //   sdl.SetRenderDrawColor(renderer, 128, 16, 16, sdl.ALPHA_OPAQUE)
+  //   sdl.RenderFillRect(renderer, r)
+  // }
+
+  // for i in 1..game.snake_n-1 do {
+  //   r.x = game.snake[i].x * (r.w + 2)
+  //   r.y = game.snake[i].y * (r.h + 2)
+  //   sdl.SetRenderDrawColor(renderer, 0, 128, 0, sdl.ALPHA_OPAQUE)
+  //   sdl.RenderFillRect(renderer, r)
+  // }
+  // r.x = game.snake.0.x * (r.w + 2)
+  // r.y = game.snake.0.y * (r.h + 2)
+  // SetRenderDrawColor(renderer; 128; 128; 0; ALPHA_OPAQUE)
+  // RenderFillRect(renderer; r)
+
   RenderPresent(renderer)
   Delay(10)
 }
