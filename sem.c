@@ -96,6 +96,8 @@ typedef enum Type_Kind {
 typedef enum Type_Flag {
   Type_Flag_size_defined    = 1 << 0,
   Type_Flag_comptime_const  = 1 << 1,
+  Type_Flag_float_literal   = 1 << 2,
+  Type_Flag_float_defined   = 1 << 3,
 } Type_Flag;
 
 typedef enum Scalar_Kind {
@@ -106,20 +108,20 @@ typedef enum Scalar_Kind {
 typedef struct Scalar Scalar;
 struct Scalar {
   Scalar_Kind kind;
-  Ranges*     ranges;
-  I16         bits_exp;
-  I16         bits_mant;
+  I16         exp_bits;
+  I16         mant_bits;
 };
 
 struct Type {
   Type_Kind kind;
   Type_Flag flag;
+  Scalar    scalar;
   I16 bits_align;
   I16 bits_size;
   union {
     U64       value;
     Type*     type;
-    Scalar*   scalar;
+    Ranges*   ranges;
     Pointer*  pointer;
     Array*    array;
     Span*     span;
