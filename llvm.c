@@ -56,8 +56,21 @@ LLVMTypeRef llvm_of_type(Type* type) {
     case Type_Kind_type: {
       result = LLVMIntTypeInContext(llvm_gen.context, 0);
     } break;
-    case Type_Kind_int: {
-      result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+    case Type_Kind_scalar: {
+      if (type_is_float(type)) {
+        if (type->scalar.exp_bits == 8) {
+          result = LLVMFloatTypeInContext(llvm_gen.context);
+        }
+        else if (type->scalar.exp_bits == 11) {
+          result = LLVMDoubleTypeInContext(llvm_gen.context);
+        }
+        else {
+          assert(0);
+        }
+      }
+      else {
+        result = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
+      }
     } break;
     case Type_Kind_ptr: {
       Type* declared = type_pointer_declared(type->pointer);
@@ -225,19 +238,32 @@ LLVMValueRef llvm_default_of_type(Type* type) {
       result = llvm_global;
     }
   } break;
-  case Type_Kind_int: {
+  case Type_Kind_scalar: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
-    I64 i64 = ranges_max(type->ranges);
+    I64 key = ranges_max(type->ranges);
     for (I32 i = 0; i < type->ranges->length; i++) {
       if (type->ranges->pairs[i].lo <= 0 && 0 <= type->ranges->pairs[i].hi) {
-        i64 = 0;
+        key = 0;
         break;
       }
       else if (type->ranges->pairs[i].lo >= 0) {
-        i64 = type->ranges->pairs[i].lo;
+        key = type->ranges->pairs[i].lo;
       }
     }
-    result = LLVMConstInt(llvm_type, i64, false);
+    if (type_is_float(type)) {
+      F64 value;
+      if (type->scalar.exp_bits == 8) {
+        value = (F64)float_f32_of_key(key);
+      }
+      else {
+        assert(type->scalar.exp_bits == 11);
+        value = float_f64_of_key(key);
+      }
+      result = LLVMConstReal(llvm_type, value);
+    }
+    else {
+      result = LLVMConstInt(llvm_type, key, false);
+    }
   } break;
   case Type_Kind_fun: {
     LLVMValueRef save_function = llvm_gen.function;
@@ -305,10 +331,28 @@ LLVMValueRef llvm_default_of_type(Type* type) {
 }
 
 LLVMValueRef llvm_conversion(LLVMValueRef llvm_val, Type* from, Type* to) {
- LLVMValueRef result = llvm_val;
-  if (from->kind == Type_Kind_int) {
+  LLVMValueRef result = llvm_val;
+  if (from->kind == Type_Kind_scalar) {
     LLVMTypeRef llvm_to = llvm_of_type(to);
-    result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
+    if (type_is_float(from)) {
+      if (type_is_float(to)) {
+        if (from->scalar.exp_bits == 8 && to->scalar.exp_bits == 11) {
+          result = LLVMBuildFPExt(llvm_gen.builder, llvm_val, llvm_to, "");
+        }
+        else if (from->scalar.exp_bits == 11 && to->scalar.exp_bits == 8) {
+          result = LLVMBuildFPTrunc(llvm_gen.builder, llvm_val, llvm_to, "");
+        }
+      }
+      else {
+        result = LLVMBuildFPToSI(llvm_gen.builder, llvm_val, llvm_to, "");
+      }
+    }
+    else if (type_is_float(to)) {
+      result = LLVMBuildSIToFP(llvm_gen.builder, llvm_val, llvm_to, "");
+    }
+    else {
+      result = LLVMBuildIntCast2(llvm_gen.builder, llvm_val, llvm_to, true, "");
+    }
   }
   return result;
 }
@@ -374,35 +418,93 @@ void llvm_ir(Ir* ir) {
     LLVMTypeRef llvm_type = llvm_of_type(type);
     result = LLVMConstInt(llvm_type, ir->i64, 0);
   } break;
+  case Ir_Kind_float: {
+    LLVMTypeRef llvm_type = llvm_of_type(type);
+    if (type->scalar.exp_bits == 8) {
+      result = LLVMConstReal(llvm_type, (F32)ir->f64);
+    }
+    else {
+      result = LLVMConstReal(llvm_type, ir->f64);
+    }
+  } break;
+  case Ir_Kind_float_cast: {
+    LLVMValueRef llvm_val = llvm_of_ir(ir->int_cast.value);
+    Type* from = type_of_ir(ir->int_cast.value);
+    LLVMTypeRef llvm_to = llvm_of_type(type);
+    if (from->scalar.exp_bits == 8 && type->scalar.exp_bits == 11) {
+      result = LLVMBuildFPExt(llvm_gen.builder, llvm_val, llvm_to, "");
+    }
+    else if (from->scalar.exp_bits == 11 && type->scalar.exp_bits == 8) {
+      result = LLVMBuildFPTrunc(llvm_gen.builder, llvm_val, llvm_to, "");
+    }
+    else {
+      result = llvm_val;
+    }
+  } break;
+  case Ir_Kind_int_float_cast: {
+    LLVMValueRef llvm_val = llvm_of_ir(ir->int_cast.value);
+    LLVMTypeRef llvm_to = llvm_of_type(type);
+    result = LLVMBuildSIToFP(llvm_gen.builder, llvm_val, llvm_to, "");
+  } break;
 
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
   case Ir_Kind_or: case Ir_Kind_xor: case Ir_Kind_and:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
   {
+    B8 is_float = type_is_float(type_of_ir(ir->binary.one));
     switch (ir->kind) {
-      case Ir_Kind_add: result = LLVMBuildAdd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_sub: result = LLVMBuildSub(llvm_gen.builder, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_mul: result = LLVMBuildMul(llvm_gen.builder, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_div: result = LLVMBuildSDiv(llvm_gen.builder, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_rem: result = LLVMBuildSRem(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_add: result = is_float
+        ? LLVMBuildFAdd(llvm_gen.builder, llvm_one, llvm_two, "")
+        : LLVMBuildAdd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_sub: result = is_float
+        ? LLVMBuildFSub(llvm_gen.builder, llvm_one, llvm_two, "")
+        : LLVMBuildSub(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_mul: result = is_float
+        ? LLVMBuildFMul(llvm_gen.builder, llvm_one, llvm_two, "")
+        : LLVMBuildMul(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_div: result = is_float
+        ? LLVMBuildFDiv(llvm_gen.builder, llvm_one, llvm_two, "")
+        : LLVMBuildSDiv(llvm_gen.builder, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_rem: result = is_float
+        ? LLVMBuildFRem(llvm_gen.builder, llvm_one, llvm_two, "")
+        : LLVMBuildSRem(llvm_gen.builder, llvm_one, llvm_two, ""); break;
 
       case Ir_Kind_or:  result = LLVMBuildOr(llvm_gen.builder, llvm_one, llvm_two, ""); break;
       case Ir_Kind_xor: result = LLVMBuildXor(llvm_gen.builder, llvm_one, llvm_two, ""); break;
       case Ir_Kind_and: result = LLVMBuildAnd(llvm_gen.builder, llvm_one, llvm_two, ""); break;
 
-      case Ir_Kind_eq: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntEQ, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_ne: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_lt: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSLT, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_le: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSLE, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_gt: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGT, llvm_one, llvm_two, ""); break;
-      case Ir_Kind_ge: result = LLVMBuildICmp(llvm_gen.builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_eq: result = is_float
+        ? LLVMBuildFCmp(llvm_gen.builder, LLVMRealOEQ, llvm_one, llvm_two, "")
+        : LLVMBuildICmp(llvm_gen.builder, LLVMIntEQ, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_ne: result = is_float
+        ? LLVMBuildFCmp(llvm_gen.builder, LLVMRealONE, llvm_one, llvm_two, "")
+        : LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_lt: result = is_float
+        ? LLVMBuildFCmp(llvm_gen.builder, LLVMRealOLT, llvm_one, llvm_two, "")
+        : LLVMBuildICmp(llvm_gen.builder, LLVMIntSLT, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_le: result = is_float
+        ? LLVMBuildFCmp(llvm_gen.builder, LLVMRealOLE, llvm_one, llvm_two, "")
+        : LLVMBuildICmp(llvm_gen.builder, LLVMIntSLE, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_gt: result = is_float
+        ? LLVMBuildFCmp(llvm_gen.builder, LLVMRealOGT, llvm_one, llvm_two, "")
+        : LLVMBuildICmp(llvm_gen.builder, LLVMIntSGT, llvm_one, llvm_two, ""); break;
+      case Ir_Kind_ge: result = is_float
+        ? LLVMBuildFCmp(llvm_gen.builder, LLVMRealOGE, llvm_one, llvm_two, "")
+        : LLVMBuildICmp(llvm_gen.builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
       default: assert(0);
     }
   } break;
-  case Ir_Kind_neg: result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, ""); break;
+  case Ir_Kind_neg: {
+    if (type_is_float(type_of_ir(ir->unary))) {
+      result = LLVMBuildFNeg(llvm_gen.builder, llvm_unary, "");
+    }
+    else {
+      result = LLVMBuildNeg(llvm_gen.builder, llvm_unary, "");
+    }
+  } break;
   case Ir_Kind_call: {
     Type* fun_type = type_of_ir(ir->binary.one);
-    if (fun_type == sem.fun_bits) {
+    if (fun_type == sem.fun_bits || fun_type == sem.fun_float) {
       result = llvm_gen.none;
     }
     else if (fun_type->kind == Type_Kind_fun) {
@@ -436,7 +538,7 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
+      if (has_flag(fun_type->flag, Type_Flag_size_defined)) { // NOTE: bits function
         result = llvm_default_of_type(type);
       }
       else if (fun_type->str) {
@@ -670,6 +772,7 @@ void llvm_ir(Ir* ir) {
     result = llvm_default_of_type(type);
   } break;
   case Ir_Kind_bits:    result = llvm_gen.none; break;
+  case Ir_Kind_ieee:    result = llvm_gen.none; break;
   case Ir_Kind_len:     result = llvm_gen.none; break;
   case Ir_Kind_run:     result = llvm_gen.none; break;
   case Ir_Kind_foreign: result = llvm_gen.none; break;
@@ -698,8 +801,15 @@ void llvm_block(Block* block) {
   case Block_Kind_branch: {
     LLVMValueRef llvm_cond       = llvm_of_ir(block->branch.cond);
     LLVMTypeRef  llvm_cond_type  = LLVMTypeOf(llvm_cond);
-    LLVMValueRef llvm_zero       = LLVMConstInt(llvm_cond_type, 0, false);
-    LLVMValueRef llvm_cond_bool  = LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_cond, llvm_zero, "");
+    LLVMValueRef llvm_cond_bool;
+    if (type_is_float(type_of_ir(block->branch.cond))) {
+      LLVMValueRef llvm_zero = LLVMConstReal(llvm_cond_type, 0.0);
+      llvm_cond_bool = LLVMBuildFCmp(llvm_gen.builder, LLVMRealUNE, llvm_cond, llvm_zero, "");
+    }
+    else {
+      LLVMValueRef llvm_zero = LLVMConstInt(llvm_cond_type, 0, false);
+      llvm_cond_bool = LLVMBuildICmp(llvm_gen.builder, LLVMIntNE, llvm_cond, llvm_zero, "");
+    }
     LLVMBasicBlockRef then_block = llvm_of_block(block->branch.nez.to_block);
     LLVMBasicBlockRef else_block = llvm_of_block(block->branch.eqz.to_block);
     LLVMBuildCondBr(llvm_gen.builder, llvm_cond_bool, then_block, else_block);

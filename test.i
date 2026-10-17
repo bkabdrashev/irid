@@ -51,7 +51,7 @@ Renderer       : #type 64'#bits(opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
 MOUSE_MOTION   : 0x400
-Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent \ MouseMotionEvent \ UnknownEvent) // TODO: c-style union
+Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent \ MouseMotionEvent \ UnknownEvent)
 WindowID       : U32
 KeyboardID     : U32
 Keycode        : U32
@@ -92,16 +92,16 @@ MouseButtonFlags: U32
 MouseID: U32
 
 MouseMotionEvent : #type (
-  type: U32 MOUSE_MOTION         /**< SDL_EVENT_MOUSE_MOTION */
-  reserved: U32
-  timestamp: U64                /**< In nanoseconds, populated using SDL_GetTicksNS() */
-  windowID: WindowID            /**< The window with mouse focus, if any */
-  which: MouseID                /**< The mouse instance id in relative mode, SDL_TOUCH_MOUSEID for touch events, SDL_PEN_MOUSEID for pen events, or 0 */
-  state: MouseButtonFlags       /**< The current button state */
-  // x:    F32                    /**< X coordinate, relative to window */ // TODO: floats
-  // y:    F32                    /**< Y coordinate, relative to window */
-  // xrel: F32                    /**< The relative motion in the X direction */
-  // yrel: F32                    /**< The relative motion in the Y direction */
+  type:      U32 MOUSE_MOTION       /**< SDL_EVENT_MOUSE_MOTION */
+  reserved:  U32
+  timestamp: U64                    /**< In nanoseconds, populated using SDL_GetTicksNS() */
+  windowID:  WindowID               /**< The window with mouse focus, if any */
+  which:     MouseID                /**< The mouse instance id in relative mode, SDL_TOUCH_MOUSEID for touch events, SDL_PEN_MOUSEID for pen events, or 0 */
+  state:     MouseButtonFlags       /**< The current button state */
+  x:         F32                    /**< X coordinate, relative to window */
+  y:         F32                    /**< Y coordinate, relative to window */
+  xrel:      F32                    /**< The relative motion in the X direction */
+  yrel:      F32                    /**< The relative motion in the Y direction */
 )
 
 init            : #foreign.c "SDL_Init"            (flags: InitFlags)->B8
@@ -115,16 +115,16 @@ DestroyWindow   : #foreign.c "SDL_DestroyWindow"   (window: @Window)->()
 Quit            : #foreign.c "SDL_Quit"            ()->()
 
 ALPHA_OPAQUE : -127
-// FRect : #type (
-//   x: I32
-//   y: I32
-//   w: I32
-//   h: I32
-// )
+FRect : #type (
+  x: F32
+  y: F32
+  w: F32
+  h: F32
+)
 
 SetRenderDrawColor : #foreign.c "SDL_SetRenderDrawColor" (renderer: @Renderer; r: I8; g: I8; b: I8; a: I8)->B8
 RenderClear        : #foreign.c "SDL_RenderClear"        (renderer: @Renderer)->B8
-// RenderFillRect     : #foreign.c "SDL_RenderFillRect"     (renderer: @Renderer; rect: @FRect)->B8
+RenderFillRect     : #foreign.c "SDL_RenderFillRect"     (renderer: @Renderer; rect: @FRect)->B8
 RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->B8
 
 print_str("Hello World!")
@@ -176,12 +176,13 @@ while game.running do {
   }
   SetRenderDrawColor(renderer; 127; 0; 0; ALPHA_OPAQUE)
   RenderClear(renderer)
+  r: FRect = (0.0; 0.0; 100.0; 100.0)
+  SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
+  RenderFillRect(renderer; @r)
 
   // for i in 0..game.food_n-1 do {
   //   r.x = game.food[i].x * (r.w + 2)
   //   r.y = game.food[i].y * (r.h + 2)
-  //   sdl.SetRenderDrawColor(renderer, 128, 16, 16, sdl.ALPHA_OPAQUE)
-  //   sdl.RenderFillRect(renderer, r)
   // }
 
   // for i in 1..game.snake_n-1 do {
@@ -197,6 +198,7 @@ while game.running do {
 
   RenderPresent(renderer)
   Delay(10)
+  // game.running = 0;
 }
 
 DestroyRenderer(renderer)

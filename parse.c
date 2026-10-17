@@ -10,6 +10,7 @@ typedef enum Ast_Kind {
   Ast_Kind_none      = 0,
   Ast_Kind_name      = Token_Kind_name & 0xff,
   Ast_Kind_int       = Token_Kind_int & 0xff,
+  Ast_Kind_float     = Token_Kind_float & 0xff,
   Ast_Kind_str       = Token_Kind_str & 0xff,
 
   Ast_Kind_add       = Token_Kind_plus,
@@ -106,6 +107,7 @@ struct Ast_Node {
   union {
     U64   bits;
     I64   i64;
+    F64   f64;
     Str*  str;
     Ast_Node* unary;
     Ast_List* list;
@@ -142,6 +144,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_none:         result = "none"; break;
   case Ast_Kind_name:         result = "name"; break;
   case Ast_Kind_int:          result = "int"; break;
+  case Ast_Kind_float:        result = "float"; break;
   case Ast_Kind_add:          result = "+"; break;
   case Ast_Kind_sub:          result = "-"; break;
   case Ast_Kind_mul:          result = "*"; break;
@@ -196,6 +199,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   break;
   case Ast_Kind_int:
     string_builder_push_i64(sb, node->i64);
+  break;
+  case Ast_Kind_float:
+    string_builder_push_f64(sb, node->f64);
   break;
   case Ast_Kind_str:
     string_builder_push_cstr(sb, "\"");
@@ -719,7 +725,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = ast_new_node(parser->perm_arena, kind);
     node->unary = unary;
   } break;
-  case Token_Kind_str: case Token_Kind_int: case Token_Kind_name:
+  case Token_Kind_str: case Token_Kind_int: case Token_Kind_float: case Token_Kind_name:
   {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
     node = ast_new_node(parser->perm_arena, kind);

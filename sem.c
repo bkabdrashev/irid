@@ -84,7 +84,7 @@ struct Span {
 typedef enum Type_Kind {
   Type_Kind_none,
   Type_Kind_type,
-  Type_Kind_int,
+  Type_Kind_scalar,
   Type_Kind_ptr,
   Type_Kind_array,
   Type_Kind_span,
@@ -94,9 +94,22 @@ typedef enum Type_Kind {
 } Type_Kind;
 
 typedef enum Type_Flag {
-  Type_Flag_size_defined   = 1 << 0,
-  Type_Flag_comptime_const = 1 << 1,
+  Type_Flag_size_defined    = 1 << 0,
+  Type_Flag_comptime_const  = 1 << 1,
 } Type_Flag;
+
+typedef enum Scalar_Kind {
+  Scalar_Kind_int,
+  Scalar_Kind_float,
+} Scalar_Kind;
+
+typedef struct Scalar Scalar;
+struct Scalar {
+  Scalar_Kind kind;
+  Ranges*     ranges;
+  I16         bits_exp;
+  I16         bits_mant;
+};
 
 struct Type {
   Type_Kind kind;
@@ -106,7 +119,7 @@ struct Type {
   union {
     U64       value;
     Type*     type;
-    Ranges*   ranges;
+    Scalar*   scalar;
     Pointer*  pointer;
     Array*    array;
     Span*     span;
@@ -155,6 +168,7 @@ struct Sem {
   Type* type_len;
   Type* fun_len;
   Type* fun_bits;
+  Type* fun_float;
   Type* fun_type_type;
   Type* rec_foreign;
   Type* fun_foreign_c;
@@ -191,6 +205,20 @@ Type* sem_var_declare(Var* var);
 B8 ranges_is_single(Ranges* ranges);
 I64 ranges_min(Ranges* ranges);
 Type* type_int(I64 i64);
+B8 type_scalar_is_same(Scalar one, Scalar two);
+Ranges* sem_ranges_merge(Ranges* one, Ranges* two);
+Ranges* sem_ranges_meet(Ranges* one, Ranges* two);
+Ranges* sem_ranges_float_widen(Ranges* ranges);
+Ranges* sem_ranges_int_to_float(Ranges* ranges, I16 bits_size, I16 mant_bits);
+B8 type_is_float(Type* type);
+B8 type_is_float_literal(Type* type);
+B8 type_float_literal_fits_f32(Type* literal);
+F64 type_float_literal_value(Type* literal);
+Type* type_float_ranges(I16 bits_size, I16 exp_bits, I16 mant_bits, Ranges* ranges, Type_Flag extra_flags);
+Type* type_float_of_ranges(Type* type, Ranges* ranges);
+Type* type_float_meet(Type* one, Type* two);
+Type* type_float_join(Type* one, Type* two);
+Type* type_float_cast_result(Type* from, Type* to);
 
 void string_builder_push_ranges(String_Builder* sb, Ranges* ranges) {
   if (ranges->length > 1) {
@@ -225,7 +253,12 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   else {
     string_builder_push_cstr(sb, " ");
   }
-  string_builder_push_cstr(sb, "bits ");
+  if (type->kind == Type_Kind_scalar && type->scalar.kind == Scalar_Kind_float) {
+    string_builder_push_cstr(sb, "float ");
+  }
+  else {
+    string_builder_push_cstr(sb, "bits ");
+  }
   switch (type->kind) {
   case Type_Kind_none:
     string_builder_push_cstr(sb, "none");
@@ -239,7 +272,14 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, " -> ");
     string_builder_push_type(sb, block, type->function->ret);
   } break;
-  case Type_Kind_int: {
+  case Type_Kind_scalar: {
+    if (type->scalar.kind == Scalar_Kind_float) {
+      string_builder_push_cstr(sb, "f");
+      string_builder_push_i64(sb, type->scalar.exp_bits);
+      string_builder_push_cstr(sb, ";");
+      string_builder_push_i64(sb, type->scalar.mant_bits);
+      string_builder_push_cstr(sb, " ");
+    }
     string_builder_push_ranges(sb, type->ranges);
   } break;
   case Type_Kind_ptr: {
@@ -542,9 +582,9 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
     case Type_Kind_type: {
       result = true;
     } break;
-    case Type_Kind_int: {
+    case Type_Kind_scalar: {
       B8 size_equal = one->bits_size == two->bits_size && one->bits_align == two->bits_align;
-      result = size_equal;
+      result = size_equal && type_scalar_is_same(one->scalar, two->scalar);
     } break;
     case Type_Kind_record: {
       if (one->record->length != two->record->length) {
@@ -654,8 +694,35 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
     case Type_Kind_type: {
       result = true;
     } break;
-    case Type_Kind_int: {
-      result = ranges_is_subrange(one->ranges, two->ranges);
+    case Type_Kind_scalar: {
+      if (one->scalar.kind != two->scalar.kind) {
+        if (one->scalar.kind == Scalar_Kind_int && two->scalar.kind == Scalar_Kind_float) {
+          I64 limit = ((I64)1) << (two->scalar.mant_bits + 1);
+          I64 lo = ranges_min(one->ranges);
+          I64 hi = ranges_max(one->ranges);
+          result = -limit <= lo && hi <= limit;
+        }
+        else {
+          result = false;
+        }
+      }
+      else if (one->scalar.kind == Scalar_Kind_float) {
+        if (type_scalar_is_same(one->scalar, two->scalar)) {
+          result = ranges_is_subrange(one->ranges, two->ranges);
+        }
+        else if (one->scalar.exp_bits == 8 && two->scalar.exp_bits == 11) {
+          result = true;
+        }
+        else if (one->scalar.exp_bits == 11 && two->scalar.exp_bits == 8) {
+          result = type_is_float_literal(one) && type_float_literal_fits_f32(one);
+        }
+        else {
+          result = false;
+        }
+      }
+      else {
+        result = ranges_is_subrange(one->ranges, two->ranges);
+      }
     } break;
     case Type_Kind_ptr: {
       if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
@@ -765,8 +832,11 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
 B8 type_is_false(Type* type) {
   B8 result = false;
   switch (type->kind) {
-  case Type_Kind_int: {
-    if (ranges_is_single(type->ranges)) {
+  case Type_Kind_scalar: {
+    if (type->scalar.kind == Scalar_Kind_float) {
+      result = -1 <= ranges_min(type->ranges) && ranges_max(type->ranges) <= 0;
+    }
+    else if (ranges_is_single(type->ranges)) {
       I64 val = ranges_min(type->ranges);
       result = val == 0;
     }
@@ -782,8 +852,13 @@ B8 type_is_false(Type* type) {
 B8 type_is_true(Type* type) {
   B8 result = false;
   switch (type->kind) {
-  case Type_Kind_int: {
-    result = !ranges_have(type->ranges, 0);
+  case Type_Kind_scalar: {
+    if (type->scalar.kind == Scalar_Kind_float) {
+      result = !ranges_have(type->ranges, -1) && !ranges_have(type->ranges, 0);
+    }
+    else {
+      result = !ranges_have(type->ranges, 0);
+    }
   } break;
   default: assert(0);
   }
@@ -815,7 +890,7 @@ B8 type_is_const(Type* type) {
   case Type_Kind_type: {
     result = true;
   } break;
-  case Type_Kind_int: {
+  case Type_Kind_scalar: {
     result = ranges_is_single(type->ranges);
   } break;
   case Type_Kind_record: {
@@ -865,12 +940,23 @@ void type_of_ir_put(Ir* ir, Type* type) {
   hash_map_put(&sem.type_of_irs, ir, type);
 }
 
+B8 type_scalar_is_same(Scalar one, Scalar two) {
+  return one.kind == two.kind
+      && one.exp_bits == two.exp_bits
+      && one.mant_bits == two.mant_bits;
+}
+
 Type* type_in_set(Type* type) {
   Type* result = sem.type_none;
   I32 i = hash_mix(type->value, type->bits_size);
   i = hash_mix(i, type->kind);
   i = hash_mix(i, type->bits_align);
   i = hash_mix(i, type->flag);
+  if (type->kind == Type_Kind_scalar) {
+    i = hash_mix(i, type->scalar.kind);
+    i = hash_mix(i, type->scalar.exp_bits);
+    i = hash_mix(i, type->scalar.mant_bits);
+  }
   for (;;) {
     i &= sem.type_set.cap - 1;
     Type* key = sem.type_set.keys[i];
@@ -880,11 +966,16 @@ Type* type_in_set(Type* type) {
       break;
     }
     else {
+      B8 scalar_equal = true;
+      if (key->kind == Type_Kind_scalar) {
+        scalar_equal = type_scalar_is_same(key->scalar, type->scalar);
+      }
       if (key->kind == type->kind
       &&  key->value == type->value
       &&  key->bits_size == type->bits_size
       &&  key->bits_align == type->bits_align
-      &&  key->flag == type->flag) {
+      &&  key->flag == type->flag
+      &&  scalar_equal) {
         del(sem.types);
         result = key;
         break;
@@ -1065,34 +1156,42 @@ Type* type_join_records(Join* join) {
   return result;
 }
 
+Ranges* sem_ranges_intern(Ranges* ranges) {
+  I32 i = 0;
+  for (;;) {
+    i &= sem.ranges_set.cap - 1;
+    Ranges* key = sem.ranges_set.keys[i];
+    if (!key) {
+      sem.ranges_set.keys[i] = ranges;
+      break;
+    }
+    else {
+      if (sem_ranges_is_equal(key, ranges)) {
+        arena_release_mark(sem.perm_arena, ranges);
+        ranges = key;
+        break;
+      }
+    }
+    i++;
+  }
+  return ranges;
+}
+
 Type* type_ranges(Ranges* ranges) {
   Type* result = sem.type_none;
   if (ranges->length == 0) {
     result = sem.type_none;
   }
   else {
-    I32 i = 0;
-    for (;;) {
-      i &= sem.ranges_set.cap - 1;
-      Ranges* key = sem.ranges_set.keys[i];
-      if (!key) {
-        sem.ranges_set.keys[i] = ranges;
-        break;
-      }
-      else {
-        if (sem_ranges_is_equal(key, ranges)) {
-          arena_release_mark(sem.perm_arena, ranges);
-          ranges = key;
-          break;
-        }
-      }
-      i++;
-    }
+    ranges = sem_ranges_intern(ranges);
     I64 min = ranges_min(ranges);
     I64 max = ranges_max(ranges);
     I16 bits_size = bits_needed(min, max);
     Type* new_type = &new(sem.types);
-    new_type->kind = Type_Kind_int;
+    new_type->kind = Type_Kind_scalar;
+    new_type->scalar.kind      = Scalar_Kind_int;
+    new_type->scalar.exp_bits  = 0;
+    new_type->scalar.mant_bits = 0;
     new_type->bits_align = align_up(bits_size, 8);
     new_type->bits_size  = bits_size;
     new_type->flag = 0;
@@ -1112,6 +1211,190 @@ Type* type_range(I64 min, I64 max) {
   ranges->pairs[0].lo = min;
   ranges->pairs[0].hi = max;
   return type_ranges(ranges);
+}
+
+Type* type_float_ranges(I16 bits_size, I16 exp_bits, I16 mant_bits, Ranges* ranges, Type_Flag extra_flags) {
+  if (ranges->length == 0) {
+    return sem.type_none;
+  }
+  ranges = sem_ranges_intern(ranges);
+  Type* new_type = &new(sem.types);
+  new_type->kind = Type_Kind_scalar;
+  new_type->scalar.kind      = Scalar_Kind_float;
+  new_type->scalar.exp_bits  = exp_bits;
+  new_type->scalar.mant_bits = mant_bits;
+  new_type->bits_align = bits_size;
+  new_type->bits_size  = bits_size;
+  new_type->flag = Type_Flag_size_defined | extra_flags;
+  new_type->ranges = ranges;
+  return type_in_set(new_type);
+}
+
+Type* type_float_full(I16 bits_size, I16 exp_bits, I16 mant_bits) {
+  assert(bits_size == exp_bits + mant_bits + 1);
+  Ranges* ranges = sem_ranges_init(1);
+  ranges->length = 1;
+  if (bits_size == 32) {
+    ranges->pairs[0].lo = I32_MIN;
+    ranges->pairs[0].hi = I32_MAX;
+  }
+  else {
+    ranges->pairs[0].lo = I64_MIN;
+    ranges->pairs[0].hi = I64_MAX;
+  }
+  return type_float_ranges(bits_size, exp_bits, mant_bits, ranges, 0);
+}
+
+Type* type_float_literal_in(F64 f64, I16 bits_size, I16 exp_bits, I16 mant_bits) {
+  Ranges* ranges = sem_ranges_init(1);
+  ranges->length = 1;
+  I64 key = bits_size == 32 ? float_key_of_f32((F32)f64) : float_key_of_f64(f64);
+  ranges->pairs[0].lo = key;
+  ranges->pairs[0].hi = key;
+  return type_float_ranges(bits_size, exp_bits, mant_bits, ranges, Type_Flag_comptime_const | Type_Flag_float_literal);
+}
+
+Type* type_float_literal(F64 f64) {
+  return type_float_literal_in(f64, 64, 11, 52);
+}
+
+B8 type_is_float(Type* type) {
+  return type->kind == Type_Kind_scalar && type->scalar.kind == Scalar_Kind_float;
+}
+
+B8 type_is_float_literal(Type* type) {
+  return type_is_float(type) && has_flag(type->flag, Type_Flag_float_literal);
+}
+
+Ranges* sem_ranges_float_widen(Ranges* ranges) {
+  Ranges* result = sem_ranges_init(ranges->length);
+  result->length = ranges->length;
+  for (I32 i = 0; i < ranges->length; i++) {
+    F32 lo = float_f32_of_key(ranges->pairs[i].lo);
+    F32 hi = float_f32_of_key(ranges->pairs[i].hi);
+    I64 lo_key = isnan(lo) ? (signbit(lo) ? I64_MIN : I64_MAX) : float_key_of_f64((F64)lo);
+    I64 hi_key = isnan(hi) ? (signbit(hi) ? I64_MIN : I64_MAX) : float_key_of_f64((F64)hi);
+    assert(lo_key <= hi_key);
+    result->pairs[i].lo = lo_key;
+    result->pairs[i].hi = hi_key;
+  }
+  return result;
+}
+
+Ranges* sem_ranges_int_to_float(Ranges* ranges, I16 bits_size, I16 mant_bits) {
+  I64 limit = ((I64)1) << (mant_bits + 1);
+  Ranges* result = sem_ranges_init(ranges->length);
+  result->length = ranges->length;
+  for (I32 i = 0; i < ranges->length; i++) {
+    I64 lo = ranges->pairs[i].lo;
+    I64 hi = ranges->pairs[i].hi;
+    assert(-limit <= lo && lo <= limit);
+    assert(-limit <= hi && hi <= limit);
+    if (bits_size == 32) {
+      result->pairs[i].lo = float_key_of_f32((F32)lo);
+      result->pairs[i].hi = float_key_of_f32((F32)hi);
+    }
+    else {
+      result->pairs[i].lo = float_key_of_f64((F64)lo);
+      result->pairs[i].hi = float_key_of_f64((F64)hi);
+    }
+    assert(result->pairs[i].lo <= result->pairs[i].hi);
+  }
+  return result;
+}
+
+F64 type_float_literal_value(Type* literal) {
+  assert(type_is_float_literal(literal));
+  if (literal->scalar.exp_bits == 8) {
+    return (F64)float_f32_of_key(ranges_min(literal->ranges));
+  }
+  return float_f64_of_key(ranges_min(literal->ranges));
+}
+
+B8 type_float_literal_fits_f32(Type* literal) {
+  F64 value = type_float_literal_value(literal);
+  if (isnan(value)) {
+    return true;
+  }
+  F32 narrowed = (F32)value;
+  return !(isinf((F64)narrowed) && !isinf(value));
+}
+
+B8 type_float_literal_exact_f32(Type* literal) {
+  F64 value = type_float_literal_value(literal);
+  if (isnan(value)) {
+    return false;
+  }
+  F32 narrowed = (F32)value;
+  return (F64)narrowed == value && signbit(narrowed) == signbit(value);
+}
+
+Type* type_float_meet(Type* one, Type* two) {
+  Type* result = sem.type_none;
+  if (type_scalar_is_same(one->scalar, two->scalar)) {
+    return type_float_ranges(one->bits_size, one->scalar.exp_bits, one->scalar.mant_bits, sem_ranges_meet(one->ranges, two->ranges), 0);
+  }
+  if (type_is_float_literal(one) && one->scalar.exp_bits == 11 && two->scalar.exp_bits == 8) {
+    if (type_float_literal_exact_f32(one)) {
+      result = type_float_literal_in(type_float_literal_value(one), 32, 8, 23);
+    }
+  }
+  else if (type_is_float_literal(two) && two->scalar.exp_bits == 11 && one->scalar.exp_bits == 8) {
+    if (type_float_literal_exact_f32(two)) {
+      result = type_float_literal_in(type_float_literal_value(two), 32, 8, 23);
+    }
+  }
+  else if (one->scalar.exp_bits == 8 && two->scalar.exp_bits == 11) {
+    result = type_float_ranges(64, 11, 52, sem_ranges_meet(sem_ranges_float_widen(one->ranges), two->ranges), 0);
+  }
+  else if (one->scalar.exp_bits == 11 && two->scalar.exp_bits == 8) {
+    result = type_float_ranges(64, 11, 52, sem_ranges_meet(one->ranges, sem_ranges_float_widen(two->ranges)), 0);
+  }
+  return result;
+}
+
+Type* type_float_join(Type* one, Type* two) {
+  Ranges* ranges;
+  if (type_scalar_is_same(one->scalar, two->scalar)) {
+    ranges = sem_ranges_merge(one->ranges, two->ranges);
+    return type_float_ranges(one->bits_size, one->scalar.exp_bits, one->scalar.mant_bits, ranges, 0);
+  }
+  if (one->scalar.exp_bits == 8) {
+    ranges = sem_ranges_merge(sem_ranges_float_widen(one->ranges), two->ranges);
+  }
+  else if (two->scalar.exp_bits == 8) {
+    ranges = sem_ranges_merge(one->ranges, sem_ranges_float_widen(two->ranges));
+  }
+  else {
+    assert(0);
+  }
+  return type_float_ranges(64, 11, 52, ranges, 0);
+}
+
+Type* type_float_cast_result(Type* from, Type* to) {
+  assert(type_is_float(from) && type_is_float(to));
+  if (type_is_float_literal(from)) {
+    F64 value = type_float_literal_value(from);
+    if (to->scalar.exp_bits == 11) {
+      return type_float_literal_in(value, 64, 11, 52);
+    }
+    return type_float_literal_in(value, 32, 8, 23);
+  }
+  if (type_scalar_is_same(from->scalar, to->scalar)) {
+    return type_float_ranges(to->bits_size, to->scalar.exp_bits, to->scalar.mant_bits, from->ranges, 0);
+  }
+  if (from->scalar.exp_bits == 8 && to->scalar.exp_bits == 11) {
+    return type_float_ranges(64, 11, 52, sem_ranges_float_widen(from->ranges), 0);
+  }
+  if (from->scalar.exp_bits == 11 && to->scalar.exp_bits == 8) {
+    Ranges* full = sem_ranges_init(1);
+    full->length = 1;
+    full->pairs[0].lo = I32_MIN;
+    full->pairs[0].hi = I32_MAX;
+    return type_float_ranges(32, 8, 23, full, 0);
+  }
+  assert(0);
+  return 0;
 }
 
 Type* type_function(Function* function) {
@@ -1173,6 +1456,20 @@ Ir* sem_push_int_extend(Block* block, Ir* value, I16 bits) {
   type->bits_size = bits;
   type->bits_align = align_up(bits, 8);
   type = type_in_set(type);
+  type_of_ir_put(new_ir, type);
+  return new_ir;
+}
+
+Ir* sem_push_float_cast(Block* block, Ir* value, Type* type) {
+  Ir sem_ir = { Ir_Kind_float_cast, .int_cast = { .value=value, .bits=type->bits_size } };
+  Ir* new_ir = sem_push_ir(block, sem_ir);
+  type_of_ir_put(new_ir, type);
+  return new_ir;
+}
+
+Ir* sem_push_int_float_cast(Block* block, Ir* value, Type* type) {
+  Ir sem_ir = { Ir_Kind_int_float_cast, .int_cast = { .value=value, .bits=type->bits_size } };
+  Ir* new_ir = sem_push_ir(block, sem_ir);
   type_of_ir_put(new_ir, type);
   return new_ir;
 }
@@ -1264,6 +1561,191 @@ Type* sem_ranges_reflow_binary(Block* block, Ir* ir, Range range, Type_Pair type
   return result;
 }
 
+F64 sem_float_of_key(I64 key, I16 exp_bits) {
+  return exp_bits == 8 ? (F64)float_f32_of_key(key) : float_f64_of_key(key);
+}
+
+I64 sem_float_key_of_lo(F64 value, I16 exp_bits) {
+  if (exp_bits == 8) {
+    F32 v = (F32)value;
+    if (isfinite(v)) v = nextafterf(v, -INFINITY);
+    return float_key_of_f32(v);
+  }
+  F64 v = value;
+  if (isfinite(v)) v = nextafter(v, -INFINITY);
+  return float_key_of_f64(v);
+}
+
+I64 sem_float_key_of_hi(F64 value, I16 exp_bits) {
+  if (exp_bits == 8) {
+    F32 v = (F32)value;
+    if (isfinite(v)) v = nextafterf(v, INFINITY);
+    return float_key_of_f32(v);
+  }
+  F64 v = value;
+  if (isfinite(v)) v = nextafter(v, INFINITY);
+  return float_key_of_f64(v);
+}
+
+Type* type_float_full_typed(Type* type) {
+  Ranges* full = sem_ranges_init(1);
+  full->length = 1;
+  if (type->bits_size == 32) {
+    full->pairs[0].lo = I32_MIN;
+    full->pairs[0].hi = I32_MAX;
+  }
+  else {
+    full->pairs[0].lo = I64_MIN;
+    full->pairs[0].hi = I64_MAX;
+  }
+  return type_float_of_ranges(type, full);
+}
+
+Type* type_float_result(Type* one, Type* two, F64 rlo, F64 rhi, B8 exact, B8 defined) {
+  I16 exp_bits  = one->scalar.exp_bits;
+  I16 mant_bits = one->scalar.mant_bits;
+  I16 bits_size = one->bits_size;
+  if (!defined || !isfinite(rlo) || !isfinite(rhi)) {
+    return type_float_full_typed(one);
+  }
+  Ranges* ranges = sem_ranges_init(1);
+  ranges->length = 1;
+  if (exact && rlo == rhi && (exp_bits != 8 || (F64)(F32)rlo == rlo)) {
+    I64 key = exp_bits == 8 ? float_key_of_f32((F32)rlo) : float_key_of_f64(rlo);
+    ranges->pairs[0].lo = key;
+    ranges->pairs[0].hi = key;
+  }
+  else {
+    ranges->pairs[0].lo = sem_float_key_of_lo(rlo, exp_bits);
+    ranges->pairs[0].hi = sem_float_key_of_hi(rhi, exp_bits);
+    assert(ranges->pairs[0].lo <= ranges->pairs[0].hi);
+  }
+  Type_Flag flags = 0;
+  if (exact && type_is_float_literal(one) && type_is_float_literal(two) && ranges_is_single(ranges)) {
+    flags = Type_Flag_comptime_const;
+  }
+  return type_float_ranges(bits_size, exp_bits, mant_bits, ranges, flags);
+}
+
+Type* type_int_float_cast_result(Type* from, Type* to) {
+  assert(from->kind == Type_Kind_scalar && from->scalar.kind == Scalar_Kind_int);
+  assert(type_is_float(to));
+  I64 limit = ((I64)1) << (to->scalar.mant_bits + 1);
+  if (ranges_min(from->ranges) >= -limit && ranges_max(from->ranges) <= limit) {
+    Ranges* ranges = sem_ranges_int_to_float(from->ranges, to->bits_size, to->scalar.mant_bits);
+    Type_Flag flags = ranges_is_single(ranges) ? Type_Flag_comptime_const : 0;
+    return type_float_ranges(to->bits_size, to->scalar.exp_bits, to->scalar.mant_bits, ranges, flags);
+  }
+  return type_float_full_typed(to);
+}
+
+void sem_unify_float_binary(Block* block, Ir* ir, Type_Pair types) {
+  if (!type_is_float(types.one) && !type_is_float(types.two)) {
+    return;
+  }
+  if (!type_is_float(types.one)) {
+    Type* cast_type = type_int_float_cast_result(types.one, types.two);
+    ir->binary.one = sem_push_int_float_cast(block, ir->binary.one, cast_type);
+  }
+  else if (!type_is_float(types.two)) {
+    Type* cast_type = type_int_float_cast_result(types.two, types.one);
+    ir->binary.two = sem_push_int_float_cast(block, ir->binary.two, cast_type);
+  }
+  types = type_of_ir_binary(ir);
+  if (types.one->scalar.exp_bits == types.two->scalar.exp_bits) {
+    return;
+  }
+  B8 one_literal = type_is_float_literal(types.one);
+  B8 two_literal = type_is_float_literal(types.two);
+  if (types.one->scalar.exp_bits == 8) {
+    if (two_literal && type_float_literal_exact_f32(types.two)) {
+      Type* cast_type = type_float_cast_result(types.two, types.one);
+      ir->binary.two = sem_push_float_cast(block, ir->binary.two, cast_type);
+    }
+    else {
+      Type* cast_type = type_float_cast_result(types.one, types.two);
+      ir->binary.one = sem_push_float_cast(block, ir->binary.one, cast_type);
+    }
+  }
+  else if (types.two->scalar.exp_bits == 8) {
+    if (one_literal && type_float_literal_exact_f32(types.one)) {
+      Type* cast_type = type_float_cast_result(types.one, types.two);
+      ir->binary.one = sem_push_float_cast(block, ir->binary.one, cast_type);
+    }
+    else {
+      Type* cast_type = type_float_cast_result(types.two, types.one);
+      ir->binary.two = sem_push_float_cast(block, ir->binary.two, cast_type);
+    }
+  }
+  else {
+    assert(0);
+  }
+}
+
+Type* sem_reflow_binary_float(Block* block, Ir* ir) {
+  Type_Pair types = type_of_ir_binary(ir);
+  Type* one = types.one;
+  Type* two = types.two;
+  assert(type_scalar_is_same(one->scalar, two->scalar));
+  I16 exp_bits = one->scalar.exp_bits;
+
+  F64 lo_one = sem_float_of_key(ranges_min(one->ranges), exp_bits);
+  F64 hi_one = sem_float_of_key(ranges_max(one->ranges), exp_bits);
+  F64 lo_two = sem_float_of_key(ranges_min(two->ranges), exp_bits);
+  F64 hi_two = sem_float_of_key(ranges_max(two->ranges), exp_bits);
+
+  F64 rlo = 0;
+  F64 rhi = 0;
+  B8 defined = true;
+  switch (ir->kind) {
+  case Ir_Kind_add: rlo = lo_one + lo_two; rhi = hi_one + hi_two; break;
+  case Ir_Kind_sub: rlo = lo_one - hi_two; rhi = hi_one - lo_two; break;
+  case Ir_Kind_mul: {
+    F64 p0 = lo_one * lo_two;
+    F64 p1 = lo_one * hi_two;
+    F64 p2 = hi_one * lo_two;
+    F64 p3 = hi_one * hi_two;
+    rlo = min(min(p0, p1), min(p2, p3));
+    rhi = max(max(p0, p1), max(p2, p3));
+  } break;
+  case Ir_Kind_div: {
+    if (lo_two <= 0 && 0 <= hi_two) {
+      defined = false;
+    }
+    else {
+      F64 q0 = lo_one / lo_two;
+      F64 q1 = lo_one / hi_two;
+      F64 q2 = hi_one / lo_two;
+      F64 q3 = hi_one / hi_two;
+      rlo = min(min(q0, q1), min(q2, q3));
+      rhi = max(max(q0, q1), max(q2, q3));
+    }
+  } break;
+  case Ir_Kind_rem: {
+    defined = false;
+  } break;
+  default: assert(0); break;
+  }
+  return type_float_result(one, two, rlo, rhi, false, defined);
+}
+
+Type* sem_reflow_neg_float(Ir* ir, Type* one) {
+  I16 exp_bits = one->scalar.exp_bits;
+  if (type_is_float_literal(one)) {
+    F64 value = -type_float_literal_value(one);
+    if (exp_bits == 8) {
+      return type_float_literal_in(value, 32, 8, 23);
+    }
+    return type_float_literal_in(value, 64, 11, 52);
+  }
+  F64 lo = sem_float_of_key(ranges_min(one->ranges), exp_bits);
+  F64 hi = sem_float_of_key(ranges_max(one->ranges), exp_bits);
+  if (!isfinite(lo) || !isfinite(hi)) {
+    return type_float_full_typed(one);
+  }
+  return type_float_result(one, one, -hi, -lo, false, true);
+}
+
 Type* type_int(I64 i64) {
   return type_range(i64, i64);
 }
@@ -1279,7 +1761,7 @@ Type* type_ranges_offset(Ranges* ranges, I64 offset) {
   return type_ranges(ranges);
 }
 
-Type* type_ranges_merge(Ranges* one, Ranges* two) {
+Ranges* sem_ranges_merge(Ranges* one, Ranges* two) {
   Ranges* new_ints = sem_ranges_init(one->length + two->length);
   I32 len_one = one->length;
   I32 len_two = two->length;
@@ -1327,7 +1809,11 @@ Type* type_ranges_merge(Ranges* one, Ranges* two) {
   for (; t < len_two; t++) {
     new_ints->pairs[new_ints->length++] = two->pairs[t];
   }
-  return type_ranges(new_ints);
+  return new_ints;
+}
+
+Type* type_ranges_merge(Ranges* one, Ranges* two) {
+  return type_ranges(sem_ranges_merge(one, two));
 }
 
 Field type_record_get_by_position(Record* record, I32 position) {
@@ -1602,8 +2088,16 @@ Type* type_meet(Type* one, Type* two) {
     case Type_Kind_type: {
       result = type_type(type_meet(one->type, two->type));
     } break;
-    case Type_Kind_int: {
-      result = type_ranges_meet(one->ranges, two->ranges);
+    case Type_Kind_scalar: {
+      if (one->scalar.kind != two->scalar.kind) {
+        result = sem.type_none;
+      }
+      else if (one->scalar.kind == Scalar_Kind_float) {
+        result = type_float_meet(one, two);
+      }
+      else {
+        result = type_ranges_meet(one->ranges, two->ranges);
+      }
     } break;
     case Type_Kind_ptr: {
       Type* one_declared = type_pointer_declared(one->pointer);
@@ -1643,8 +2137,29 @@ Type* type_join(Type* one, Type* two) {
   else if (two->kind == Type_Kind_none) {
     result = one;
   }
-  else if (one->kind == Type_Kind_int && two->kind == Type_Kind_int) {
-    result = type_ranges_merge(one->ranges, two->ranges);
+  else if (one->kind == Type_Kind_scalar && two->kind == Type_Kind_scalar) {
+    if (one->scalar.kind != two->scalar.kind) {
+      assert(0);
+    }
+    else if (one->scalar.kind == Scalar_Kind_float) {
+      result = type_float_join(one, two);
+    }
+    else {
+      Ranges* ranges = sem_ranges_merge(one->ranges, two->ranges);
+      if (has_flag(one->flag, Type_Flag_size_defined) || has_flag(two->flag, Type_Flag_size_defined)) {
+        I16 bits_size = max(one->bits_size, two->bits_size);
+        Type* merged = type_ranges(ranges);
+        if (merged->bits_size <= bits_size) {
+          result = type_define_size(bits_size, merged);
+        }
+        else {
+          result = merged;
+        }
+      }
+      else {
+        result = type_ranges(ranges);
+      }
+    }
   }
   else if (one->kind == Type_Kind_ptr && two->kind == Type_Kind_ptr) {
     Type* one_declared = type_pointer_declared(one->pointer);
@@ -1799,7 +2314,7 @@ B8 type_kind_of_ir_binary_operands_equal(Ir* ir, Type_Kind type_kind) {
   return pair.one->kind == type_kind && pair.two->kind == type_kind;
 }
 
-Type* type_ranges_meet(Ranges* one, Ranges* two) {
+Ranges* sem_ranges_meet(Ranges* one, Ranges* two) {
   Ranges* new_ranges = sem_ranges_init(max(one->length, two->length));
   I32 o = 0; I32 t = 0;
   while (o < one->length && t < two->length) {
@@ -1816,7 +2331,11 @@ Type* type_ranges_meet(Ranges* one, Ranges* two) {
       t++;
     }
   }
-  return type_ranges(new_ranges);
+  return new_ranges;
+}
+
+Type* type_ranges_meet(Ranges* one, Ranges* two) {
+  return type_ranges(sem_ranges_meet(one, two));
 }
 
 Type* type_ranges_no_meet(Ranges* one, Ranges* two) {
@@ -1913,7 +2432,7 @@ Type* type_ranges_no_meet(Ranges* one, Ranges* two) {
   return type_ranges(new_ranges);
 }
 
-Type* type_ranges_exclude(Ranges* ranges, I64 val) {
+Ranges* sem_ranges_exclude(Ranges* ranges, I64 val) {
   Ranges* new_ints = sem_ranges_init(ranges->length+1);
   for (I32 i = 0; i < ranges->length; i++) {
     if (ranges->pairs[i].lo <= val && val <= ranges->pairs[i].hi) {
@@ -1943,7 +2462,15 @@ Type* type_ranges_exclude(Ranges* ranges, I64 val) {
       new_ints->pairs[new_ints->length++] = ranges->pairs[i];
     }
   }
-  return type_ranges(new_ints);
+  return new_ints;
+}
+
+Type* type_float_of_ranges(Type* type, Ranges* ranges) {
+  return type_float_ranges(type->bits_size, type->scalar.exp_bits, type->scalar.mant_bits, ranges, 0);
+}
+
+Type* type_ranges_exclude(Ranges* ranges, I64 val) {
+  return type_ranges(sem_ranges_exclude(ranges, val));
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
@@ -1953,13 +2480,13 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     if (ptr->stack_vars.len == 1) {
       Var* var = ptr->stack_vars.list[0];
       Type* old_type = var->block_types[tasks->block->id];
-      Type* new_type_as_old = &new(sem.types);
-           *new_type_as_old = *new_type;
-            new_type_as_old->flag       = old_type->flag;
-            new_type_as_old->bits_size  = old_type->bits_size;
-            new_type_as_old->bits_align = old_type->bits_align;
-      new_type = type_in_set(new_type_as_old);
       if (old_type) {
+        Type* new_type_as_old = &new(sem.types);
+             *new_type_as_old = *new_type;
+              new_type_as_old->flag       = old_type->flag;
+              new_type_as_old->bits_size  = old_type->bits_size;
+              new_type_as_old->bits_align = old_type->bits_align;
+        new_type = type_in_set(new_type_as_old);
         var->block_types[tasks->block->id] = new_type;
         if (var->parent) {
           Var*  parent = var->parent;
@@ -1993,8 +2520,15 @@ void sem_type_of_ir_binary_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type_one, 
 }
 
 void sem_type_narrow_int_eq(Sem_Tasks* tasks, Ir* ir) {
-  Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-  Type* new_type = type_ranges_meet(pair.one, pair.two);
+  Type_Pair pair = type_of_ir_binary(ir);
+  Type* new_type;
+  if (type_is_float(pair.one) || type_is_float(pair.two)) {
+    new_type = type_meet(pair.one, pair.two);
+  }
+  else {
+    Ranges_Pair ranges = ranges_pair_of_ir_binary(ir);
+    new_type = type_ranges_meet(ranges.one, ranges.two);
+  }
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
 
@@ -2012,12 +2546,16 @@ void sem_type_narrow_int_ne(Sem_Tasks* tasks, Ir* ir) {
   Type_Pair pair = type_of_ir_binary(ir);
   if (ranges_is_single(pair.one->ranges)) {
     I64 val = ranges_min(pair.one->ranges);
-    Type* new_type_two = type_ranges_exclude(pair.two->ranges, val);
+    Type* new_type_two = type_is_float(pair.two)
+      ? type_float_of_ranges(pair.two, sem_ranges_exclude(pair.two->ranges, val))
+      : type_ranges_exclude(pair.two->ranges, val);
     sem_type_of_ir_narrow(tasks, ir->binary.two, new_type_two);
   }
   if (ranges_is_single(pair.two->ranges)) {
     I64 val = ranges_min(pair.two->ranges);
-    Type* new_type_one = type_ranges_exclude(pair.one->ranges, val);
+    Type* new_type_one = type_is_float(pair.one)
+      ? type_float_of_ranges(pair.one, sem_ranges_exclude(pair.one->ranges, val))
+      : type_ranges_exclude(pair.one->ranges, val);
     sem_type_of_ir_narrow(tasks, ir->binary.one, new_type_one);
   }
 }
@@ -2044,12 +2582,16 @@ void sem_type_narrow_ptr_ne(Sem_Tasks* tasks, Ir* ir) {
 I64 sem_sat_dec(I64 x) { return x == I64_MIN ? I64_MIN : x - 1; }
 I64 sem_sat_inc(I64 x) { return x == I64_MAX ? I64_MAX : x + 1; }
 
-Type* sem_ranges_clamp(Ranges* ranges, I64 lo, I64 hi) {
+Type* sem_type_clamp(Type* type, I64 lo, I64 hi) {
   Ranges* line = sem_ranges_init(1);
   line->length = 1;
   line->pairs[0].lo = lo;
   line->pairs[0].hi = hi;
-  return type_ranges_meet(ranges, line);
+  Ranges* meet = sem_ranges_meet(type->ranges, line);
+  if (type_is_float(type)) {
+    return type_float_of_ranges(type, meet);
+  }
+  return type_ranges(meet);
 }
 
 Ir_Kind sem_cmp_negate(Ir_Kind op) {
@@ -2074,20 +2616,20 @@ void sem_type_narrow_int_cmp(Sem_Tasks* tasks, Ir* ir, Ir_Kind op) {
   Type* nb = 0;
   switch (op) {
   case Ir_Kind_lt:
-    na = sem_ranges_clamp(ra, I64_MIN, sem_sat_dec(bmax));
-    nb = sem_ranges_clamp(rb, sem_sat_inc(amin), I64_MAX);
+    na = sem_type_clamp(pair.one, I64_MIN, sem_sat_dec(bmax));
+    nb = sem_type_clamp(pair.two, sem_sat_inc(amin), I64_MAX);
   break;
   case Ir_Kind_le:
-    na = sem_ranges_clamp(ra, I64_MIN, bmax);
-    nb = sem_ranges_clamp(rb, amin, I64_MAX);
+    na = sem_type_clamp(pair.one, I64_MIN, bmax);
+    nb = sem_type_clamp(pair.two, amin, I64_MAX);
   break;
   case Ir_Kind_gt:
-    na = sem_ranges_clamp(ra, sem_sat_inc(bmin), I64_MAX);
-    nb = sem_ranges_clamp(rb, I64_MIN, sem_sat_dec(amax));
+    na = sem_type_clamp(pair.one, sem_sat_inc(bmin), I64_MAX);
+    nb = sem_type_clamp(pair.two, I64_MIN, sem_sat_dec(amax));
   break;
   case Ir_Kind_ge:
-    na = sem_ranges_clamp(ra, bmin, I64_MAX);
-    nb = sem_ranges_clamp(rb, I64_MIN, amax);
+    na = sem_type_clamp(pair.one, bmin, I64_MAX);
+    nb = sem_type_clamp(pair.two, I64_MIN, amax);
   break;
   default:
     assert(0);
@@ -2098,7 +2640,19 @@ void sem_type_narrow_int_cmp(Sem_Tasks* tasks, Ir* ir, Ir_Kind op) {
 
 Type* type_narrow_eqz(Type* type) {
   switch (type->kind) {
-  case Type_Kind_int: {
+  case Type_Kind_scalar: {
+    if (type_is_float(type)) {
+      B8 have_zero = ranges_have(type->ranges, 0) || ranges_have(type->ranges, -1);
+      if (have_zero) {
+        Ranges* zeros = sem_ranges_init(1);
+        zeros->length = 1;
+        zeros->pairs[0].lo = -1;
+        zeros->pairs[0].hi = 0;
+        Ranges* meet = sem_ranges_meet(type->ranges, zeros);
+        return type_float_of_ranges(type, meet);
+      }
+      return 0;
+    }
     B8 have_zero = ranges_have(type->ranges, 0);
     if (have_zero) {
       return sem.type_zero;
@@ -2114,7 +2668,12 @@ Type* type_narrow_eqz(Type* type) {
 
 Type* type_narrow_nez(Type* type) {
   switch (type->kind) {
-  case Type_Kind_int: {
+  case Type_Kind_scalar: {
+    if (type_is_float(type)) {
+      Ranges* nonzero = sem_ranges_exclude(type->ranges, 0);
+      nonzero = sem_ranges_exclude(nonzero, -1);
+      return type_float_of_ranges(type, nonzero);
+    }
     return type_ranges_exclude(type->ranges, 0);
   } break;
   default: break;
@@ -2127,7 +2686,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_eq(tasks, cond_ir);
     }
     else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
@@ -2138,7 +2697,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
     }
   } break;
   case Ir_Kind_ne: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_ne(tasks, cond_ir);
     }
     else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
@@ -2150,7 +2709,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
   } break;
   case Ir_Kind_lt: case Ir_Kind_le:
   case Ir_Kind_gt: case Ir_Kind_ge: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_cmp(tasks, cond_ir, cond_ir->kind);
     }
   } break;
@@ -2172,7 +2731,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   Ir* cond_ir = block->branch.cond;
   switch (cond_ir->kind) {
   case Ir_Kind_eq: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_ne(tasks, cond_ir);
     }
     else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
@@ -2183,7 +2742,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
     }
   } break;
   case Ir_Kind_ne: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_eq(tasks, cond_ir);
     }
     else if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_ptr)) {
@@ -2195,7 +2754,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   } break;
   case Ir_Kind_lt: case Ir_Kind_le:
   case Ir_Kind_gt: case Ir_Kind_ge: {
-    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_cmp(tasks, cond_ir, sem_cmp_negate(cond_ir->kind));
     }
   } break;
@@ -2206,8 +2765,8 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
       for (I32 i = 0; i < ptr->stack_vars.len; i++) {
         Var* var = ptr->stack_vars.list[i];
         Type* old_type = var->block_types[tasks->block->id];
-        Type* new_type = type_narrow_eqz(old_type);
         if (old_type) {
+          Type* new_type = type_narrow_eqz(old_type);
           var->block_types[tasks->block->id] = new_type;
         }
       }
@@ -2298,8 +2857,33 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
   Type* result = sem.type_none;
   if (from->kind == to->kind) {
     switch (from->kind) {
-    case Type_Kind_int: {
-      if (store) {
+    case Type_Kind_scalar: {
+      if (type_is_float(from) || type_is_float(to)) {
+        Type* cast_type;
+        if (type_is_float(from) && type_is_float(to)) {
+          cast_type = type_float_cast_result(from, to);
+        }
+        else if (from->scalar.kind == Scalar_Kind_int && type_is_float(to)) {
+          cast_type = type_int_float_cast_result(from, to);
+        }
+        else {
+          assert(0);
+          cast_type = sem.type_none;
+        }
+        if (cast_type->kind == Type_Kind_none) {
+          assert(0);
+        }
+        if (store) {
+          if (from->scalar.kind == Scalar_Kind_int) {
+            store->binary.two = sem_push_int_float_cast(block, store->binary.two, cast_type);
+          }
+          else {
+            store->binary.two = sem_push_float_cast(block, store->binary.two, cast_type);
+          }
+        }
+        result = cast_type;
+      }
+      else if (store) {
         store->binary.two = sem_push_int_extend(block, store->binary.two, to->bits_size);
         result = type_of_ir(store->binary.two);
       }
@@ -2424,6 +3008,9 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
     }
   }
   else {
+    printf("type_auto_cast kind mismatch: from kind %d float %d bits %d, to kind %d float %d bits %d\n",
+      from->kind, type_is_float(from), from->bits_size,
+      to->kind, type_is_float(to), to->bits_size);
     assert(0);
   }
   return result;
@@ -2465,7 +3052,13 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
       var->block_types[block->id] = type;
     }
     else {
-      printf("not subtype\n");
+      C8 buffer_declared[4096];
+      C8 buffer_type[4096];
+      String_Builder sb_declared = string_builder_begin(buffer_declared);
+      String_Builder sb_type = string_builder_begin(buffer_type);
+      string_builder_push_type(&sb_declared, block, var->declared);
+      string_builder_push_type(&sb_type, block, type);
+      printf("not subtype: declared %s, got %s\n", string_builder_end(&sb_declared), string_builder_end(&sb_type));
       assert(0);
     }
   }
@@ -2612,6 +3205,10 @@ void sem_ir(Block* block, Ir* ir) {
     I64 i64 = ir->i64;
     result  = type_int(i64);
   } break;
+  case Ir_Kind_float: {
+    F64 f64 = ir->f64;
+    result  = type_float_literal(f64);
+  } break;
   case Ir_Kind_str: {
     Array* str_array = type_array_init(ir->str->length);
     str_array->of_type = sem.bytes_range;
@@ -2672,12 +3269,18 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_add: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      Range one = ranges_limits(pair.one);
-      Range two = ranges_limits(pair.two);
-      Range range = { one.lo+two.lo, one.hi+two.hi };
-      result = sem_ranges_reflow_binary(block, ir, range, types);
+    if (types.one->kind == Type_Kind_scalar && types.two->kind == Type_Kind_scalar) {
+      if (type_is_float(types.one) || type_is_float(types.two)) {
+        sem_unify_float_binary(block, ir, types);
+        result = sem_reflow_binary_float(block, ir);
+      }
+      else {
+        Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+        Range one = ranges_limits(pair.one);
+        Range two = ranges_limits(pair.two);
+        Range range = { one.lo+two.lo, one.hi+two.hi };
+        result = sem_ranges_reflow_binary(block, ir, range, types);
+      }
     }
     else {
       assert(0);
@@ -2685,12 +3288,18 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_sub: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      Range one = ranges_limits(pair.one);
-      Range two = ranges_limits(pair.two);
-      Range range = { one.lo-two.lo, one.hi-two.hi };
-      result = sem_ranges_reflow_binary(block, ir, range, types);
+    if (types.one->kind == Type_Kind_scalar && types.two->kind == Type_Kind_scalar) {
+      if (type_is_float(types.one) || type_is_float(types.two)) {
+        sem_unify_float_binary(block, ir, types);
+        result = sem_reflow_binary_float(block, ir);
+      }
+      else {
+        Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+        Range one = ranges_limits(pair.one);
+        Range two = ranges_limits(pair.two);
+        Range range = { one.lo-two.lo, one.hi-two.hi };
+        result = sem_ranges_reflow_binary(block, ir, range, types);
+      }
     }
     else {
       assert(0);
@@ -2698,17 +3307,23 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_mul: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      Range one = ranges_limits(pair.one);
-      Range two = ranges_limits(pair.two);
-      I64 a = one.lo * two.lo;
-      I64 b = one.hi * two.lo;
-      I64 c = one.lo * two.hi;
-      I64 d = one.hi * two.hi;
-      // TODO: check that this works, even with undeflow/overflow
-      Range range = { .lo = min(a, min(b, min(c, d))), .hi = max(a, max(b, max(c, d))) };
-      result = sem_ranges_reflow_binary(block, ir, range, types);
+    if (types.one->kind == Type_Kind_scalar && types.two->kind == Type_Kind_scalar) {
+      if (type_is_float(types.one) || type_is_float(types.two)) {
+        sem_unify_float_binary(block, ir, types);
+        result = sem_reflow_binary_float(block, ir);
+      }
+      else {
+        Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+        Range one = ranges_limits(pair.one);
+        Range two = ranges_limits(pair.two);
+        I64 a = one.lo * two.lo;
+        I64 b = one.hi * two.lo;
+        I64 c = one.lo * two.hi;
+        I64 d = one.hi * two.hi;
+        // TODO: check that this works, even with undeflow/overflow
+        Range range = { .lo = min(a, min(b, min(c, d))), .hi = max(a, max(b, max(c, d))) };
+        result = sem_ranges_reflow_binary(block, ir, range, types);
+      }
     }
     else {
       assert(0);
@@ -2716,16 +3331,22 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_div: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      I64 max_one = ranges_max(pair.one);
-      I64 max_two = ranges_max(pair.two);
-      I64 min_one = ranges_min(pair.one);
-      I64 min_two = ranges_min(pair.two);
-      I64 max = max_one / min_two;
-      I64 min = min_one / max_two;
-      Range range = { .lo = min, .hi = max };
-      result = sem_ranges_reflow_binary(block, ir, range, types);
+    if (types.one->kind == Type_Kind_scalar && types.two->kind == Type_Kind_scalar) {
+      if (type_is_float(types.one) || type_is_float(types.two)) {
+        sem_unify_float_binary(block, ir, types);
+        result = sem_reflow_binary_float(block, ir);
+      }
+      else {
+        Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+        I64 max_one = ranges_max(pair.one);
+        I64 max_two = ranges_max(pair.two);
+        I64 min_one = ranges_min(pair.one);
+        I64 min_two = ranges_min(pair.two);
+        I64 max = max_one / min_two;
+        I64 min = min_one / max_two;
+        Range range = { .lo = min, .hi = max };
+        result = sem_ranges_reflow_binary(block, ir, range, types);
+      }
     }
     else {
       assert(0);
@@ -2733,11 +3354,17 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_rem: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
-      Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
-      I64 max_two = ranges_max(pair.two);
-      Range range  = { .lo = 0, .hi = max_two-1 };
-      result = sem_ranges_reflow_binary(block, ir, range, types);
+    if (types.one->kind == Type_Kind_scalar && types.two->kind == Type_Kind_scalar) {
+      if (type_is_float(types.one) || type_is_float(types.two)) {
+        sem_unify_float_binary(block, ir, types);
+        result = sem_reflow_binary_float(block, ir);
+      }
+      else {
+        Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
+        I64 max_two = ranges_max(pair.two);
+        Range range  = { .lo = 0, .hi = max_two-1 };
+        result = sem_ranges_reflow_binary(block, ir, range, types);
+      }
     }
     else {
       assert(0);
@@ -2745,7 +3372,7 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_or: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (types.one->kind == Type_Kind_int && types.two->kind == Type_Kind_int) {
+    if (types.one->kind == Type_Kind_scalar && types.two->kind == Type_Kind_scalar) {
       if (ranges_is_single(types.one->ranges) && ranges_is_single(types.two->ranges)) {
         I64 one = ranges_min(types.one->ranges);
         I64 two = ranges_min(types.two->ranges);
@@ -2775,20 +3402,39 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_lt: case Ir_Kind_le:
   case Ir_Kind_gt: case Ir_Kind_ge: {
     Type_Pair types = type_of_ir_binary(ir);
-    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_scalar)) {
+      if (type_is_float(types.one) || type_is_float(types.two)) {
+        sem_unify_float_binary(block, ir, types);
+      }
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
       if (ranges_is_single(pair.one) && ranges_is_single(pair.two)) {
-        I64 x = ranges_min(pair.one);
-        I64 y = ranges_min(pair.two);
         I64 val = 0;
-        switch (ir->kind) {
-        case Ir_Kind_eq: val = x == y; break;
-        case Ir_Kind_ne: val = x != y; break;
-        case Ir_Kind_lt: val = x <  y; break;
-        case Ir_Kind_le: val = x <= y; break;
-        case Ir_Kind_gt: val = x >  y; break;
-        case Ir_Kind_ge: val = x >= y; break;
-        default: break;
+        if (type_is_float(types.one)) {
+          I16 exp_bits = types.one->scalar.exp_bits;
+          F64 x = sem_float_of_key(ranges_min(pair.one), exp_bits);
+          F64 y = sem_float_of_key(ranges_min(pair.two), exp_bits);
+          switch (ir->kind) {
+          case Ir_Kind_eq: val = x == y; break;
+          case Ir_Kind_ne: val = x != y; break;
+          case Ir_Kind_lt: val = x <  y; break;
+          case Ir_Kind_le: val = x <= y; break;
+          case Ir_Kind_gt: val = x >  y; break;
+          case Ir_Kind_ge: val = x >= y; break;
+          default: break;
+          }
+        }
+        else {
+          I64 x = ranges_min(pair.one);
+          I64 y = ranges_min(pair.two);
+          switch (ir->kind) {
+          case Ir_Kind_eq: val = x == y; break;
+          case Ir_Kind_ne: val = x != y; break;
+          case Ir_Kind_lt: val = x <  y; break;
+          case Ir_Kind_le: val = x <= y; break;
+          case Ir_Kind_gt: val = x >  y; break;
+          case Ir_Kind_ge: val = x >= y; break;
+          default: break;
+          }
         }
         Range range = { .lo = val, .hi = val };
         result = sem_ranges_reflow_binary(block, ir, range, types);
@@ -2804,7 +3450,10 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_neg: {
     Type* one = type_of_ir(ir->unary);
-    if (one->kind == Type_Kind_int) {
+    if (type_is_float(one)) {
+      result = sem_reflow_neg_float(ir, one);
+    }
+    else if (one->kind == Type_Kind_scalar) {
       // TODO: overflow/underflow
       Range limits = ranges_limits(one->ranges);
       if (limits.lo == I64_MIN) {
@@ -2855,7 +3504,7 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_array: {
     Type* one_type = type_of_ir(ir->binary.one);
     Type* two_type = type_of_ir(ir->binary.two);
-    if (one_type->kind == Type_Kind_int) {
+    if (one_type->kind == Type_Kind_scalar) {
       if (ranges_is_single(one_type->ranges)) {
         I64 length = ranges_min(one_type->ranges);
         Array* array = type_array_init(length);
@@ -2880,7 +3529,7 @@ void sem_ir(Block* block, Ir* ir) {
     Type* of_type = type_of_ir(ir->binary.one);
     Type* at_type = type_of_ir(ir->binary.two);
     if (of_type->kind == Type_Kind_ptr) {
-      if (at_type->kind == Type_Kind_int) {
+      if (at_type->kind == Type_Kind_scalar) {
         Type* declared = type_pointer_declared(of_type->pointer);
         Type* declared_of_type;
         if (declared->kind == Type_Kind_ptr) {
@@ -3096,13 +3745,38 @@ void sem_ir(Block* block, Ir* ir) {
     Type* fun_type = types.one;
     Type* arg_type = types.two;
     if (fun_type == sem.fun_bits) {
-      if (arg_type->kind == Type_Kind_int) {
+      if (arg_type->kind == Type_Kind_scalar) {
         if (ranges_is_single(arg_type->ranges)) {
           I64 val = ranges_min(arg_type->ranges);
           if (val < I16_MAX) {
             Type* type = &new(sem.types);
             type->kind = Type_Kind_none;
             type->flag = Type_Flag_size_defined;
+            type->bits_size = val;
+            type->bits_align = align_up(val, 8);
+            type->value = 0;
+            result = type_in_set(type);
+          }
+          else {
+            assert(0);
+          }
+        }
+        else {
+          assert(0);
+        }
+      }
+      else {
+        assert(0);
+      }
+    }
+    else if (fun_type == sem.fun_float) {
+      if (arg_type->kind == Type_Kind_scalar) {
+        if (ranges_is_single(arg_type->ranges)) {
+          I64 val = ranges_min(arg_type->ranges);
+          if (val < I16_MAX) {
+            Type* type = &new(sem.types);
+            type->kind = Type_Kind_none;
+            type->flag = Type_Flag_size_defined | Type_Flag_float_defined;
             type->bits_size = val;
             type->bits_align = align_up(val, 8);
             type->value = 0;
@@ -3191,7 +3865,13 @@ void sem_ir(Block* block, Ir* ir) {
           result = fun->ret;
         }
         else {
-          printf("call not subtype\n");
+          C8 buffer_arg[4096];
+          C8 buffer_par[4096];
+          String_Builder sb_arg = string_builder_begin(buffer_arg);
+          String_Builder sb_par = string_builder_begin(buffer_par);
+          string_builder_push_type(&sb_arg, block, arg_type);
+          string_builder_push_type(&sb_par, block, fun->arg);
+          printf("call not subtype at block %d: arg %s, par %s\n", block->id, string_builder_end(&sb_arg), string_builder_end(&sb_par));
           assert(0);
         }
       }
@@ -3200,7 +3880,30 @@ void sem_ir(Block* block, Ir* ir) {
       assert(0); // TODO
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
+      if (fun_type->flag == (Type_Flag_size_defined | Type_Flag_float_defined)) { // NOTE: float function
+        if (arg_type->kind == Type_Kind_record && arg_type->record->length == 2) {
+          Type* exp_type  = type_of_field_at(arg_type->record, 0);
+          Type* mant_type = type_of_field_at(arg_type->record, 1);
+          if (exp_type->kind == Type_Kind_scalar && mant_type->kind == Type_Kind_scalar
+           && ranges_is_single(exp_type->ranges) && ranges_is_single(mant_type->ranges)) {
+            I64 exp  = ranges_min(exp_type->ranges);
+            I64 mant = ranges_min(mant_type->ranges);
+            if (0 < exp && exp < I16_MAX && 0 < mant && mant < I16_MAX) {
+              result = type_float_full(fun_type->bits_size, (I16)exp, (I16)mant);
+            }
+            else {
+              assert(0);
+            }
+          }
+          else {
+            assert(0);
+          }
+        }
+        else {
+          assert(0);
+        }
+      }
+      else if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
         if (arg_type->kind == Type_Kind_type) {
           arg_type = arg_type->type;
         }
@@ -3230,7 +3933,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_range: {
-    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_int)) {
+    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_scalar)) {
       Ranges_Pair pair = ranges_pair_of_ir_binary(ir);
 
       if (ranges_is_single(pair.one) && ranges_is_single(pair.two)) {
@@ -3560,6 +4263,10 @@ void sem_funs(Arena* arena, Funs funs) {
   sem.fun_bits = &new(sem.types);
   sem.fun_bits->kind = Type_Kind_none;
   type_of_ir_put(irgen.irid_bits, sem.fun_bits);
+
+  sem.fun_float = &new(sem.types);
+  sem.fun_float->kind = Type_Kind_none;
+  type_of_ir_put(irgen.irid_float, sem.fun_float);
 
   sem.fun_len = &new(sem.types);
   sem.fun_len->kind = Type_Kind_none;

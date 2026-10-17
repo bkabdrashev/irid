@@ -20,4 +20,7 @@ U8 : #type 8'#bits(0..I8_MAX)
 
 B8 : #type 8'#bits(0\1)
 
+F32 : #type 32'#float(8; 23)
+F64 : #type 64'#float(11; 52)
+
 Str : #type ([]I8)

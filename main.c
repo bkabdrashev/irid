@@ -7,6 +7,7 @@ const char *__asan_default_options() {
 
 int main(void) {
   arena_test();
+  float_test();
   parse_test();
   irgen_test();
   sem_test();

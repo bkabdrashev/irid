@@ -14,6 +14,7 @@ typedef enum Token_Kind {
   Token_Kind_source_leave       = 0,
   Token_Kind_source_enter       = 1,
   Token_Kind_int                = 3 | Token_Kind_Flag_call_rhs,
+  Token_Kind_float              = 12 | Token_Kind_Flag_call_rhs,
   Token_Kind_plus               = 4,
   Token_Kind_plus_prefix        = 4 | Token_Kind_Flag_prefix,
   Token_Kind_minus              = 6,
@@ -68,6 +69,7 @@ typedef struct {
   union {
     U64  bits;
     I64  i64;
+    F64  f64;
     Str* str;
   };
 } Token;
@@ -146,6 +148,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
     case '0': case '1': case '2': case '3': case '4':
     case '5': case '6': case '7': case '8': case '9': {
       token.kind = Token_Kind_int;
+      Cstr number_start = lexer.stream;
       I32 base = 10;
       if (*lexer.stream == '0') {
         lexer.stream++;
@@ -166,6 +169,11 @@ Tokens lex_source(Arena* arena, Cstr source) {
         if (*lexer.stream == '_') {
           lexer.stream++;
           continue;
+        }
+        if (base == 10 && (*lexer.stream == 'e' || *lexer.stream == 'E')
+            && (isdigit((U8)lexer.stream[1])
+             || ((lexer.stream[1] == '+' || lexer.stream[1] == '-') && isdigit((U8)lexer.stream[2])))) {
+          break;
         }
         I32 digit = 0;
         switch (*lexer.stream) {
@@ -193,7 +201,55 @@ Tokens lex_source(Arena* arena, Cstr source) {
         val = val*base + digit;
         lexer.stream++;
       }
-      token.i64 = val;
+      B8 is_float = false;
+      if (base == 10) {
+        if (*lexer.stream == '.' && isdigit((U8)lexer.stream[1])) {
+          is_float = true;
+        }
+        else if ((*lexer.stream == 'e' || *lexer.stream == 'E')
+             &&  (isdigit((U8)lexer.stream[1])
+              || ((lexer.stream[1] == '+' || lexer.stream[1] == '-') && isdigit((U8)lexer.stream[2])))) {
+          is_float = true;
+        }
+      }
+      if (is_float) {
+        C8 buffer[128];
+        I32 length = 0;
+        for (Cstr at = number_start; at < lexer.stream; at++) {
+          if (*at != '_') {
+            assert(length + 1 < (I32)sizeof(buffer));
+            buffer[length++] = *at;
+          }
+        }
+        if (*lexer.stream == '.') {
+          buffer[length++] = *lexer.stream++;
+          while (isdigit((U8)*lexer.stream) || *lexer.stream == '_') {
+            if (*lexer.stream != '_') {
+              buffer[length++] = *lexer.stream;
+            }
+            lexer.stream++;
+          }
+        }
+        if (*lexer.stream == 'e' || *lexer.stream == 'E') {
+          buffer[length++] = *lexer.stream++;
+          if (*lexer.stream == '+' || *lexer.stream == '-') {
+            buffer[length++] = *lexer.stream++;
+          }
+          while (isdigit((U8)*lexer.stream) || *lexer.stream == '_') {
+            if (*lexer.stream != '_') {
+              buffer[length++] = *lexer.stream;
+            }
+            lexer.stream++;
+          }
+        }
+        assert(length < (I32)sizeof(buffer));
+        buffer[length] = '\0';
+        token.kind = Token_Kind_float;
+        token.f64  = strtod(buffer, 0);
+      }
+      else {
+        token.i64 = val;
+      }
     } break;
     case '_':
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
@@ -435,6 +491,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     } break;
     case Token_Kind_int:
       string_builder_push_i64(&sb, token->i64);
+    break;
+    case Token_Kind_float:
+      string_builder_push_f64(&sb, token->f64);
     break;
     case Token_Kind_str:
       string_builder_push_str(&sb, token->str);

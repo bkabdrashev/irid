@@ -131,7 +131,130 @@ U64 bits_or_range(U64 lo, U64 hi) {
   return hi | mask;
 }
 
+// NOTE: IEEE-754 ordered keys.
+// Bijection between raw bit patterns and I64 such that signed
+// key order equals the float total order:
+//   -NaN < -inf < ... < -0 < +0 < ... < +inf < +NaN
+// For width W keys live in [-2^(W-1), 2^(W-1)).
+U64 float_bits_of_f64(F64 x) {
+  U64 bits = 0;
+  memcpy(&bits, &x, sizeof(bits));
+  return bits;
+}
+
+F64 float_f64_of_bits(U64 bits) {
+  F64 x = 0;
+  memcpy(&x, &bits, sizeof(x));
+  return x;
+}
+
+U64 float_bits_of_f32(F32 x) {
+  U32 bits = 0;
+  memcpy(&bits, &x, sizeof(bits));
+  return bits;
+}
+
+F32 float_f32_of_bits(U64 bits) {
+  U32 raw = (U32)bits;
+  F32 x = 0;
+  memcpy(&x, &raw, sizeof(x));
+  return x;
+}
+
+U64 float_key_of_bits(U64 bits, I16 width) {
+  U64 top  = 1ULL << (width - 1);
+  U64 mask = (width == 64) ? ~0ULL : (top | (top - 1));
+  U64 sign = bits & top;
+  U64 key  = sign ? (~bits & mask) : (bits | top);
+  return key - top;
+}
+
+U64 float_bits_of_key(U64 key, I16 width) {
+  U64 top  = 1ULL << (width - 1);
+  U64 mask = (width == 64) ? ~0ULL : (top | (top - 1));
+  U64 k    = (key + top) & mask;
+  if (k & top) {
+    return k ^ top;
+  }
+  return ~k & mask;
+}
+
+I64 float_key_of_f64(F64 x) {
+  return (I64)float_key_of_bits(float_bits_of_f64(x), 64);
+}
+
+F64 float_f64_of_key(I64 key) {
+  return float_f64_of_bits(float_bits_of_key((U64)key, 64));
+}
+
+I64 float_key_of_f32(F32 x) {
+  return (I64)(I32)float_key_of_bits(float_bits_of_f32(x), 32);
+}
+
+F32 float_f32_of_key(I64 key) {
+  return float_f32_of_bits(float_bits_of_key((U64)(I32)key, 32));
+}
+
+void float_test(void) {
+  { // bijection f32
+    U64 x = 0x123456789abcdefULL;
+    for (I32 i = 0; i < 100000; i++) {
+      x = x * 6364136223846793005ULL + 1442695040888963407ULL;
+      U64 bits    = (U32)(x >> 32);
+      U64 key     = float_key_of_bits(bits, 32);
+      U64 back    = float_bits_of_key(key, 32);
+      assert(bits == back);
+    }
+  }
+  { // bijection f64
+    U64 x = 0xdeadbeefcafef00dULL;
+    for (I32 i = 0; i < 100000; i++) {
+      x = x * 6364136223846793005ULL + 1442695040888963407ULL;
+      U64 bits = x;
+      U64 key  = float_key_of_bits(bits, 64);
+      U64 back = float_bits_of_key(key, 64);
+      assert(bits == back);
+    }
+  }
+  { // ordering f32
+    I64 neg_nan  = float_key_of_f32(float_f32_of_bits(0xffffffff)); // negative NaN, max payload
+    I64 neg_inf  = float_key_of_f32(float_f32_of_bits(0xff800000));
+    I64 neg_one  = float_key_of_f32(-1.0f);
+    I64 neg_zero = float_key_of_f32(-0.0f);
+    I64 pos_zero = float_key_of_f32( 0.0f);
+    I64 pos_one  = float_key_of_f32( 1.0f);
+    I64 pos_inf  = float_key_of_f32(float_f32_of_bits(0x7f800000));
+    I64 pos_nan  = float_key_of_f32(float_f32_of_bits(0x7fffffff)); // positive NaN, max payload
+    assert(neg_nan < neg_inf);
+    assert(neg_inf < neg_one);
+    assert(neg_one < neg_zero);
+    assert(neg_zero + 1 == pos_zero);
+    assert(pos_zero < pos_one);
+    assert(pos_one < pos_inf);
+    assert(pos_inf < pos_nan);
+    assert(neg_nan == I32_MIN);
+    assert(pos_nan == I32_MAX);
+    assert(float_f32_of_key(neg_zero) == 0.0f && signbit(float_f32_of_key(neg_zero)));
+    assert(float_f32_of_key(pos_zero) == 0.0f && !signbit(float_f32_of_key(pos_zero)));
+    assert(isnan(float_f32_of_key(pos_nan)) && !signbit(float_f32_of_key(pos_nan)));
+  }
+  { // ordering f64
+    I64 neg_inf = float_key_of_f64(-INFINITY);
+    I64 pos_inf = float_key_of_f64( INFINITY);
+    I64 neg_one = float_key_of_f64(-1.0);
+    I64 pos_one = float_key_of_f64( 1.0);
+    assert(neg_inf < neg_one && neg_one < pos_one && pos_one < pos_inf);
+    assert(float_f64_of_key(float_key_of_f64(3.14159)) == 3.14159);
+    assert(float_f64_of_key(neg_inf) < -1.0e308);
+    assert(float_f64_of_key(pos_inf) >  1.0e308);
+    assert(isnan(float_f64_of_key(float_key_of_f64(NAN))));
+  }
+}
+
 Umi power_of_2_up(Umi v) {
+  if (v <= 1) {
+    return 1;
+  }
   v--;
   v |= v >> 1;
   v |= v >> 2;

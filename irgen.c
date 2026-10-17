@@ -7,6 +7,7 @@ typedef enum Ir_Kind {
   Ir_Kind_none = 0,
 
   Ir_Kind_int = Ast_Kind_int,
+  Ir_Kind_float = Ast_Kind_float,
   Ir_Kind_str = Ast_Kind_str,
 
   Ir_Kind_add = Ast_Kind_add | Ir_Flag_binary,
@@ -56,11 +57,14 @@ typedef enum Ir_Kind {
   Ir_Kind_record_cast = 141,
   Ir_Kind_array_cast  = 142,
   Ir_Kind_span_from_array_cast = 143,
+  Ir_Kind_float_cast     = 144,
+  Ir_Kind_int_float_cast = 145,
 
   Ir_Kind_foreign = 150,
   Ir_Kind_bits    = 151,
   Ir_Kind_len     = 152,
   Ir_Kind_type    = 153,
+  Ir_Kind_ieee    = 154,
 
 } Ir_Kind;
 
@@ -130,6 +134,7 @@ struct Ir {
   Ir_Kind kind;
   union {
     I64     i64;
+    F64     f64;
     Str*    str;
     Var*    var;
     Fun*    fun;
@@ -303,12 +308,14 @@ struct Irgen {
   Str*        str_bits;
   Str*        str_type;
   Str*        str_foreign;
+  Str*        str_float;
 
   Hash_Map    builtins;
   Ir*         irid_len;
   Ir*         irid_bits;
   Ir*         irid_type;
   Ir*         irid_foreign;
+  Ir*         irid_float;
 
   Fun_Stack   fun_stack;
   Blocks*     unresolved_breaks;
@@ -351,6 +358,9 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
   }
   else if (ir == irgen.irid_foreign) {
     string_builder_push_cstr(sb, "foreign");
+  }
+  else if (ir == irgen.irid_float) {
+    string_builder_push_cstr(sb, "float");
   }
   else {
     string_builder_push_cstr(sb, "r");
@@ -406,9 +416,16 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_bits:
     string_builder_push_cstr(sb, "bits");
   break;
+  case Ir_Kind_ieee:
+    string_builder_push_cstr(sb, "float");
+  break;
   case Ir_Kind_int:
     string_builder_push_cstr(sb, "int ");
     string_builder_push_i64(sb, ir->i64);
+  break;
+  case Ir_Kind_float:
+    string_builder_push_cstr(sb, "float ");
+    string_builder_push_f64(sb, ir->f64);
   break;
   case Ir_Kind_str:
     string_builder_push_cstr(sb, "str ");
@@ -457,6 +474,16 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_irid(sb, ir->int_cast.value);
     string_builder_push_cstr(sb, " to ");
     string_builder_push_i64(sb, ir->int_cast.bits);
+  break;
+  case Ir_Kind_float_cast:
+    string_builder_push_cstr(sb, "float cast ");
+    string_builder_push_irid(sb, ir->int_cast.value);
+    string_builder_push_cstr(sb, " to ");
+    string_builder_push_i64(sb, ir->int_cast.bits);
+  break;
+  case Ir_Kind_int_float_cast:
+    string_builder_push_cstr(sb, "int float cast ");
+    string_builder_push_irid(sb, ir->int_cast.value);
   break;
   case Ir_Kind_record_cast:
     string_builder_push_cstr(sb, "record cast ");
@@ -675,6 +702,11 @@ Ir* irgen_push_int(I64 i64) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_float(F64 f64) {
+  Ir ir = { Ir_Kind_float, .f64 = f64 };
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_arg(Var* var) {
   Ir ir = { Ir_Kind_arg, .var = var};
   return irgen_push(ir);
@@ -793,7 +825,7 @@ void irgen_sym_put(Str* str, Symbol* sym) {
 }
 
 Symbol* irgen_sym_get(Str* str) {
-  for (I32 i = 0; i < irgen.scope_stack.length; i++) {
+  for (I32 i = irgen.scope_stack.length - 1; i >= 0; i--) {
     Hash_Map* scope = irgen.scope_stack.base[i];
     Symbol* sym = hash_map_get(scope, str);
     if (sym) {
@@ -997,6 +1029,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
   switch (node->kind) {
   case Ast_Kind_int: {
     result = irgen_push_int(node->i64);
+  } break;
+  case Ast_Kind_float: {
+    result = irgen_push_float(node->f64);
   } break;
   case Ast_Kind_str: {
     result = irgen_push_str(node->str);
@@ -1322,7 +1357,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
   irgen.str_nil  = str_from_cstr("");
   irgen.str_anon = str_from_cstr("__anon");
 
-  irgen.builtins = hash_map_init(irgen.perm_arena, 4);
+  irgen.builtins = hash_map_init(irgen.perm_arena, 8);
   {
     irgen.irid_len = &new(irgen.irs);
     irgen.irid_len->kind = Ir_Kind_len;
@@ -1351,6 +1386,16 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes) {
     sym->kind = Symbol_Kind_constant;
     sym->ir = irgen.irid_type;
     hash_map_put(&irgen.builtins, irgen.str_type, sym);
+  }
+
+  {
+    irgen.irid_float = &new(irgen.irs);
+    irgen.irid_float->kind = Ir_Kind_ieee;
+    irgen.str_float = str_from_cstr("float");
+    Symbol* sym = arena_push(irgen.perm_arena, sizeof(Symbol));
+    sym->kind = Symbol_Kind_constant;
+    sym->ir = irgen.irid_float;
+    hash_map_put(&irgen.builtins, irgen.str_float, sym);
   }
 
   {

@@ -150,6 +150,12 @@ void string_builder_push_i64(String_Builder* sb, I64 val) {
   string_builder_push_cstr(sb, line_str);
 }
 
+void string_builder_push_f64(String_Builder* sb, F64 val) {
+  C8 line_str[64];
+  snprintf(line_str, sizeof(line_str), "%g", val);
+  string_builder_push_cstr(sb, line_str);
+}
+
 void string_builder_push_str(String_Builder* sb, Str* str) {
   for (I32 i = 0; i < str->length; i++) {
     sb->base[sb->size++] = str->base[i];
