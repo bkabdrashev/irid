@@ -58,10 +58,10 @@ LLVMTypeRef llvm_of_type(Type* type) {
     } break;
     case Type_Kind_scalar: {
       if (type_is_float(type)) {
-        if (type->scalar.exp_bits == 8) {
+        if (type->scalar->bits_exp == F32_EXP) {
           result = LLVMFloatTypeInContext(llvm_gen.context);
         }
-        else if (type->scalar.exp_bits == 11) {
+        else if (type->scalar->bits_exp == F64_EXP) {
           result = LLVMDoubleTypeInContext(llvm_gen.context);
         }
         else {
@@ -240,23 +240,23 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   } break;
   case Type_Kind_scalar: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
-    I64 key = ranges_max(type->ranges);
-    for (I32 i = 0; i < type->ranges->length; i++) {
-      if (type->ranges->pairs[i].lo <= 0 && 0 <= type->ranges->pairs[i].hi) {
+    I64 key = scalar_max(type->scalar);
+    for (I32 i = 0; i < type->scalar->length; i++) {
+      if (type->scalar->pairs[i].lo <= 0 && 0 <= type->scalar->pairs[i].hi) {
         key = 0;
         break;
       }
-      else if (type->ranges->pairs[i].lo >= 0) {
-        key = type->ranges->pairs[i].lo;
+      else if (type->scalar->pairs[i].lo >= 0) {
+        key = type->scalar->pairs[i].lo;
       }
     }
     if (type_is_float(type)) {
       F64 value;
-      if (type->scalar.exp_bits == 8) {
+      if (type->scalar->bits_exp == F32_EXP) {
         value = (F64)float_f32_of_key(key);
       }
       else {
-        assert(type->scalar.exp_bits == 11);
+        assert(type->scalar->bits_exp == F64_EXP);
         value = float_f64_of_key(key);
       }
       result = LLVMConstReal(llvm_type, value);
@@ -336,10 +336,10 @@ LLVMValueRef llvm_conversion(LLVMValueRef llvm_val, Type* from, Type* to) {
     LLVMTypeRef llvm_to = llvm_of_type(to);
     if (type_is_float(from)) {
       if (type_is_float(to)) {
-        if (from->scalar.exp_bits == 8 && to->scalar.exp_bits == 11) {
+        if (from->scalar->bits_exp == F32_EXP && to->scalar->bits_exp == F64_EXP) {
           result = LLVMBuildFPExt(llvm_gen.builder, llvm_val, llvm_to, "");
         }
-        else if (from->scalar.exp_bits == 11 && to->scalar.exp_bits == 8) {
+        else if (from->scalar->bits_exp == F64_EXP && to->scalar->bits_exp == F32_EXP) {
           result = LLVMBuildFPTrunc(llvm_gen.builder, llvm_val, llvm_to, "");
         }
       }
@@ -420,7 +420,7 @@ void llvm_ir(Ir* ir) {
   } break;
   case Ir_Kind_float: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
-    if (type->scalar.exp_bits == 8) {
+    if (type->scalar->bits_exp == F32_EXP) {
       result = LLVMConstReal(llvm_type, (F32)ir->f64);
     }
     else {
@@ -431,10 +431,10 @@ void llvm_ir(Ir* ir) {
     LLVMValueRef llvm_val = llvm_of_ir(ir->int_cast.value);
     Type* from = type_of_ir(ir->int_cast.value);
     LLVMTypeRef llvm_to = llvm_of_type(type);
-    if (from->scalar.exp_bits == 8 && type->scalar.exp_bits == 11) {
+    if (from->scalar->bits_exp == F32_EXP && type->scalar->bits_exp == F64_EXP) {
       result = LLVMBuildFPExt(llvm_gen.builder, llvm_val, llvm_to, "");
     }
-    else if (from->scalar.exp_bits == 11 && type->scalar.exp_bits == 8) {
+    else if (from->scalar->bits_exp == F64_EXP && type->scalar->bits_exp == 8) {
       result = LLVMBuildFPTrunc(llvm_gen.builder, llvm_val, llvm_to, "");
     }
     else {
