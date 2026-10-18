@@ -537,6 +537,12 @@ void llvm_ir(Ir* ir) {
       }
       result = LLVMBuildCall2(llvm_gen.builder, llvm_fun_type, llvm_one, llvm_args, llvm_arg_count, "");
     }
+    else if (fun_type->kind == Type_Kind_type) {
+      Ir* ir_arg   = ir->binary.two;
+      Type* arg_type = type_of_ir(ir_arg);
+      LLVMValueRef llvm_arg = llvm_of_ir(ir_arg);
+      result = llvm_conversion(llvm_arg, arg_type, fun_type->type);
+    }
     else if (fun_type->kind == Type_Kind_none) {
       if (has_flag(fun_type->flag, Type_Flag_size_defined)) { // NOTE: bits function
         result = llvm_default_of_type(type);

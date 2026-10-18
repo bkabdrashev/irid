@@ -205,7 +205,7 @@ Scalar* sem_scalar_meet(Scalar* one, Scalar* two);
 Scalar* sem_scalar_float_widen(Scalar* scalar);
 Scalar* sem_scalar_int_to_float(Scalar* scalar, I16 bits_size, I16 bits_man);
 B8 type_is_float(Type* type);
-Type* type_float_cast_result(Type* from, Type* to);
+Type* type_float_cast(Type* from, Type* to);
 
 void string_builder_push_scalar(String_Builder* sb, Scalar* scalar) {
   if (scalar->length > 1) {
@@ -685,7 +685,12 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
       result = true;
     } break;
     case Type_Kind_scalar: {
-      result = scalar_is_subrange(one->scalar, two->scalar);
+      if (one->scalar->kind == two->scalar->kind) {
+        result = scalar_is_subrange(one->scalar, two->scalar);
+      }
+      else if (one->scalar->kind == Scalar_Kind_int && !has_flag(one->flag, Type_Flag_size_defined)) {
+        result = true;
+      }
     } break;
     case Type_Kind_ptr: {
       if (subtype_visited_contains(visited, one->pointer, two->pointer)) {
@@ -1189,9 +1194,6 @@ Type* type_float_scalar(I16 bits_exp, I16 bits_man, Scalar* scalar) {
 Type* type_float_full(I16 bits_exp, I16 bits_man) {
   I16 bits_size = bits_exp + bits_man + 1;
   Scalar* scalar = sem_scalar_init(1);
-  scalar->kind     = Scalar_Kind_float;
-  scalar->bits_exp = bits_exp;
-  scalar->bits_man = bits_man;
   scalar->length = 1;
   if (bits_size == 32) {
     scalar->pairs[0].lo = I32_MIN;
@@ -1201,7 +1203,7 @@ Type* type_float_full(I16 bits_exp, I16 bits_man) {
     scalar->pairs[0].lo = I64_MIN;
     scalar->pairs[0].hi = I64_MAX;
   }
-  return type_int_scalar(scalar);
+  return type_float_scalar(bits_exp, bits_man, scalar);
 }
 
 B8 type_is_float(Type* type) {
@@ -1257,10 +1259,10 @@ Type* type_float_meet(Type* one, Type* two) {
     return type_float_scalar(one->scalar->bits_exp, one->scalar->bits_man, sem_scalar_meet(one->scalar, two->scalar));
   }
   else if (one->scalar->bits_exp == F32_EXP && two->scalar->bits_exp == F64_EXP) {
-    result = type_float_scalar(F64_EXP, F64_EXP, sem_scalar_meet(sem_scalar_float_widen(one->scalar), two->scalar));
+    result = type_float_scalar(F64_EXP, F64_MAN, sem_scalar_meet(sem_scalar_float_widen(one->scalar), two->scalar));
   }
   else if (one->scalar->bits_exp == F64_EXP && two->scalar->bits_exp == F32_EXP) {
-    result = type_float_scalar(F64_EXP, F64_EXP, sem_scalar_meet(one->scalar, sem_scalar_float_widen(two->scalar)));
+    result = type_float_scalar(F64_EXP, F64_MAN, sem_scalar_meet(one->scalar, sem_scalar_float_widen(two->scalar)));
   }
   return result;
 }
@@ -1280,15 +1282,15 @@ Type* type_float_join(Type* one, Type* two) {
   else {
     assert(0);
   }
-  return type_float_scalar(F64_EXP, F64_EXP, scalar);
+  return type_float_scalar(F64_EXP, F64_MAN, scalar);
 }
 
-Type* type_float_cast_result(Type* from, Type* to) {
+Type* type_float_cast(Type* from, Type* to) {
   if (type_float_is_same(from->scalar, to->scalar)) {
     return type_float_scalar(to->scalar->bits_exp, to->scalar->bits_man, from->scalar);
   }
   if (from->scalar->bits_exp == F32_EXP && to->scalar->bits_exp == F64_EXP) {
-    return type_float_scalar(F64_EXP, F64_EXP, sem_scalar_float_widen(from->scalar));
+    return type_float_scalar(F64_EXP, F64_MAN, sem_scalar_float_widen(from->scalar));
   }
   if (from->scalar->bits_exp == F64_EXP && to->scalar->bits_exp == F32_EXP) {
     Scalar* full = sem_scalar_init(1);
@@ -1496,8 +1498,12 @@ Type* type_int(I64 i64) {
 }
 
 Type* type_float(F64 f64) {
-  I64 i64 = sem_float_key_of_hi(f64, F32_EXP);
-  return type_range(i64, i64);
+  Scalar* scalar = sem_scalar_init(1);
+  scalar->length = 1;
+  I64 key = float_key_of_f32((F32)f64);
+  scalar->pairs[0].lo = key;
+  scalar->pairs[0].hi = key;
+  return type_float_scalar(F32_EXP, F32_MAN, scalar);
 }
 
 Type* type_scalar_offset(Scalar* scalar, I64 offset) {
@@ -2236,22 +2242,24 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
         if (var->parent) {
           Var*  parent = var->parent;
           Type* type_parent_old = parent->block_types[tasks->block->id];
-          if (type_parent_old->kind == Type_Kind_join_records) {
-            Join* join_old = parent->declared->join;
-            Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
-                  join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
-            for (I32 e = 0; e < join_old->records.len; e++) {
-              Type* element = join_old->records.list[e];
-              Record* record = element->record;
-              I32     pos    = hash_map_i32_get_i32(&record->position_from_offset, var->index);
-              Type*   meet   = type_meet(new_type, record->types[pos]);
-              if (meet != sem.type_none) {
-                hash_set_put(&join_new->records, element);
+          if (type_parent_old) {
+            if (type_parent_old->kind == Type_Kind_join_records) {
+              Join* join_old = parent->declared->join;
+              Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
+                    join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
+              for (I32 e = 0; e < join_old->records.len; e++) {
+                Type* element = join_old->records.list[e];
+                Record* record = element->record;
+                I32     pos    = hash_map_i32_get_i32(&record->position_from_offset, var->index);
+                Type*   meet   = type_meet(new_type, record->types[pos]);
+                if (meet != sem.type_none) {
+                  hash_set_put(&join_new->records, element);
+                }
               }
+              Type* type_parent_new = type_join_records(join_new);
+              parent->block_types[tasks->block->id] = type_parent_new;
+              // TODO: recursive
             }
-            Type* type_parent_new = type_join_records(join_new);
-            parent->block_types[tasks->block->id] = type_parent_new;
-            // TODO: recursive
           }
         }
       }
@@ -2604,10 +2612,13 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
     switch (from->kind) {
     case Type_Kind_scalar: {
       if (from->scalar->kind == Scalar_Kind_float && to->scalar->kind == Scalar_Kind_float) {
-        result = type_float_cast_result(from, to);
+        result = type_float_cast(from, to);
         if (store) {
           store->binary.two = sem_push_float_cast(block, store->binary.two, result);
         }
+      }
+      else if (from->scalar->kind == Scalar_Kind_int && to->scalar->kind == Scalar_Kind_float) {
+        result = to;
       }
       else if (from->scalar->kind == Scalar_Kind_int && to->scalar->kind == Scalar_Kind_int) {
         if (store) {
@@ -2811,6 +2822,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
            var_field->parent   = var;
            var_field->declared = type_field;
            var_field->state    = Var_State_resolved;
+           var_field->kind     = Var_Kind_declared;
       sem_var_kind(var_field);
       var->vars[i] = var_field;
       sem_record_declare_fields(var_field, type_field);
@@ -3328,32 +3340,44 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
     if (of_type->kind == Type_Kind_ptr) {
-      Var* first_var = of_type->pointer->stack_vars.list[0];
-      I32  first_offset = sem_get_offset_by_name(block, ir, first_var, ir->name_offset.at);
-      Var* first_var_field = sem_get_var_by_name(block, first_var, ir->name_offset.at);
-      for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
-        Var* var = of_type->pointer->stack_vars.list[i];
-        I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
-        if (offset != first_offset) {
-          printf("field offsets don't match\n");
+      if (of_type->pointer->stack_vars.len > 0) {
+        Var* first_var = of_type->pointer->stack_vars.list[0];
+        I32  first_offset = sem_get_offset_by_name(block, ir, first_var, ir->name_offset.at);
+        Var* first_var_field = sem_get_var_by_name(block, first_var, ir->name_offset.at);
+        for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
+          Var* var = of_type->pointer->stack_vars.list[i];
+          I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
+          if (offset != first_offset) {
+            printf("field offsets don't match\n");
+            assert(0);
+          }
+        }
+
+        Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+        assert(of_type->pointer->stack_vars.len > 0);
+        pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
+        pointer->declared = first_var_field->declared;
+        hash_set_put(&pointer->stack_vars, first_var_field);
+
+        for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
+          Var* var = of_type->pointer->stack_vars.list[i];
+          Var* field_var = sem_get_var_by_name(block, var, ir->name_offset.at);
+          pointer->declared = type_meet(pointer->declared, field_var->declared);
+          hash_set_put(&pointer->stack_vars, field_var);
+        }
+        result = type_pointer(pointer);
+      }
+      else {
+        Type* declared = type_pointer_declared(of_type->pointer);
+        if (declared->kind == Type_Kind_record) {
+          Field field = type_record_get_by_name(declared->record, ir->name_offset.at);
+          result = type_pointer_to(field.type);
+        }
+        else {
           assert(0);
         }
       }
 
-      Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-      assert(of_type->pointer->stack_vars.len > 0);
-      pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
-      pointer->declared = first_var_field->declared;
-      hash_set_put(&pointer->stack_vars, first_var_field);
-
-      for (I32 i = 0; i < of_type->pointer->stack_vars.len; i++) {
-        Var* var = of_type->pointer->stack_vars.list[i];
-        Var* field_var = sem_get_var_by_name(block, var, ir->name_offset.at);
-        pointer->declared = type_meet(pointer->declared, field_var->declared);
-        hash_set_put(&pointer->stack_vars, field_var);
-      }
-
-      result = type_pointer(pointer);
     }
     else if (of_type->kind == Type_Kind_record) {
       Field field = type_record_get_by_name(of_type->record, ir->name_offset.at);
@@ -4055,7 +4079,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a:@I32; b:I32; a = @b", "");
+  // test("a:(x:F32); a = (10;); a.x", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
   // test("A:(a:I32; b:I32); ab: A; ab.a ", "");

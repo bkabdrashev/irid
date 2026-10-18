@@ -129,9 +129,9 @@ RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->
 
 print_str("Hello World!")
 
-BLOCK_SIZE_IN_PIXELS : 24
-WINDOW_WIDTH   : BLOCK_SIZE_IN_PIXELS * game.width
-WINDOW_HEIGHT  : BLOCK_SIZE_IN_PIXELS * game.height
+BLOCK_PIXELS   : 24
+WINDOW_WIDTH   : BLOCK_PIXELS * game.width
+WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
 Vec2 : #type (
   x: I32
@@ -154,6 +154,9 @@ window:   @Window   = CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 
 renderer: @Renderer = CreateRenderer(window; @("\0"[0]))
 
 game.running = 1
+game.snake_n = 1
+game.snake_p[0].x = game.width  / 2 - 1
+game.snake_p[0].y = game.height / 2 - 1
 while game.running do {
   event: Event
   while PollEvent(@event) do {
@@ -176,14 +179,16 @@ while game.running do {
   }
   SetRenderDrawColor(renderer; 127; 0; 0; ALPHA_OPAQUE)
   RenderClear(renderer)
-  r: FRect = (0.0; 0.0; 100.0; 100.0)
-  SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
-  RenderFillRect(renderer; @r)
 
-  // for i in 0..game.food_n-1 do {
-  //   r.x = game.food[i].x * (r.w + 2)
-  //   r.y = game.food[i].y * (r.h + 2)
-  // }
+  { i: I32 = 0
+    r: FRect = (0.0; 0.0; BLOCK_PIXELS; BLOCK_PIXELS)
+  while i < game.snake_n do
+    r.x = F32 game.snake_p[i].x * (r.w + 2.0)
+    r.y = F32 game.snake_p[i].y * (r.h + 2.0)
+    SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
+    RenderFillRect(renderer; @r)
+    i = i + 1
+  }
 
   // for i in 1..game.snake_n-1 do {
   //   r.x = game.snake[i].x * (r.w + 2)
