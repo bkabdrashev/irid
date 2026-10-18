@@ -952,6 +952,9 @@ B8 sem_scalar_is_equal(Scalar* one, Scalar* two) {
         }
       }
     }
+    else {
+      result = false;
+    }
   }
   return result;
 }
@@ -1129,21 +1132,21 @@ Scalar* sem_scalar_intern(Scalar* scalar) {
   return scalar;
 }
 
-Type* type_scalar(Scalar* scalar) {
+Type* type_int_scalar(Scalar* scalar) {
   Type* result = sem.type_none;
   if (scalar->length == 0) {
     result = sem.type_none;
   }
   else {
+    scalar->kind     = Scalar_Kind_int;
+    scalar->bits_exp = 0;
+    scalar->bits_man = 0;
     scalar = sem_scalar_intern(scalar);
     I64 min = scalar_min(scalar);
     I64 max = scalar_max(scalar);
     I16 bits_size = bits_needed(min, max);
     Type* new_type = &new(sem.types);
     new_type->kind = Type_Kind_scalar;
-    new_type->scalar->kind      = Scalar_Kind_int;
-    new_type->scalar->bits_exp  = 0;
-    new_type->scalar->bits_man = 0;
     new_type->bits_align = align_up(bits_size, 8);
     new_type->bits_size  = bits_size;
     new_type->flag = 0;
@@ -1162,7 +1165,7 @@ Type* type_range(I64 min, I64 max) {
   scalar->length = 1;
   scalar->pairs[0].lo = min;
   scalar->pairs[0].hi = max;
-  return type_scalar(scalar);
+  return type_int_scalar(scalar);
 }
 
 Type* type_float_scalar(I16 bits_exp, I16 bits_man, Scalar* scalar) {
@@ -1198,7 +1201,7 @@ Type* type_float_full(I16 bits_exp, I16 bits_man) {
     scalar->pairs[0].lo = I64_MIN;
     scalar->pairs[0].hi = I64_MAX;
   }
-  return type_scalar(scalar);
+  return type_int_scalar(scalar);
 }
 
 B8 type_is_float(Type* type) {
@@ -1440,7 +1443,7 @@ Type* sem_scalar_reflow_binary(Block* block, Ir* ir, Range range, Type_Pair type
       }
     }
     Scalar* scalar = scalar_reflow(range, res_bits_size);
-    Type* unsized = type_scalar(scalar);
+    Type* unsized = type_int_scalar(scalar);
     result = type_define_size(res_bits_size, unsized);
   }
   else {
@@ -1493,7 +1496,7 @@ Type* type_int(I64 i64) {
 }
 
 Type* type_float(F64 f64) {
-  I64 i64 = sem_float_key_of_hi(f64, F64_EXP);
+  I64 i64 = sem_float_key_of_hi(f64, F32_EXP);
   return type_range(i64, i64);
 }
 
@@ -1505,7 +1508,7 @@ Type* type_scalar_offset(Scalar* scalar, I64 offset) {
     new_scalar->pairs[i] = offset_pair;
   }
 
-  return type_scalar(scalar);
+  return type_int_scalar(scalar);
 }
 
 Scalar* sem_scalar_merge(Scalar* one, Scalar* two) {
@@ -1560,7 +1563,7 @@ Scalar* sem_scalar_merge(Scalar* one, Scalar* two) {
 }
 
 Type* type_scalar_merge(Scalar* one, Scalar* two) {
-  return type_scalar(sem_scalar_merge(one, two));
+  return type_int_scalar(sem_scalar_merge(one, two));
 }
 
 Field type_record_get_by_position(Record* record, I32 position) {
@@ -1842,7 +1845,7 @@ Type* type_meet(Type* one, Type* two) {
         result = type_float_meet(one, two);
       }
       else {
-        result = type_scalar(sem_scalar_meet(one->scalar, two->scalar));
+        result = type_int_scalar(sem_scalar_meet(one->scalar, two->scalar));
       }
     } break;
     case Type_Kind_ptr: {
@@ -1894,7 +1897,7 @@ Type* type_join(Type* one, Type* two) {
       Scalar* scalar = sem_scalar_merge(one->scalar, two->scalar);
       if (has_flag(one->flag, Type_Flag_size_defined) || has_flag(two->flag, Type_Flag_size_defined)) {
         I16 bits_size = max(one->bits_size, two->bits_size);
-        Type* merged = type_scalar(scalar);
+        Type* merged = type_int_scalar(scalar);
         if (merged->bits_size <= bits_size) {
           result = type_define_size(bits_size, merged);
         }
@@ -1903,7 +1906,7 @@ Type* type_join(Type* one, Type* two) {
         }
       }
       else {
-        result = type_scalar(scalar);
+        result = type_int_scalar(scalar);
       }
     }
   }
@@ -2171,7 +2174,7 @@ Type* type_scalar_no_meet(Scalar* one, Scalar* two) {
     new_scalar->pairs[new_scalar->length++] = range2;
     range2 = two->pairs[t++];
   }
-  return type_scalar(new_scalar);
+  return type_int_scalar(new_scalar);
 }
 
 Scalar* sem_scalar_exclude(Scalar* scalar, I64 val) {
@@ -2212,7 +2215,7 @@ Type* type_float_of_scalar(Type* type, Scalar* scalar) {
 }
 
 Type* type_scalar_exclude(Scalar* scalar, I64 val) {
-  return type_scalar(sem_scalar_exclude(scalar, val));
+  return type_int_scalar(sem_scalar_exclude(scalar, val));
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
@@ -2269,7 +2272,7 @@ void sem_type_narrow_int_eq(Sem_Tasks* tasks, Ir* ir) {
   }
   else {
     Scalar_Pair scalar = scalar_pair_of_ir_binary(ir);
-    new_type = type_scalar(sem_scalar_meet(scalar.one, scalar.two));
+    new_type = type_int_scalar(sem_scalar_meet(scalar.one, scalar.two));
   }
   sem_type_of_ir_binary_narrow(tasks, ir, new_type, new_type);
 }
@@ -2333,7 +2336,7 @@ Type* sem_type_clamp(Type* type, I64 lo, I64 hi) {
   if (type_is_float(type)) {
     return type_float_of_scalar(type, meet);
   }
-  return type_scalar(meet);
+  return type_int_scalar(meet);
 }
 
 Ir_Kind sem_cmp_negate(Ir_Kind op) {
@@ -3598,9 +3601,7 @@ void sem_ir(Block* block, Ir* ir) {
       assert(0); // TODO
     }
     else if (fun_type->kind == Type_Kind_none) {
-      if (fun_type->flag == Type_Flag_size_defined) { // NOTE: float function
-      }
-      else if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
+      if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
         if (arg_type->kind == Type_Kind_type) {
           arg_type = arg_type->type;
         }
