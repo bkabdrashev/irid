@@ -4079,6 +4079,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.y else { if 4 do a.z }", ""); // FIX: @a.y incorrectly directs to @a.z
   // test("a:(x:F32); a = (10;); a.x", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");

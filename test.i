@@ -62,6 +62,33 @@ SCANCODE_ESCAPE    : 41
 SCANCODE_BACKSPACE : 42
 SCANCODE_TAB       : 43
 SCANCODE_SPACE     : 44
+SCANCODE_A : 4
+SCANCODE_B : 5
+SCANCODE_C : 6
+SCANCODE_D : 7
+SCANCODE_E : 8
+SCANCODE_F : 9
+SCANCODE_G : 10
+SCANCODE_H : 11
+SCANCODE_I : 12
+SCANCODE_J : 13
+SCANCODE_K : 14
+SCANCODE_L : 15
+SCANCODE_M : 16
+SCANCODE_N : 17
+SCANCODE_O : 18
+SCANCODE_P : 19
+SCANCODE_Q : 20
+SCANCODE_R : 21
+SCANCODE_S : 22
+SCANCODE_T : 23
+SCANCODE_U : 24
+SCANCODE_V : 25
+SCANCODE_W : 26
+SCANCODE_X : 27
+SCANCODE_Y : 28
+SCANCODE_Z : 29
+
 Scancode : U16 // TODO: enum
 
 UnknownEvent : #type (
@@ -130,6 +157,7 @@ RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->
 print_str("Hello World!")
 
 BLOCK_PIXELS   : 24
+BLOCKS_PER_MS  : 0.005
 WINDOW_WIDTH   : BLOCK_PIXELS * game.width
 WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
@@ -144,19 +172,21 @@ game : (
   size    : width * height
 
   snake_p : [size]Vec2
+  snake_v : Vec2
   snake_n : I32
   running : B8
-  time    : I32
+  last_tick : F32
 )
 
 init(INIT_VIDEO | INIT_EVENTS)
 window:   @Window   = CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
-renderer: @Renderer = CreateRenderer(window; @ "\0"[0]))
+renderer: @Renderer = CreateRenderer(window; @ "\0"[0])
 
 game.running = 1
 game.snake_n = 1
 game.snake_p[0].x = game.width  / 2 - 1
 game.snake_p[0].y = game.height / 2 - 1
+game.last_tick = F32 GetTicks()
 while game.running do {
   event: Event
   while PollEvent(@event) do {
@@ -172,6 +202,26 @@ while game.running do {
         print_str("Escape")
         game.running = 0
       }
+      else if event.scancode == SCANCODE_H do {
+        print_str("Left")
+        game.snake_v.x = -BLOCKS_PER_MS
+        game.snake_v.y = 0
+      }
+      // else if event.scancode == SCANCODE_L do {
+      //   print_str("Right")
+      //   game.snake_v.x = +BLOCKS_PER_MS
+      //   game.snake_v.y = 0
+      // }
+      // else if event.scancode == SCANCODE_K do {
+      //   print_str("Up")
+      //   game.snake_v.x = 0
+      //   game.snake_v.y = -BLOCKS_PER_MS
+      // }
+      // else if event.scancode == SCANCODE_J do {
+      //   print_str("Down")
+      //   game.snake_v.x = 0
+      //   game.snake_v.y = +BLOCKS_PER_MS
+      // }
     }
     else if event.type == MOUSE_MOTION do {
       print_i64(event.type)
@@ -180,14 +230,21 @@ while game.running do {
   SetRenderDrawColor(renderer; 127; 0; 0; ALPHA_OPAQUE)
   RenderClear(renderer)
 
-  { i: I32 = 0
+  {
+    i: I32 = 0
     r: FRect = (0.0; 0.0; BLOCK_PIXELS; BLOCK_PIXELS)
+    // now: F32 = F32 GetTicks()
+    // dt: F32 = now - game.last_tick
+    // game.last_tick = now
   while i < game.snake_n do
     r.x = F32 game.snake_p[i].x * (r.w + 2.0)
     r.y = F32 game.snake_p[i].y * (r.h + 2.0)
     SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
     RenderFillRect(renderer; @r)
     i = i + 1
+
+    // game.snake_p[i].x = game.snake_v.x * dt
+    // game.snake_p[i].y = game.snake_v.y * dt
   }
 
   // for i in 1..game.snake_n-1 do {
