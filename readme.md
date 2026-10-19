@@ -5,24 +5,30 @@
 
 - [ ] When element sizes in a record are equal then this record is an array:
 ```irid
-a = ((U32, U32), U64) // implicit [2]([2]\U32\U64)
+a = ((U32; U32); U64) // implicit [2]([2]\U32\U64)
 ```
 
 - [ ] Values that could be assign only to certain type. Example: type bool, values: false/true. Need to think syntax/semantics of it.
 
 - [ ] Flexible arrays
 ```irid
-arr = [2]I32(2, 3) // stores (len:2) and @(2, 3)
+arr = [2]I32(2; 3) // stores (len:2) and @(2, 3)
 for i in arr.len do
   arr[i] = 1
 ```
 
 - [ ] Custom header
 ```irid
-arr: (cap: 4; len:I32 = 2), @(I32, I32, I32, I32)
+arr: [cap: 4; len:I32 = 2]I32 = (1; 2; 3)
 for i in arr.len do
   arr[i] = i
 arr[arr.len++] = 0
+```
+
+- [ ] Flexible function paramter list
+```irid
+print : (param: [str: Str]Any) -> ()
+print("Hello % %"; "World"; 42)
 ```
 
 - [ ] For loop
@@ -48,16 +54,69 @@ char : (str : string) -> {
 #char "a"
 ```
 
-- [ ] Foreigh functions should be metaprogram instead of #c syntax:
+- [ ] function return value type checking
 ```irid
-Init : (foreign:c : "SDL_Init"), (flags = InitFlags) -> b8
+foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
+  if () return 1
+  else  return 2.0
+}
+bar : () -> I32 { // not error since both values are converted via the same I32
+  if () return 1.0
+  else  return 2.0
+}
+baz : () -> (x:I32; y:I32) { // not error
+  if () return (1, 2)
+  else  return (x:3, y:4)
+}
+zap : () -> (x:I32; y:I32) { // error since the second returned value have to swap 3 and 4
+  if () return (1, 2)
+  else  return (y:3, x:4)
+}
 ```
 
-- [ ] Pointer types can incorporate pointer location:
+- [ ] Function types
 ```irid
-a:I32
-b:I32
-c : @a\@b // can only points to a or b
+// Both are function types
+(@I32) -> I32
+(@I32\nil) -> {
+  re I32
+}
+// Both are function literals
+(ptr:@I32) -> ptr@
+(ptr: @I32\nil) -> {
+  if ptr re ptr@
+  re 0
+}
+// Both are (function type and function literal)
+(@I32) -> 1
+(ptr:@I32) -> {
+  re ptr@ * 0;
+}
+// Both are function literal
+(ptr:@I32) -> {
+  ptr@ = 1
+  re ptr@
+}
+(ptr:@I32\nil) -> {
+  re ptr@ * 0
+}
+```
+
+- [ ] Function type return declaration:
+```irid
+foo : () -> I32 do {
+  return 10
+}
+```
+
+- [ ] Foreigh functions should be metaprogram instead of #c syntax:
+```irid
+Init : (foreign.c : "SDL_Init") (flags: InitFlags) -> B8
+```
+
+- [ ] Foreigh functions alternative syntax:
+```irid
+Init : (flags: InitFlags) -> B8 do #foreign.c "SDL_Init"
 ```
 
 - [ ] Define constants and use them at the same time
@@ -200,54 +259,6 @@ c = dot a b // 1*3 + 2*4
 c = b'a'dot // 1*3 + 2*4
 ```
 
-- [ ] function return value type checking
-```irid
-foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
-  if () return 1
-  else  return 2.0
-}
-bar : () -> I32 { // not error since both values are converted via the same I32
-  if () return 1.0
-  else  return 2.0
-}
-baz : () -> (x:I32; y:I32) { // not error
-  if () return (1, 2)
-  else  return (x:3, y:4)
-}
-zap : () -> (x:I32; y:I32) { // error since the second returned value have to swap 3 and 4
-  if () return (1, 2)
-  else  return (y:3, x:4)
-}
-```
-
-- [ ] Function types
-```irid
-// Both are function types
-(@I32) -> I32
-(@I32\nil) -> {
-  re I32
-}
-// Both are function literals
-(ptr:@I32) -> ptr@
-(ptr: @I32\nil) -> {
-  if ptr re ptr@
-  re 0
-}
-// Both are (function type and function literal)
-(@I32) -> 1
-(ptr:@I32) -> {
-  re ptr@ * 0;
-}
-// Both are function literal
-(ptr:@I32) -> {
-  ptr@ = 1
-  re ptr@
-}
-(ptr:@I32\nil) -> {
-  re ptr@ * 0
-}
-```
-
 - [ ] Packages
 ```irid
 package : Vec, Str
@@ -334,7 +345,13 @@ foo:F32->F32
   use foo(I32)
   foo(1)
 }
+```
 
+- [x] Pointer types can incorporate pointer location:
+```irid
+a:I32
+b:I32
+c : @a\@b // can only points to a or b
 ```
 
 - [x] Optional do

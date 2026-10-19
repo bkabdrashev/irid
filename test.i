@@ -151,7 +151,7 @@ game : (
 
 init(INIT_VIDEO | INIT_EVENTS)
 window:   @Window   = CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
-renderer: @Renderer = CreateRenderer(window; @("\0"[0]))
+renderer: @Renderer = CreateRenderer(window; @ "\0"[0]))
 
 game.running = 1
 game.snake_n = 1
