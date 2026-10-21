@@ -161,6 +161,61 @@ BLOCKS_PER_MS  : 0.005
 WINDOW_WIDTH   : BLOCK_PIXELS * game.width
 WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
+min : (a:F32; b:F32) -> if a < b do a else b
+max : (a:F32; b:F32) -> if a > b do a else b
+
+intersection : (x0: F32; y0: F32; x1: F32; y1: F32) -> {
+  xa: F32 = 1.0 + min(x0; x1) - max(x0; x1)
+  ya: F32 = 1.0 + min(y0; y1) - max(y0; y1)
+  xOverlap: F32 = max(0.0; xa)
+  yOverlap: F32 = max(0.0; ya)
+  return xOverlap * yOverlap
+}
+
+new_food : (game: @Game) -> {
+  empty_n: I32 = game@.size - game@.snake_n - game@.food_n
+  if empty_n > 0 do {
+    board = [game@.size]B8
+    { i:I32 = 0
+    while i < game@.size do
+      board[i] = 1
+      i = i + 1
+    }
+
+    { i:I32 = 0
+    while i < game@.snake_n do
+      k:I32 = game@.snake_p[i].x'I32 + game@.snake_p[i].y'I32 * game@.width
+      board[k] = 0
+      i = i + 1
+    }
+
+    { i:I32 = 0
+    while i < game@.food_n do
+      k:I32 = game@.food_p[i].x'I32 + game@.food_p[i].y'I32 * game@.width
+      board[k] = 0
+      i = i + 1
+    }
+
+    {
+      empty: [game@.size]Vec2
+      e: I32 = 0
+      i: I32 = 0
+
+      while i < game@.size do
+        if board[i] do {
+          empty[e].x = F32 (i % game@.width)
+          empty[e].y = F32 (i / game@.height)
+          e++
+        }
+
+      r: I32 = rand(empty_n)
+      game@.food[game@.food_n].x = empty[r].x
+      game@.food[game@.food_n].y = empty[r].y
+      game@.food_n++
+    }
+  }
+}
+
 Vec2 : #type (
   x: F32
   y: F32
@@ -174,6 +229,10 @@ game : (
   snake_p : [size]Vec2
   snake_v : Vec2
   snake_n : I32
+
+  food   : [size]Vec2
+  food_n : I32
+
   running : B8
   last_tick : F32
 )
@@ -189,6 +248,8 @@ game.snake_p[0].y = game.height'F32 / 2.0 - 1.0
 game.snake_v.x = 0.0
 game.snake_v.y = 0.0
 game.last_tick = F32 GetTicks()
+game'new_food
+
 while game.running do {
   event: Event
   while PollEvent(@event) do {
@@ -224,7 +285,6 @@ while game.running do {
       }
     }
     else if event.type == MOUSE_MOTION do {
-      print_i64(event.type)
     }
   }
   SetRenderDrawColor(renderer; 15; 15; 15; ALPHA_OPAQUE)
