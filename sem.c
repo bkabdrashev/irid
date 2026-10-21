@@ -132,11 +132,18 @@ struct Type_Pool {
 };
 
 typedef struct Sem_Tasks Sem_Tasks;
+typedef struct Sem_Narrowed Sem_Narrowed;
+struct Sem_Narrowed {
+  Var*          var;
+  Type*         type;
+  Sem_Narrowed* next;
+};
 struct Sem_Tasks {
-  Block*  block;
-  Type*   type;
-  Var*    var;
-  I32     length;
+  Block*        block;
+  Type*         type;
+  Var*          var;
+  I32           length;
+  Sem_Narrowed* narrowed;
 };
 
 typedef struct Sem Sem;
@@ -196,6 +203,7 @@ Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
 Type* type_join(Type* one, Type* two);
 Type* type_meet(Type* one, Type* two);
+Type* type_define_size(I32 bits_size, Type* bits_of);
 Type* type_pointer_declared(Pointer* pointer);
 Type* sem_var_declare(Var* var);
 B8 scalar_is_single(Scalar* scalar);
@@ -1374,8 +1382,15 @@ Ir* sem_push_float_cast(Block* block, Ir* value, Type* type) {
   return new_ir;
 }
 
-Ir* sem_push_int_float_cast(Block* block, Ir* value, Type* type) {
-  Ir sem_ir = { Ir_Kind_int_float_cast, .int_cast = { .value=value, .bits=type->bits_size } };
+Ir* sem_push_float_from_int_cast(Block* block, Ir* value, Type* type) {
+  Ir sem_ir = { Ir_Kind_float_from_int_cast, .cast_value = value };
+  Ir* new_ir = sem_push_ir(block, sem_ir);
+  type_of_ir_put(new_ir, type);
+  return new_ir;
+}
+
+Ir* sem_push_int_from_float_cast(Block* block, Ir* value, Type* type) {
+  Ir sem_ir = { Ir_Kind_int_from_float_cast, .cast_value = value };
   Ir* new_ir = sem_push_ir(block, sem_ir);
   type_of_ir_put(new_ir, type);
   return new_ir;
@@ -1615,19 +1630,75 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     // INVARIANT: offsets are equal for each record in the join
-    Join* join = type_of_var(block, var)->join;
+
+    // FIX: this leads to a collion in case of 4 records join.
+    // v:A\B\C\D -- A.x and B.x have different offset from C.x and D.x.
+    // So if it narrows to only A\B and then later narrows to C\D, v.x has wrong type
+    Var* var_common = hash_map_get(&var->join_vars, name);
+    if (var_common) {
+      return var_common;
+    }
+    Type* var_type = type_of_var(block, var);
+    Join* join = var_type->join;
+    B8    is_first    = true;
     Type* type_joined = sem.type_none;
+    I16   bits_size   = 0;
+    I32   offset_join = -1;
+    B8    is_size_defined = false;
     for (I32 i = 0; i < join->records.len; i++) {
       Type*   element = join->records.list[i];
       Record* record  = element->record;
       if (record->length != 0) {
-        Var* var_record = var->vars[i];
         I32 position = hash_map_get_i32(&record->position_from_name, name);
-        Var* var_field = var_record->vars[position];
-        type_joined = type_join(type_joined, record->types[position]);
+        Type* type = record->types[position];
+        if (position < 0) {
+          printf("field '%s' is not present in every possible record\n", name->base);
+          assert(0);
+        }
+        if (is_first) {
+          offset_join = record->offsets[position];
+          bits_size   = type->bits_size;
+          is_first    = false;
+        }
+        else if (offset_join != record->offsets[position]) {
+          printf("field '%s' has different offsets in joined records\n", name->base);
+          assert(0);
+        }
+        if (type_joined == sem.type_none) {
+        }
+        else if (bits_size != type->bits_size) {
+          printf("field '%s' has different sizes in joined records\n", name->base);
+          assert(0);
+        }
+        is_size_defined |= has_flag(type->flag, Type_Flag_size_defined);
+        type_joined = type_join(type_joined, type);
+
       }
     }
-    // TODO: complete this approach and see whether it works
+
+    if (is_first) {
+      printf("narrowed record is empty; trying to access field '%s'\n", name->base);
+      assert(0);
+    }
+
+    if (is_size_defined) {
+      type_joined = type_define_size(bits_size, type_joined);
+    }
+
+    var_common = &new(irgen.vars);
+    var_common->index    = offset_join;
+    var_common->name     = name;
+    var_common->parent   = var;
+    var_common->declared = type_joined;
+    var_common->state    = Var_State_resolved;
+    var_common->kind     = Var_Kind_declared;
+    var_common->global   = var->global;
+    var_common->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    sem_var_kind(var_common);
+    sem_record_declare_fields(var_common, type_joined);
+
+    hash_map_put(&var->join_vars, name, var_common);
+    return var_common;
   }
   else if (var->declared->kind == Type_Kind_array) {
     if (name == irgen.str_len) {
@@ -1648,6 +1719,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   else {
     assert(0);
   }
+  return 0;
 }
 
 I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
@@ -1660,28 +1732,31 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     Join* join = type_of_var(block, var)->join;
-    { // NOTE: first record in the set
-      Type* element = join->records.list[0];
-      sem_element_of_join_put(ir, element);
-      I32 position = hash_map_get_i32(&element->record->position_from_name, name);
-      if (position >= 0) {
-        result = element->record->offsets[position];
-      }
-      else {
-        assert(0);
-      }
-    }
-    for (I32 i = 1; i < join->records.len; i++) {
+    Type* first_element = 0;
+    for (I32 i = 0; i < join->records.len; i++) {
       Type* element = join->records.list[i];
       Record* record = element->record;
-      I32 position = hash_map_get_i32(&record->position_from_name, name);
-      if (position < 0) {
-        assert(0);
-      }
-      if (result != record->offsets[position]) {
-        assert(0);
+      if (record->length > 0) {
+        I32 position = hash_map_get_i32(&record->position_from_name, name);
+        if (position < 0) {
+          printf("field '%s' is not present in every possible record\n", name->base);
+          assert(0);
+        }
+        if (result < 0) {
+          result = record->offsets[position];
+          first_element = element;
+        }
+        else if (result != record->offsets[position]) {
+          printf("field '%s' has different offsets in joined records\n", name->base);
+          assert(0);
+        }
       }
     }
+    if (!first_element) {
+      printf("narrowed record is empty; trying to access field '%s'\n", name->base);
+      assert(0);
+    }
+    sem_element_of_join_put(ir, first_element);
   }
   else if (var->declared->kind == Type_Kind_array) {
     if (name == irgen.str_len) {
@@ -2191,6 +2266,65 @@ Type* type_scalar_exclude(Scalar* scalar, I64 val) {
   return type_int_scalar(sem_scalar_exclude(scalar, val));
 }
 
+Type* sem_join_field_type(Join* join, Str* name) {
+  Type* result = sem.type_none;
+  for (I32 i = 0; i < join->records.len; i++) {
+    Type*   element = join->records.list[i];
+    Record* record  = element->record;
+    if (record->length == 0) {
+      continue;
+    }
+    I32 position = hash_map_get_i32(&record->position_from_name, name);
+    if (position < 0) {
+      return sem.type_none;
+    }
+    result = type_join(result, record->types[position]);
+  }
+  return result;
+}
+
+Type* sem_type_narrow_meet(Type* narrowed, Type* field) {
+  Type* result;
+  if (narrowed->kind == Type_Kind_join_records) {
+    if (field->kind == Type_Kind_join_records) {
+      Join* join = arena_push(sem.perm_arena, sizeof(Join));
+            join->records = hash_set_init(sem.perm_arena, field->join->records.len);
+      for (I32 i = 0; i < field->join->records.len; i++) {
+        Type* element = field->join->records.list[i];
+        if (hash_set_exists(&narrowed->join->records, element)) {
+          hash_set_put(&join->records, element);
+        }
+      }
+      result = type_join_records(join);
+    }
+    else if (field->kind == Type_Kind_record) {
+      result = hash_set_exists(&narrowed->join->records, field) ? field : sem.type_none;
+    }
+    else {
+      result = type_meet(narrowed, field);
+    }
+  }
+  else if (field->kind == Type_Kind_join_records) {
+    result = sem_type_narrow_meet(field, narrowed);
+  }
+  else if (narrowed->kind == Type_Kind_record && field->kind == Type_Kind_record) {
+    result = type_is_same(narrowed, field) ? field : sem.type_none;
+  }
+  else {
+    result = type_meet(narrowed, field);
+  }
+  return result;
+}
+
+void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
+  Sem_Narrowed* narrowed = arena_push(sem.temp_arena, sizeof(Sem_Narrowed));
+                narrowed->var  = var;
+                narrowed->type = var->block_types[tasks->block->id];
+                narrowed->next = tasks->narrowed;
+  tasks->narrowed = narrowed;
+  var->block_types[tasks->block->id] = type;
+}
+
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
   if (ir->kind == Ir_Kind_load) {
     Type* ptr_type = type_of_ir(ir->unary);
@@ -2199,38 +2333,87 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
       Var* var = ptr->stack_vars.list[0];
       Type* old_type = var->block_types[tasks->block->id];
       if (old_type) {
-        Type* new_type_as_old = &new(sem.types);
-             *new_type_as_old = *new_type;
-              new_type_as_old->flag       = old_type->flag;
-              new_type_as_old->bits_size  = old_type->bits_size;
-              new_type_as_old->bits_align = old_type->bits_align;
-        new_type = type_in_set(new_type_as_old);
-        var->block_types[tasks->block->id] = new_type;
-        if (var->parent) {
-          Var*  parent = var->parent;
+        Type* new_type_but_size_as_old = &new(sem.types);
+             *new_type_but_size_as_old = *new_type;
+              new_type_but_size_as_old->flag       = old_type->flag;
+              new_type_but_size_as_old->bits_size  = old_type->bits_size;
+              new_type_but_size_as_old->bits_align = old_type->bits_align;
+        new_type = type_in_set(new_type_but_size_as_old);
+        sem_narrow_var(tasks, var, new_type);
+        // TODO: analyse this slop and simplify
+
+        // NOTE: only narrow the ancestors of the variable whose type is being
+        // computed, otherwise an unrelated computation would leave them narrowed.
+        B8 var_is_ancestor_of_tasks_var = false;
+        for (Var* v = var; v; v = v->parent) {
+          if (v == tasks->var) {
+            var_is_ancestor_of_tasks_var = true;
+            break;
+          }
+        }
+
+        // NOTE: a field may be nested in several joined records (e.g. a.x in
+        // (a:(x:1)) \ (a:(x:2))), so the narrowing is propagated up the whole
+        // parent chain, not just to the direct parent.
+        Var* child = var;
+        for (; var_is_ancestor_of_tasks_var && child != tasks->var && child->parent; child = child->parent) {
+          Var*  parent = child->parent;
           Type* type_parent_old = parent->block_types[tasks->block->id];
-          if (type_parent_old) {
-            if (type_parent_old->kind == Type_Kind_join_records) {
-              Join* join_old = type_parent_old->join;
-              Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
-                    join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
-              for (I32 e = 0; e < join_old->records.len; e++) {
-                Type* element = join_old->records.list[e];
-                Record* record = element->record;
-                I32     pos    = hash_map_i32_get_i32(&record->position_from_offset, var->index);
-                Type*   meet   = type_meet(new_type, record->types[pos]);
-                if (meet != sem.type_none) {
-                  hash_set_put(&join_new->records, element);
-                }
-                else {
-                  hash_set_put(&join_new->records, sem.type_empty_record);
-                }
-              }
-              Type* type_parent_new = type_join_records(join_new);
-              parent->block_types[tasks->block->id] = type_parent_new;
-              // TODO: recursive
+          if (!type_parent_old || type_parent_old->kind == Type_Kind_none) {
+            type_parent_old = parent->declared;
+          }
+          if (!type_parent_old || type_parent_old->kind != Type_Kind_join_records) {
+            break;
+          }
+
+          Join* join_old = type_parent_old->join;
+          Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
+                join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
+          for (I32 e = 0; e < join_old->records.len; e++) {
+            Type* element = join_old->records.list[e];
+            Record* record = element->record;
+            I32     pos    = -1;
+            if (record->length != 0) {
+              pos = child->name
+                ? hash_map_get_i32(&record->position_from_name, child->name)
+                : hash_map_i32_get_i32(&record->position_from_offset, child->index);
+            }
+            Type* meet = pos < 0 ? sem.type_none : sem_type_narrow_meet(new_type, record->types[pos]);
+            if (meet != sem.type_none) {
+              hash_set_put(&join_new->records, element);
+            }
+            else {
+              hash_set_put(&join_new->records, sem.type_empty_record);
             }
           }
+          Type* type_parent_new = type_join_records(join_new);
+          sem_narrow_var(tasks, parent, type_parent_new);
+
+          // Keep already cached common fields in sync with the narrowed parent.
+          for (I32 c = 0; c < parent->join_vars.len; c++) {
+            Str* common_name = parent->join_vars.list[c];
+            Var* common = hash_map_get(&parent->join_vars, common_name);
+            Type* type_common = sem_join_field_type(type_parent_new->join, common_name);
+            if (type_common->kind == Type_Kind_record && common->declared->kind == Type_Kind_join_records) {
+              // NOTE: a join narrowed down to a single record is still a join
+              // for the purposes of the common field variable.
+              Join* join_common = arena_push(sem.perm_arena, sizeof(Join));
+                    join_common->records = hash_set_init(sem.perm_arena, 1);
+              hash_set_put(&join_common->records, type_common);
+              type_common = type_join_records(join_common);
+            }
+            if (type_common != sem.type_none) {
+              Type* old_common = common->block_types[tasks->block->id];
+              if (old_common) {
+                type_common = sem_type_narrow_meet(type_common, old_common);
+              }
+              if (type_common != sem.type_none && type_common->kind == common->declared->kind) {
+                sem_narrow_var(tasks, common, type_common);
+              }
+            }
+          }
+
+          new_type = type_parent_new;
         }
       }
     }
@@ -2490,7 +2673,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
         Type* old_type = var->block_types[tasks->block->id];
         if (old_type) {
           Type* new_type = type_narrow_eqz(old_type);
-          var->block_types[tasks->block->id] = new_type;
+          sem_narrow_var(tasks, var, new_type);
         }
       }
     }
@@ -2499,10 +2682,15 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
   }
 }
 
-void sem_unnarrow(Sem_Tasks tasks) {
-  Var*  var = tasks.var;
-  Type* old = tasks.type;
-  var->block_types[tasks.block->id] = old;
+void sem_unnarrow(Sem_Tasks* tasks) {
+  while (tasks->narrowed) {
+    Sem_Narrowed* narrowed = tasks->narrowed;
+    narrowed->var->block_types[tasks->block->id] = narrowed->type;
+    tasks->narrowed = narrowed->next;
+  }
+  Var*  var = tasks->var;
+  Type* old = tasks->type;
+  var->block_types[tasks->block->id] = old;
 }
 
 Type* type_of_var_rec(Block* block, Var* var) {
@@ -2538,7 +2726,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
             sem_narrow_nez(&tasks, pred);
             Type* pred_type = type_of_var_rec(pred, var);
             type = type_join(type, pred_type);
-            sem_unnarrow(tasks);
+            sem_unnarrow(&tasks);
             tasks.length = 0;
           }
         }
@@ -2548,7 +2736,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
             sem_narrow_eqz(&tasks, pred);
             Type* pred_type = type_of_var_rec(pred, var);
             type = type_join(type, pred_type);
-            sem_unnarrow(tasks);
+            sem_unnarrow(&tasks);
             tasks.length = 0;
           }
         }
@@ -2573,27 +2761,30 @@ Type* type_of_var(Block* block, Var* var) {
   return type;
 }
 
-Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
+Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
   if (type_is_same(from, to)) {
     return from;
   }
-  Type* result = sem.type_none;
+  Type* result = 0;
   if (from->kind == to->kind) {
     switch (from->kind) {
     case Type_Kind_scalar: {
       if (from->scalar->kind == Scalar_Kind_float && to->scalar->kind == Scalar_Kind_float) {
         result = type_float_cast(from, to);
-        if (store) {
-          store->binary.two = sem_push_float_cast(block, store->binary.two, result);
+        if (ir) {
+          *ir = sem_push_float_cast(block, *ir, result);
         }
       }
       else if (from->scalar->kind == Scalar_Kind_int && to->scalar->kind == Scalar_Kind_float) {
         result = to;
+        if (ir) {
+          *ir = sem_push_float_from_int_cast(block, *ir, result);
+        }
       }
       else if (from->scalar->kind == Scalar_Kind_int && to->scalar->kind == Scalar_Kind_int) {
-        if (store) {
-          store->binary.two = sem_push_int_extend(block, store->binary.two, to->bits_size);
-          result = type_of_ir(store->binary.two);
+        if (ir) {
+          *ir = sem_push_int_extend(block, *ir, to->bits_size);
+          result = type_of_ir(*ir);
         }
         else {
           result = &new(sem.types);
@@ -2627,8 +2818,8 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       }
       result = type_record(new_record);
 
-      if (store) {
-        store->binary.two = sem_push_record_cast(block, store->binary.two, result);
+      if (ir) {
+        *ir = sem_push_record_cast(block, *ir, result);
       }
     } break;
     case Type_Kind_array: {
@@ -2647,8 +2838,8 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       }
       new_array->of_type = type_auto_cast(block, 0, from->array->of_type, to->array->of_type);
       result = type_array(new_array);
-      if (store) {
-        store->binary.two = sem_push_array_cast(block, store->binary.two, result);
+      if (ir) {
+        *ir = sem_push_array_cast(block, *ir, result);
       }
     } break;
     default: assert(0);
@@ -2670,14 +2861,14 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
       span->of_type = from->array->of_type;
       result = type_span(span);
 
-      if (store) {
-        Ir* two = store->binary.two;
+      if (ir) {
+        Ir* two = *ir;
         if (two->kind == Ir_Kind_load) {
           Ir* ptr_loaded = two->unary;
           Ir  ir_sem = { Ir_Kind_span_from_array_cast, .cast_value = ptr_loaded };
           Ir* ir_new = sem_push_ir(block, ir_sem);
           type_of_ir_put(ir_new, result);
-          store->binary.two = ir_new;
+          *ir = ir_new;
         }
         else {
           Var* var = &new(irgen.vars);
@@ -2706,7 +2897,7 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
             Ir  ir_sem = { Ir_Kind_span_from_array_cast, .cast_value = ir_var };
             Ir* ir_new = sem_push_ir(block, ir_sem);
             type_of_ir_put(ir_new, result);
-            store->binary.two = ir_new;
+            *ir = ir_new;
           }
 
         }
@@ -2725,7 +2916,31 @@ Type* type_auto_cast(Block* block, Ir* store, Type* from, Type* to) {
   return result;
 }
 
-void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
+Type* type_cast(Block* block, Ir** ir, Type* from, Type* to) {
+  Type* result = type_auto_cast(block, ir, from, to);
+  if (!result) {
+    if (from->kind == to->kind) {
+      switch (from->kind) {
+      case Type_Kind_scalar: {
+        if (from->scalar->kind == Scalar_Kind_float && to->scalar->kind == Scalar_Kind_int) {
+          result = to;
+          *ir = sem_push_int_from_float_cast(block, *ir, result);
+        }
+        else {
+          assert(0);
+        }
+      } break;
+      default: assert(0);
+      }
+    }
+    else {
+      assert(0);
+    }
+  }
+  return result;
+}
+
+void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
   if (var->kind == Var_Kind_constant) {
     printf("cannot assign a constant '%s'\n", var->name->base);
     assert(0);
@@ -2736,7 +2951,7 @@ void type_of_var_put(Block* block, Ir* store, Var* var, Type* type) {
   }
   else {
     if (type_is_subtype(block, type, var->declared)) {
-      type = type_auto_cast(block, store, type, var->declared);
+      type = type_auto_cast(block, ir, type, var->declared);
 
       if (type->kind == Type_Kind_record) {
         for (I32 i = 0; i < type->record->length; i++) {
@@ -2804,7 +3019,12 @@ void sem_record_declare_fields(Var* var, Type* type) {
   else if (type->kind == Type_Kind_join_records) {
     Join* join = type->join;
     I32 total_length = 0;
+    for (I32 i = 0; i < join->records.len; i++) {
+      Type* element = join->records.list[i];
+      total_length += element->record->length;
+    }
     var->vars = arena_push(sem.perm_arena, join->records.len*sizeof(Var*));
+    var->join_vars = hash_map_init(sem.perm_arena, max(total_length, 1));
     for (I32 i = 0; i < join->records.len; i++) {
       Type* element = join->records.list[i];
 
@@ -2815,6 +3035,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
           var_element->declared = element;
           var_element->state    = Var_State_resolved;
           var_element->kind     = Var_Kind_declared;
+          var_element->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
 
       var->vars[i] = var_element;
       sem_record_declare_fields(var_element, element);
@@ -3163,6 +3384,12 @@ void sem_ir(Block* block, Ir* ir) {
       assert(0);
     }
   } break;
+  case Ir_Kind_pos: {
+    Type* one = type_of_ir(ir->unary);
+    if (one->kind == Type_Kind_scalar) {
+      result = one;
+    }
+  } break;
   case Ir_Kind_neg: {
     Type* one = type_of_ir(ir->unary);
     if (type_is_float(one)) {
@@ -3398,20 +3625,20 @@ void sem_ir(Block* block, Ir* ir) {
       Hash_Set stack_vars = pointer->stack_vars;
       if (stack_vars.len == 1) {
         Var* var = stack_vars.list[0];
-        type_of_var_put(block, ir, var, rhs);
+        type_of_var_put(block, &ir->binary.two, var, rhs);
       }
       else if (stack_vars.len > 1) {
         for (I32 i = 0; i < stack_vars.len; i++) {
           Var* var = stack_vars.list[i];
           Type* old_type = type_of_var(block, var);
           Type* new_type = type_join(old_type, rhs);
-          type_of_var_put(block, ir, var, new_type);
+          type_of_var_put(block, &ir->binary.two, var, new_type);
         }
       }
       else {
         Type* declared = type_pointer_declared(lhs->pointer);
         if (type_is_subtype(block, rhs, declared)) {
-          type_auto_cast(block, ir, rhs, declared);
+          type_auto_cast(block, &ir->binary.two, rhs, declared);
         }
         else {
           assert(0);
@@ -3566,7 +3793,7 @@ void sem_ir(Block* block, Ir* ir) {
       result = type_type(type_type(arg_type));
     }
     else if (fun_type->kind == Type_Kind_type) {
-      result = type_auto_cast(block, 0, arg_type, fun_type->type);
+      result = type_cast(block, &ir->binary.two, arg_type, fun_type->type);
     }
     else if (fun_type->kind == Type_Kind_fun) {
       if (fun_type->function->fun->kind == Fun_Kind_macro) {
@@ -3586,7 +3813,7 @@ void sem_ir(Block* block, Ir* ir) {
       else {
         Function* fun = fun_type->function;
         if (type_is_subtype(block, arg_type, fun->arg)) {
-          type_auto_cast(block, ir, arg_type, fun->arg);
+          type_auto_cast(block, &ir->binary.two, arg_type, fun->arg);
           result = fun->ret;
         }
         else {
@@ -4064,10 +4291,15 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.y else { if 4 do a.z }", ""); // FIX: @a.y incorrectly directs to @a.z
-  // test("a:(x:F32); a = (10;); a.x", "");
+  // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.y else { if 4 do a.z }", "");
+  // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
+  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; ab.a", "");
+  // test("A:(a:(x:I32 1); b:I32 5); B:(a:(x:I32 2); c:I32 4); ab: A\\B; if ab.a.x == 1 do ab.b else ab.c", "");
+  // test("A:(a:(b:(x:I32 1); p:I32 5); q:I32 7); B:(a:(b:(x:I32 2); r:I32 4); s:I32 6); ab: A\\B; if ab.a.b.x == 1 do ab.q else ab.s", "");
+  // test("A:(a:(x:I32 1); r:(y:I32 5)); B:(a:(x:I32 2); r:(y:I32 6)); ab: A\\B; ab.r; if ab.a.x == 1 do ab.r.y else ab.r.y", "");
+  // test("a:(x:F32); a = (10;); a.x", "");
   // test("A:(a:I32; b:I32); ab: A; ab.a ", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
   // test("a: Str = \"Hi\"; a.len; a[0]", "");

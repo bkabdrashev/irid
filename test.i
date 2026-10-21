@@ -162,8 +162,8 @@ WINDOW_WIDTH   : BLOCK_PIXELS * game.width
 WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
 Vec2 : #type (
-  x: I32
-  y: I32
+  x: F32
+  y: F32
 )
 
 game : (
@@ -184,8 +184,10 @@ renderer: @Renderer = CreateRenderer(window; @ "\0"[0])
 
 game.running = 1
 game.snake_n = 1
-game.snake_p[0].x = game.width  / 2 - 1
-game.snake_p[0].y = game.height / 2 - 1
+game.snake_p[0].x = game.width'F32  / 2.0 - 1.0
+game.snake_p[0].y = game.height'F32 / 2.0 - 1.0
+game.snake_v.x = 0.0
+game.snake_v.y = 0.0
 game.last_tick = F32 GetTicks()
 while game.running do {
   event: Event
@@ -196,8 +198,6 @@ while game.running do {
       game.running = 0
     }
     else if event.type == KEY_DOWN do {
-      print_i64(event.scancode)
-      print_i64(event.type)
       if event.scancode == SCANCODE_ESCAPE do {
         print_str("Escape")
         game.running = 0
@@ -205,46 +205,47 @@ while game.running do {
       else if event.scancode == SCANCODE_H do {
         print_str("Left")
         game.snake_v.x = -BLOCKS_PER_MS
+        game.snake_v.y = 0.0
+      }
+      else if event.scancode == SCANCODE_L do {
+        print_str("Right")
+        game.snake_v.x = +BLOCKS_PER_MS
         game.snake_v.y = 0
       }
-      // else if event.scancode == SCANCODE_L do {
-      //   print_str("Right")
-      //   game.snake_v.x = +BLOCKS_PER_MS
-      //   game.snake_v.y = 0
-      // }
-      // else if event.scancode == SCANCODE_K do {
-      //   print_str("Up")
-      //   game.snake_v.x = 0
-      //   game.snake_v.y = -BLOCKS_PER_MS
-      // }
-      // else if event.scancode == SCANCODE_J do {
-      //   print_str("Down")
-      //   game.snake_v.x = 0
-      //   game.snake_v.y = +BLOCKS_PER_MS
-      // }
+      else if event.scancode == SCANCODE_K do {
+        print_str("Up")
+        game.snake_v.x = 0
+        game.snake_v.y = -BLOCKS_PER_MS
+      }
+      else if event.scancode == SCANCODE_J do {
+        print_str("Down")
+        game.snake_v.x = 0
+        game.snake_v.y = +BLOCKS_PER_MS
+      }
     }
     else if event.type == MOUSE_MOTION do {
       print_i64(event.type)
     }
   }
-  SetRenderDrawColor(renderer; 127; 0; 0; ALPHA_OPAQUE)
+  SetRenderDrawColor(renderer; 15; 15; 15; ALPHA_OPAQUE)
   RenderClear(renderer)
 
   {
     i: I32 = 0
     r: FRect = (0.0; 0.0; BLOCK_PIXELS; BLOCK_PIXELS)
-    // now: F32 = F32 GetTicks()
-    // dt: F32 = now - game.last_tick
-    // game.last_tick = now
+    now: F32 = F32 GetTicks()
+    dt: F32 = now - game.last_tick
+    game.last_tick = now
   while i < game.snake_n do
-    r.x = F32 game.snake_p[i].x * (r.w + 2.0)
-    r.y = F32 game.snake_p[i].y * (r.h + 2.0)
+    r.x = game.snake_p[i].x * (r.w + 2.0)
+    r.y = game.snake_p[i].y * (r.h + 2.0)
     SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
     RenderFillRect(renderer; @r)
-    i = i + 1
 
-    // game.snake_p[i].x = game.snake_v.x * dt
-    // game.snake_p[i].y = game.snake_v.y * dt
+    game.snake_p[i].x = game.snake_p[i].x + game.snake_v.x * dt
+    game.snake_p[i].y = game.snake_p[i].y + game.snake_v.y * dt
+
+    i = i + 1
   }
 
   // for i in 1..game.snake_n-1 do {

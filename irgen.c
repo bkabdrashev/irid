@@ -37,6 +37,7 @@ typedef enum Ir_Kind {
   Ir_Kind_range = Ast_Kind_range | Ir_Flag_binary,
 
   Ir_Kind_neg = Ast_Kind_neg | Ir_Flag_unary,
+  Ir_Kind_pos = Ast_Kind_pos | Ir_Flag_unary,
 
   Ir_Kind_run       = Ast_Kind_run | Ir_Flag_unary,
   Ir_Kind_load      = Ast_Kind_load | Ir_Flag_unary,
@@ -57,8 +58,9 @@ typedef enum Ir_Kind {
   Ir_Kind_record_cast = 141,
   Ir_Kind_array_cast  = 142,
   Ir_Kind_span_from_array_cast = 143,
-  Ir_Kind_float_cast     = 144,
-  Ir_Kind_int_float_cast = 145,
+  Ir_Kind_float_cast          = 144,
+  Ir_Kind_float_from_int_cast = 145,
+  Ir_Kind_int_from_float_cast = 146,
 
   Ir_Kind_foreign = 150,
   Ir_Kind_bits    = 151,
@@ -126,6 +128,7 @@ struct Var {
   Blocks* blocks;
   Type*   declared;
   Var**   vars;
+  Hash_Map join_vars; // common fields of joined records, keyed by name
   Type**  block_types;
 };
 
@@ -480,9 +483,13 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, " to ");
     string_builder_push_i64(sb, ir->int_cast.bits);
   break;
-  case Ir_Kind_int_float_cast:
-    string_builder_push_cstr(sb, "int float cast ");
-    string_builder_push_irid(sb, ir->int_cast.value);
+  case Ir_Kind_float_from_int_cast:
+    string_builder_push_cstr(sb, "float from int cast ");
+    string_builder_push_irid(sb, ir->cast_value);
+  break;
+  case Ir_Kind_int_from_float_cast:
+    string_builder_push_cstr(sb, "int from float cast ");
+    string_builder_push_irid(sb, ir->cast_value);
   break;
   case Ir_Kind_record_cast:
     string_builder_push_cstr(sb, "record cast ");
@@ -534,6 +541,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
 
   case Ir_Kind_join: string_builder_push_cstr(sb, "join "); break;
   case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
+  case Ir_Kind_pos: string_builder_push_cstr(sb, "pos "); break;
   case Ir_Kind_load: string_builder_push_cstr(sb, "load "); break;
   case Ir_Kind_ptr:  string_builder_push_cstr(sb, "ptr "); break;
   case Ir_Kind_store: string_builder_push_cstr(sb, "store "); break;

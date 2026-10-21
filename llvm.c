@@ -441,12 +441,16 @@ void llvm_ir(Ir* ir) {
       result = llvm_val;
     }
   } break;
-  case Ir_Kind_int_float_cast: {
-    LLVMValueRef llvm_val = llvm_of_ir(ir->int_cast.value);
-    LLVMTypeRef llvm_to = llvm_of_type(type);
+  case Ir_Kind_float_from_int_cast: {
+    LLVMValueRef llvm_val = llvm_of_ir(ir->cast_value);
+    LLVMTypeRef  llvm_to  = llvm_of_type(type);
     result = LLVMBuildSIToFP(llvm_gen.builder, llvm_val, llvm_to, "");
   } break;
-
+  case Ir_Kind_int_from_float_cast: {
+    LLVMValueRef llvm_val = llvm_of_ir(ir->cast_value);
+    LLVMTypeRef  llvm_to  = llvm_of_type(type);
+    result = LLVMBuildFPToSI(llvm_gen.builder, llvm_val, llvm_to, "");
+  } break;
   case Ir_Kind_add: case Ir_Kind_sub: case Ir_Kind_mul: case Ir_Kind_div: case Ir_Kind_rem:
   case Ir_Kind_or: case Ir_Kind_xor: case Ir_Kind_and:
   case Ir_Kind_eq: case Ir_Kind_ne: case Ir_Kind_lt: case Ir_Kind_le: case Ir_Kind_gt: case Ir_Kind_ge:
@@ -493,6 +497,9 @@ void llvm_ir(Ir* ir) {
         : LLVMBuildICmp(llvm_gen.builder, LLVMIntSGE, llvm_one, llvm_two, ""); break;
       default: assert(0);
     }
+  } break;
+  case Ir_Kind_pos: {
+    result = llvm_unary;
   } break;
   case Ir_Kind_neg: {
     if (type_is_float(type_of_ir(ir->unary))) {
