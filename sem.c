@@ -4253,18 +4253,23 @@ void sem_funs(Arena* arena, Funs funs) {
 
 void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Cstr builtin        = file_read("basic.i");
-  I32  builtin_length = strlen(builtin);
+  I32  builtin_length = (I32)file_size("basic.i");
   I32  source_length  = strlen(source);
   I32  length         = source_length + builtin_length + 32;
 
   Arena arena         = arena_init(KB(4) * length);
                         str_init(&arena, 2*length);
 
-  Tokens builtin_tokens = lex_source(&arena, "basic.i", builtin);
-  Ast_Block ast         = parse_tokens(&arena, builtin_tokens);
+  Source_Map sources = {0};
+  Diags diags = diags_init(&arena, 256);
+  File_Id builtin_file = source_add(&sources, &arena, "basic.i", builtin, builtin_length);
 
-  Tokens source_tokens = lex_source(&arena, file_name, source);
-  Ast_Block source_ast = parse_tokens(&arena, source_tokens);
+  Tokens builtin_tokens = lex_source(&arena, &sources, builtin_file, &diags);
+  Ast_Block ast         = parse_tokens(&arena, builtin_tokens, &diags);
+
+  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
+  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
+  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
 
   Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
   node->block    = source_ast;

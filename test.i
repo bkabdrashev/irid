@@ -205,13 +205,13 @@ new_food : (game: @Game) -> {
         if board[i] do {
           empty[e].x = F32 (i % game@.width)
           empty[e].y = F32 (i / game@.height)
-          e++
+          e = e + 1
         }
 
       r: I32 = rand(empty_n)
       game@.food[game@.food_n].x = empty[r].x
       game@.food[game@.food_n].y = empty[r].y
-      game@.food_n++
+      game@.food_n = game@.food_n + 1
     }
   }
 }

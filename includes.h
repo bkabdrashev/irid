@@ -15,6 +15,9 @@
 
 #include "common.c"
 #include "str.c"
+#include "source.c"
+#include "token.c"
+#include "diag.c"
 #include "lex.c"
 #include "parse.c"
 #include "irgen.c"

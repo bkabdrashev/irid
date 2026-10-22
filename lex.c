@@ -5,70 +5,11 @@ typedef enum {
   Token_Flag_willspace   = 1 << 3,
 } Token_Flag;
 
-typedef enum Token_Kind_Flag {
-  Token_Kind_Flag_prefix   = 1 << 8,
-  Token_Kind_Flag_call_rhs = 1 << 9,
-} Token_Kind_Flag;
-
-typedef enum Token_Kind {
-  Token_Kind_source_leave       = 0,
-  Token_Kind_source_enter       = 1,
-  Token_Kind_int                = 3 | Token_Kind_Flag_call_rhs,
-  Token_Kind_float              = 12 | Token_Kind_Flag_call_rhs,
-  Token_Kind_plus               = 4,
-  Token_Kind_plus_prefix        = 4 | Token_Kind_Flag_prefix,
-  Token_Kind_minus              = 6,
-  Token_Kind_minus_prefix       = 6 | Token_Kind_Flag_prefix,
-  Token_Kind_star               = 8,
-  Token_Kind_at                 = 9,
-  Token_Kind_at_prefix          = 9 | Token_Kind_Flag_prefix,
-  Token_Kind_dot                = 11,
-  Token_Kind_equal              = 13,
-  Token_Kind_colon              = 15,
-  Token_Kind_brace_open         = 17,
-  Token_Kind_brace_prefix_open  = 17 | Token_Kind_Flag_prefix,
-  Token_Kind_brace_close        = 19,
-  Token_Kind_paren_open         = 20 | Token_Kind_Flag_call_rhs,
-  Token_Kind_paren_close        = 22,
-  Token_Kind_curly_open         = 23 | Token_Kind_Flag_call_rhs,
-  Token_Kind_curly_close        = 24,
-  Token_Kind_semicolon          = 25,
-  Token_Kind_comma              = 26,
-  Token_Kind_arrow              = 33,
-  Token_Kind_bang               = 35 | Token_Kind_Flag_call_rhs,
-  Token_Kind_bang_equal         = 40,
-  Token_Kind_equal_equal        = 41,
-  Token_Kind_less_equal         = 42,
-  Token_Kind_less               = 43,
-  Token_Kind_greater_equal      = 44,
-  Token_Kind_greater            = 45,
-  Token_Kind_backslash          = 46,
-  Token_Kind_quote              = 47,
-  Token_Kind_str                = 48 | Token_Kind_Flag_call_rhs,
-  Token_Kind_sharp              = 49 | Token_Kind_Flag_call_rhs,
-  Token_Kind_slash              = 53,
-  Token_Kind_percent            = 55,
-  Token_Kind_dot_dot            = 57,
-  Token_Kind_pipe               = 59,
-  Token_Kind_pike               = 61,
-  Token_Kind_ampersand          = 63,
-
-  Token_Kind_name               = String_Kind_name | Token_Kind_Flag_call_rhs,
-  Token_Kind_if                 = String_Kind_if | Token_Kind_Flag_call_rhs,
-  Token_Kind_do                 = String_Kind_do,
-  Token_Kind_else               = String_Kind_else,
-  Token_Kind_return             = String_Kind_return,
-  Token_Kind_break              = String_Kind_break,
-  Token_Kind_while              = String_Kind_while,
-} Token_Kind;
-
 typedef struct {
   Token_Kind kind;
   Token_Flag flag;
   I16 indent;
-  Cstr file_path;
-  I32 line;
-  I32 column;
+  Loc loc;
   union {
     U64  bits;
     I64  i64;
@@ -83,13 +24,14 @@ typedef struct {
 } Tokens;
 
 typedef struct {
-  Cstr source;
-  Cstr stream;
-  B8   wasnewline;
-  B8   wasspace;
-  I16  indent;
-  I32  line;
-  I32  column;
+  Cstr    source;
+  Cstr    stream;
+  Cstr    end;
+  File_Id file;
+  Diags*  diags;
+  B8      wasnewline;
+  B8      wasspace;
+  I16     indent;
 } Lexer;
 
 void tokens_push(Tokens* tokens, Token item) {
@@ -111,48 +53,81 @@ Token* tokens_top(Tokens* token) {
 Lexer lexer = {0};
 
 void lex_advance() {
-  lexer.stream++;
-  lexer.column++;
+  if (lexer.stream < lexer.end) {
+    lexer.stream++;
+  }
 }
 
-Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
+C8 lex_peek(I32 offset) {
+  Cstr at = lexer.stream + offset;
+  if (at >= lexer.end) return '\0';
+  return *at;
+}
+
+Loc lex_loc(Cstr begin, Cstr end) {
+  Loc loc = {0};
+  loc.file  = lexer.file;
+  loc.start = (U32)(begin - lexer.source);
+  loc.end   = (U32)(end - lexer.source);
+  return loc;
+}
+
+Tokens lex_source(Arena* arena, Source_Map* sources, File_Id file, Diags* diags) {
   Tokens slice_token = {0};
-  Umi source_length = strlen(source);
+  Source_File* source_file = source_get(sources, file);
+  assert(source_file);
+  Cstr source        = source_file->data;
+  Umi  source_length = source_file->length;
   slice_token.base = arena_push(arena, sizeof(Token) * (source_length + 2));
   lexer.source = source;
   lexer.stream = source;
+  lexer.end    = source + source_length;
+  lexer.file   = file;
+  lexer.diags  = diags;
   lexer.wasnewline = true;
+  lexer.wasspace   = false;
   lexer.indent    = 0;
-  lexer.line      = 1;
-  lexer.column    = 1;
-  tokens_push(&slice_token, (Token){Token_Kind_source_enter, 0, 0, 0, 0, 0, {0}});
+  tokens_push(&slice_token, (Token){
+    .kind = Token_Kind_source_enter,
+    .loc  = {file, 0, 0},
+  });
 
-  while (*lexer.stream) {
+  while (lexer.stream < lexer.end && !(diags && diags->limit_hit)) {
+    Cstr token_start = lexer.stream;
     Token token = {0};
     switch (*lexer.stream) {
     case ' ':
+      if (lexer.wasnewline) lexer.indent += 1;
       lex_advance();
       lexer.wasspace = true;
     continue;
     case '\t':
+      if (lexer.wasnewline) lexer.indent += 8;
       lex_advance();
       lexer.wasspace = true;
     continue;
     case '\n': case '\r':
       lexer.indent = 0;
       lexer.wasnewline = true;
-      while (true) {
-        lex_advance();
-        if (*lexer.stream == '\n' || *lexer.stream == '\r') {
+      while (lexer.stream < lexer.end) {
+        if (*lexer.stream == '\r') {
+          lex_advance();
+          if (lexer.stream < lexer.end && *lexer.stream == '\n') {
+            lex_advance();
+          }
           lexer.indent = 0;
-          lexer.column = 0;
-          lexer.line  += 1;
+        }
+        else if (*lexer.stream == '\n') {
+          lex_advance();
+          lexer.indent = 0;
         }
         else if (*lexer.stream == ' ') {
           lexer.indent += 1;
+          lex_advance();
         }
         else if (*lexer.stream == '\t') {
           lexer.indent += 8;
+          lex_advance();
         }
         else {
           break;
@@ -164,32 +139,42 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
       token.kind = Token_Kind_int;
       Cstr number_start = lexer.stream;
       I32 base = 10;
+      B8 has_prefix = false;
+      Cstr prefix = "";
       if (*lexer.stream == '0') {
         lex_advance();
-        if (tolower(*lexer.stream) == 'x') {
+        if (tolower((U8)lex_peek(0)) == 'x') {
           lex_advance();
           base = 16;
+          has_prefix = true;
+          prefix = "0x";
         }
-        else if (tolower(*lexer.stream) == 'b') {
+        else if (tolower((U8)lex_peek(0)) == 'b') {
           lex_advance();
           base = 2;
+          has_prefix = true;
+          prefix = "0b";
         }
-        else if (isdigit(*lexer.stream)) {
+        else if (isdigit((U8)lex_peek(0))) {
           base = 8;
         }
       }
       U64 val = 0;
+      B8 saw_digit = !has_prefix;
+      B8 invalid_reported = false;
+      B8 overflow_reported = false;
       for (;;) {
+        if (lexer.stream >= lexer.end) break;
         if (*lexer.stream == '_') {
           lex_advance();
           continue;
         }
         if (base == 10 && (*lexer.stream == 'e' || *lexer.stream == 'E')
-            && (isdigit((U8)lexer.stream[1])
-             || ((lexer.stream[1] == '+' || lexer.stream[1] == '-') && isdigit((U8)lexer.stream[2])))) {
+            && (isdigit((U8)lex_peek(1))
+             || ((lex_peek(1) == '+' || lex_peek(1) == '-') && isdigit((U8)lex_peek(2))))) {
           break;
         }
-        I32 digit = 0;
+        I32 digit = 16;
         switch (*lexer.stream) {
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
           digit = *lexer.stream - '0';
@@ -205,67 +190,114 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
         break;
         }
 
-        if (digit == 16 && *lexer.stream != '0') {
-          break;
-        }
+        if (digit > 15) break;
+        if (base == 10 && digit > 9) break;
+        if ((base == 2 || base == 8) && digit > 9) break;
         if (digit >= base) {
-          printf("Digit '%c' out of range for base %d", *lexer.stream, base);
+          if (!invalid_reported && lexer.diags) {
+            Diag* diag = diag_error(lexer.diags, Diag_Code_invalid_digit,
+                                    lex_loc(lexer.stream, lexer.stream + 1));
+            if (diag) {
+              diag->data.invalid_digit.digit = *lexer.stream;
+              diag->data.invalid_digit.base  = base;
+            }
+            invalid_reported = true;
+          }
           digit = 0;
         }
-        val = val*base + digit;
+        else {
+          saw_digit = true;
+        }
+
+        if (val > (UINT64_MAX - (U64)digit) / (U64)base) {
+          if (!overflow_reported && lexer.diags) {
+            diag_error(lexer.diags, Diag_Code_number_overflow,
+                       lex_loc(number_start, lexer.stream + 1));
+            overflow_reported = true;
+          }
+          val = UINT64_MAX;
+        }
+        else {
+          val = val * (U64)base + (U64)digit;
+        }
         lex_advance();
+      }
+      if (has_prefix && !saw_digit && lexer.diags) {
+        Diag* diag = diag_error(lexer.diags, Diag_Code_missing_digits,
+                                lex_loc(number_start, lexer.stream));
+        if (diag) diag->data.text.text = prefix;
       }
       B8 is_float = false;
       if (base == 10) {
-        if (*lexer.stream == '.' && isdigit((U8)lexer.stream[1])) {
+        if (lexer.stream < lexer.end && *lexer.stream == '.'
+            && isdigit((U8)lex_peek(1))) {
           is_float = true;
         }
-        else if ((*lexer.stream == 'e' || *lexer.stream == 'E')
-             &&  (isdigit((U8)lexer.stream[1])
-              || ((lexer.stream[1] == '+' || lexer.stream[1] == '-') && isdigit((U8)lexer.stream[2])))) {
+        else if (lexer.stream < lexer.end
+              && (*lexer.stream == 'e' || *lexer.stream == 'E')
+              && (isdigit((U8)lex_peek(1))
+               || ((lex_peek(1) == '+' || lex_peek(1) == '-') && isdigit((U8)lex_peek(2))))) {
           is_float = true;
         }
       }
       if (is_float) {
         C8 buffer[128];
         I32 length = 0;
+        B8 float_too_long = false;
+#define lex_float_push(c)                                                     \
+        do {                                                                  \
+          if (length + 1 < (I32)sizeof(buffer)) {                             \
+            buffer[length++] = (c);                                           \
+          }                                                                   \
+          else if (!float_too_long) {                                         \
+            if (!overflow_reported && lexer.diags) {                          \
+              diag_error(lexer.diags, Diag_Code_number_overflow,              \
+                         lex_loc(number_start, lexer.stream + 1));            \
+              overflow_reported = true;                                       \
+            }                                                                 \
+            float_too_long = true;                                            \
+          }                                                                   \
+        } while (0)
         for (Cstr at = number_start; at < lexer.stream; at++) {
           if (*at != '_') {
-            assert(length + 1 < (I32)sizeof(buffer));
-            buffer[length++] = *at;
+            lex_float_push(*at);
           }
         }
         if (*lexer.stream == '.') {
-          buffer[length++] = *lexer.stream;
+          lex_float_push(*lexer.stream);
           lex_advance();
-          while (isdigit((U8)*lexer.stream) || *lexer.stream == '_') {
+          while (lexer.stream < lexer.end
+              && (isdigit((U8)*lexer.stream) || *lexer.stream == '_')) {
             if (*lexer.stream != '_') {
-              buffer[length++] = *lexer.stream;
+              lex_float_push(*lexer.stream);
             }
             lex_advance();
           }
         }
-        if (*lexer.stream == 'e' || *lexer.stream == 'E') {
-          buffer[length++] = *lexer.stream;
+        if (lexer.stream < lexer.end
+            && (*lexer.stream == 'e' || *lexer.stream == 'E')) {
+          lex_float_push(*lexer.stream);
           lex_advance();
-          if (*lexer.stream == '+' || *lexer.stream == '-') {
-            buffer[length++] = *lexer.stream;
+          if (lexer.stream < lexer.end
+              && (*lexer.stream == '+' || *lexer.stream == '-')) {
+            lex_float_push(*lexer.stream);
             lex_advance();
           }
-          while (isdigit((U8)*lexer.stream) || *lexer.stream == '_') {
+          while (lexer.stream < lexer.end
+              && (isdigit((U8)*lexer.stream) || *lexer.stream == '_')) {
             if (*lexer.stream != '_') {
-              buffer[length++] = *lexer.stream;
+              lex_float_push(*lexer.stream);
             }
             lex_advance();
           }
         }
-        assert(length < (I32)sizeof(buffer));
+#undef lex_float_push
         buffer[length] = '\0';
         token.kind = Token_Kind_float;
         token.f64  = strtod(buffer, 0);
       }
       else {
-        token.i64 = val;
+        token.i64 = (I64)val;
       }
     } break;
     case '_':
@@ -277,7 +309,8 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
     case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': {
       Cstr start = lexer.stream;
       token.kind = Token_Kind_name;
-      while (isalnum(*lexer.stream) || *lexer.stream == '_') {
+      while (lexer.stream < lexer.end
+         && (isalnum((U8)*lexer.stream) || *lexer.stream == '_')) {
         lex_advance();
       }
       token.str = str_from_range(start, lexer.stream);
@@ -297,7 +330,7 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
-      if (lexer.wasnewline && !isspace(lexer.stream[1])) {
+      if (lexer.wasnewline && !isspace((U8)lex_peek(1))) {
         token.kind = Token_Kind_plus_prefix;
       }
       lex_advance();
@@ -305,10 +338,10 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
     case '-': {
       token.kind = Token_Kind_minus;
       lex_advance();
-      if (lexer.wasnewline && !isspace(lexer.stream[1])) {
+      if (lexer.wasnewline && !isspace((U8)lex_peek(0))) {
         token.kind = Token_Kind_minus_prefix;
       }
-      else if (*lexer.stream == '>') {
+      else if (lexer.stream < lexer.end && *lexer.stream == '>') {
         token.kind = Token_Kind_arrow;
         lex_advance();
       }
@@ -320,28 +353,53 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
     case '/': {
       token.kind = Token_Kind_slash;
       lex_advance();
-      if (*lexer.stream == '/') {
+      if (lexer.stream < lexer.end && *lexer.stream == '/') {
         lex_advance();
-        while (*lexer.stream && *lexer.stream != '\n') {
+        while (lexer.stream < lexer.end
+            && *lexer.stream != '\n' && *lexer.stream != '\r') {
           lex_advance();
         }
         continue;
       }
-      else if (*lexer.stream == '*') {
+      else if (lexer.stream < lexer.end && *lexer.stream == '*') {
+        Cstr comment_start = token_start;
         lex_advance();
         I32 level = 1;
-        while (*lexer.stream && level > 0) {
-          if (lexer.stream[0] == '/' && lexer.stream[1] == '*') {
+        while (lexer.stream < lexer.end && level > 0) {
+          if (lexer.stream + 1 < lexer.end
+              && lexer.stream[0] == '/' && lexer.stream[1] == '*') {
             level++;
             lexer.stream += 2;
           }
-          else if (lexer.stream[0] == '*' && lexer.stream[1] == '/') {
+          else if (lexer.stream + 1 < lexer.end
+                && lexer.stream[0] == '*' && lexer.stream[1] == '/') {
             level--;
             lexer.stream += 2;
           }
           else {
-            lex_advance();
+            if (*lexer.stream == '\n' || *lexer.stream == '\r') {
+              lexer.wasnewline = true;
+              lexer.indent = 0;
+              if (*lexer.stream == '\r') {
+                lex_advance();
+                if (lexer.stream < lexer.end && *lexer.stream == '\n') {
+                  lex_advance();
+                }
+              }
+              else {
+                lex_advance();
+              }
+            }
+            else {
+              lex_advance();
+            }
           }
+        }
+        if (level > 0 && lexer.diags) {
+          Cstr end = comment_start + 2;
+          if (end > lexer.end) end = lexer.end;
+          diag_error(lexer.diags, Diag_Code_unterminated_comment,
+                     lex_loc(comment_start, end));
         }
         continue;
       }
@@ -445,22 +503,37 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
       lex_advance();
     } break;
     case '"': {
+      Cstr quote_start = lexer.stream;
       lex_advance();
       Cstr start = lexer.stream;
       token.kind = Token_Kind_str;
-      while (*lexer.stream != '"') {
+      while (lexer.stream < lexer.end
+          && *lexer.stream != '"'
+          && *lexer.stream != '\n' && *lexer.stream != '\r') {
         lex_advance();
       }
       token.str = str_from_range(start, lexer.stream);
-      lex_advance();
+      if (lexer.stream >= lexer.end || *lexer.stream != '"') {
+        if (lexer.diags) {
+          diag_error(lexer.diags, Diag_Code_unterminated_string,
+                     lex_loc(quote_start, lexer.stream));
+        }
+      }
+      else {
+        lex_advance();
+      }
     } break;
     case '#': {
       token.kind = Token_Kind_sharp;
       lex_advance();
     } break;
     default: {
-      printf("unknown character '%c'\n", *lexer.stream);
-      assert(0);
+      if (lexer.diags) {
+        Diag* diag = diag_error(lexer.diags, Diag_Code_unknown_character,
+                                lex_loc(lexer.stream, lexer.stream + 1));
+        if (diag) diag->data.unknown_char.byte = (U8)*lexer.stream;
+      }
+      token.kind = Token_Kind_error;
       lex_advance();
     } break;
     }
@@ -475,8 +548,7 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
       top->flag |= Token_Flag_willspace;
     }
     token.indent = lexer.indent;
-    token.column = lexer.column;
-    token.line   = lexer.line;
+    token.loc    = lex_loc(token_start, lexer.stream);
 
     // NOTE: wasnewline checks whether rhs should be disabled
     lexer.wasnewline = false;
@@ -489,7 +561,10 @@ Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
   }
   Token* top = tokens_top(&slice_token);
   top->flag |= Token_Flag_willnewline;
-  Token token = { .kind = Token_Kind_source_leave };
+  Token token = {
+    .kind = Token_Kind_source_leave,
+    .loc  = {file, (U32)source_length, (U32)source_length},
+  };
   tokens_push(&slice_token, token);
   return slice_token;
 }
@@ -504,6 +579,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_source_enter:
       string_builder_push_cstr(&sb, "enter");
+    break;
+    case Token_Kind_error:
+      string_builder_push_cstr(&sb, "error");
     break;
     case Token_Kind_name: {
       string_builder_push_str(&sb, token->str);

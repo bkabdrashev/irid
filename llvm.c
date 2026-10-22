@@ -1004,18 +1004,23 @@ I32 llvm_funs(Arena* arena, Funs funs) {
 
 void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Cstr basic        = file_read("basic.i");
-  I32  basic_length = strlen(basic);
+  I32  basic_length = (I32)file_size("basic.i");
   I32  source_length  = strlen(source);
   I32  length         = source_length + basic_length + 32;
 
   Arena arena          = arena_init(KB(4) * length);
                          str_init(&arena, 2*length);
 
-  Tokens basic_tokens   = lex_source(&arena, "basic.i", basic);
-  Ast_Block ast         = parse_tokens(&arena, basic_tokens);
+  Source_Map sources = {0};
+  Diags diags = diags_init(&arena, 256);
+  File_Id basic_file = source_add(&sources, &arena, "basic.i", basic, basic_length);
 
-  Tokens source_tokens = lex_source(&arena, file_name, source);
-  Ast_Block source_ast = parse_tokens(&arena, source_tokens);
+  Tokens basic_tokens   = lex_source(&arena, &sources, basic_file, &diags);
+  Ast_Block ast         = parse_tokens(&arena, basic_tokens, &diags);
+
+  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
+  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
+  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
 
   Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
   node->block    = source_ast;

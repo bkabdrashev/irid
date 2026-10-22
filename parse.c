@@ -60,6 +60,7 @@ typedef enum Ast_Kind {
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
   Ast_Kind_span,
+  Ast_Kind_error,
 } Ast_Kind;
 
 typedef struct Scope_Stack Scope_Stack;
@@ -104,6 +105,7 @@ struct Ast_Named {
 
 struct Ast_Node {
   Ast_Kind kind;
+  Loc      loc;
   union {
     U64   bits;
     I64   i64;
@@ -124,6 +126,7 @@ typedef struct Ast_Decl Ast_Decl;
 struct Ast_Decl {
   Str*      name;
   Ast_Node* rhs;
+  Loc       loc;
 };
 
 typedef struct Ast_Decls Ast_Decls;
@@ -133,8 +136,14 @@ struct Ast_Decls {
 };
 
 Ast_Node* ast_new_node(Arena* arena, Ast_Kind kind) {
-  Ast_Node* node = arena_push(arena, sizeof(Ast_Node));
+  Ast_Node* node = arena_push_zero(arena, sizeof(Ast_Node));
   node->kind = kind;
+  return node;
+}
+
+Ast_Node* ast_new_error(Arena* arena, Loc loc) {
+  Ast_Node* node = ast_new_node(arena, Ast_Kind_error);
+  node->loc = loc;
   return node;
 }
 
@@ -184,6 +193,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_while:        result = "while"; break;
   case Ast_Kind_record:       result = "record"; break;
   case Ast_Kind_call:         result = "call"; break;
+  case Ast_Kind_error:        result = "error"; break;
   }
   return result;
 }
@@ -353,6 +363,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->unary);
     string_builder_push_cstr(sb, ")");
   } break;
+  case Ast_Kind_error: {
+    string_builder_push_cstr(sb, "<error>");
+  } break;
   }
 }
 
@@ -386,6 +399,10 @@ typedef struct {
 
   Tokens tokens;
   I32  tok;
+
+  Diags* diags;
+  I32    last_error_tok;
+  B8     panic;
 } Parser;
 
 I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
@@ -440,7 +457,7 @@ I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
     result = 28;
   break;
   default :
-    assert(0);
+    result = 0;
   break;
   }
   if (!has_flag(token_flags, Token_Flag_willspace)) {
@@ -494,7 +511,7 @@ I32 parse_left_precedence(Ast_Kind kind, I32 token_flags) {
     result = 27;
   break;
   default :
-    assert(0);
+    result = 0;
   break;
   }
   if (!has_flag(token_flags, Token_Flag_wasspace)) {
@@ -503,33 +520,231 @@ I32 parse_left_precedence(Ast_Kind kind, I32 token_flags) {
   return result;
 }
 
-B8 parse_match_token(Parser* parser, Token_Kind kind) {
-  Token token = parser->tokens.base[parser->tok];
-  if (token.kind == kind) {
+Token* parse_peek(Parser* parser) {
+  if (parser->tokens.length == 0) {
+    static Token eof = { .kind = Token_Kind_source_leave };
+    return &eof;
+  }
+  if (parser->tok < 1) parser->tok = 1;
+  if ((Umi)parser->tok >= parser->tokens.length) {
+    parser->tok = parser->tokens.length - 1;
+  }
+  return &parser->tokens.base[parser->tok];
+}
+
+B8 parse_at_end(Parser* parser) {
+  return parse_peek(parser)->kind == Token_Kind_source_leave;
+}
+
+void parse_advance(Parser* parser) {
+  if (!parse_at_end(parser)) {
     parser->tok++;
+  }
+}
+
+void parse_retreat(Parser* parser) {
+  if (parser->tok > 1) {
+    parser->tok--;
+  }
+}
+
+B8 parse_match_token(Parser* parser, Token_Kind kind) {
+  Token token = *parse_peek(parser);
+  if (token.kind == kind) {
+    parse_advance(parser);
     return true;
   }
   return false;
 }
 
 B8 parse_is_token(Parser* parser, Token_Kind kind) {
-  Token token = parser->tokens.base[parser->tok];
+  Token token = *parse_peek(parser);
   if (token.kind == kind) {
     return true;
   }
   return false;
 }
 
-B8 parse_expect_token(Parser* parser, Token_Kind kind) {
-  Token token = parser->tokens.base[parser->tok];
-  if (token.kind == kind) {
-    parser->tok++;
+B8 parse_diags_blocked(Parser* parser) {
+  return !parser->diags || parser->diags->limit_hit;
+}
+
+Diag* parse_diag(Parser* parser, Diag_Code code, Loc loc) {
+  if (parser->panic || parser->last_error_tok == parser->tok
+      || parse_diags_blocked(parser)) {
+    return NULL;
+  }
+  parser->last_error_tok = parser->tok;
+  return diag_error(parser->diags, code, loc);
+}
+
+B8 parse_expected(Parser* parser, Token at, Token_Kind expected) {
+  Diag* diag = parse_diag(parser, Diag_Code_expected_token, at.loc);
+  if (diag) {
+    diag->data.expected.expected = expected;
+    diag->data.expected.found    = at.kind;
+  }
+  parser->panic = true;
+  return false;
+}
+
+B8 parse_expected_expression(Parser* parser, Token at) {
+  Diag* diag = parse_diag(parser, Diag_Code_expected_expression, at.loc);
+  if (diag) {
+    diag->data.expected.found = at.kind;
+  }
+  parser->panic = true;
+  return false;
+}
+
+void parse_expected_expression_eol(Parser* parser, Loc loc) {
+  Diag* diag = parse_diag(parser, Diag_Code_expected_expression, loc);
+  if (diag) {
+    diag->data.expected.end_of_line = true;
+    parser->last_error_tok = parser->tok - 1;
+  }
+  parser->panic = true;
+}
+
+B8 parse_expression_is_available(Parser* parser, I16 indent) {
+  Token next = *parse_peek(parser);
+  if (next.kind == Token_Kind_source_leave) return false;
+  if (has_flag(next.flag, Token_Flag_wasnewline) && next.indent <= indent) {
+    return false;
+  }
+  return true;
+}
+
+void parse_unexpected(Parser* parser, Token at) {
+  Diag* diag = parse_diag(parser, Diag_Code_unexpected_token, at.loc);
+  if (diag) {
+    diag->data.expected.found = at.kind;
+  }
+}
+
+void parse_unmatched(Parser* parser, Token at) {
+  Diag* diag = parse_diag(parser, Diag_Code_unmatched_delimiter, at.loc);
+  if (diag) {
+    diag->data.delimiter.open = at.kind;
+  }
+}
+
+void parse_unclosed(Parser* parser, Token open, Token_Kind close, Loc at) {
+  Diag* diag = parse_diag(parser, Diag_Code_unclosed_delimiter, at);
+  if (!diag) return;
+  diag->data.delimiter.open  = open.kind;
+  diag->data.delimiter.close = close;
+  I32 parent = (I32)(diag - parser->diags->base);
+  Diag* note = diag_note(parser->diags, parent, Diag_Code_opened_here, open.loc);
+  if (note) {
+    note->data.delimiter.open = open.kind;
+  }
+}
+
+B8 parse_token_starts_statement(Token_Kind kind) {
+  switch (kind) {
+  case Token_Kind_source_leave:
+  case Token_Kind_semicolon:
+  case Token_Kind_comma:
+  case Token_Kind_colon:
+  case Token_Kind_paren_close:
+  case Token_Kind_brace_close:
+  case Token_Kind_curly_close:
+  case Token_Kind_equal:
+  case Token_Kind_equal_equal:
+  case Token_Kind_bang_equal:
+  case Token_Kind_less:
+  case Token_Kind_less_equal:
+  case Token_Kind_greater:
+  case Token_Kind_greater_equal:
+  case Token_Kind_plus:
+  case Token_Kind_minus:
+  case Token_Kind_star:
+  case Token_Kind_slash:
+  case Token_Kind_percent:
+  case Token_Kind_pipe:
+  case Token_Kind_pike:
+  case Token_Kind_ampersand:
+  case Token_Kind_dot:
+  case Token_Kind_dot_dot:
+  case Token_Kind_arrow:
+  case Token_Kind_quote:
+  case Token_Kind_backslash:
+    return false;
+  default:
     return true;
   }
-  else {
-    printf("expected\n");
+}
+
+B8 parse_is_sync(Parser* parser, I16 indent) {
+  Token token = *parse_peek(parser);
+  if (token.kind == Token_Kind_source_leave) return true;
+  if (token.kind == Token_Kind_semicolon) return true;
+  if (token.kind == Token_Kind_curly_close) return true;
+  if (has_flag(token.flag, Token_Flag_wasnewline)
+      && token.indent <= indent
+      && parse_token_starts_statement(token.kind)) {
+    return true;
   }
   return false;
+}
+
+void parse_sync(Parser* parser, I16 indent) {
+  while (!parse_at_end(parser) && !parse_is_sync(parser, indent)) {
+    parse_advance(parser);
+  }
+  parser->panic = false;
+}
+
+void parse_recover_delimiter(Parser* parser, Token open, Token_Kind close, I16 open_indent) {
+  I32 depth = 1;
+  while (!parse_at_end(parser)) {
+    Token token = *parse_peek(parser);
+    if (token.kind == close) {
+      depth -= 1;
+      if (depth == 0) {
+        parse_advance(parser);
+        return;
+      }
+    }
+    else if (token.kind == open.kind) {
+      depth += 1;
+    }
+    else if (token.kind == Token_Kind_curly_close) {
+      return;
+    }
+    else if (has_flag(token.flag, Token_Flag_wasnewline)
+          && token.indent <= open_indent) {
+      return;
+    }
+    parse_advance(parser);
+  }
+}
+
+B8 parse_expect_close(Parser* parser, Token open, Token_Kind close, I16 open_indent) {
+  Token token = *parse_peek(parser);
+  if (token.kind == close) {
+    parse_advance(parser);
+    return true;
+  }
+  parse_unclosed(parser, open, close, token.loc);
+  parser->panic = true;
+  parse_recover_delimiter(parser, open, close, open_indent);
+  parser->panic = false;
+  return false;
+}
+
+B8 parse_expect_token(Parser* parser, Token_Kind kind) {
+  Token token = *parse_peek(parser);
+  if (token.kind == kind) {
+    parse_advance(parser);
+    return true;
+  }
+  return parse_expected(parser, token, kind);
+}
+
+Ast_Node* parse_error_node(Parser* parser, Loc loc) {
+  return ast_new_error(parser->perm_arena, loc);
 }
 
 void parse_list_end(Parser* parser, Ast_List* list) {
@@ -549,8 +764,22 @@ Ast_List* parse_list_perm(Parser* parser, Ast_List* temp_list) {
   return perm_list;
 }
 
-void parse_decls_push(Parser* parser, Ast_Decls* decls, Str* name, Ast_Node* rhs) {
-  Ast_Decl decl = { name, rhs };
+void parse_decls_push(Parser* parser, Ast_Decls* decls, Str* name, Ast_Node* rhs, Loc loc) {
+  for (I32 i = 0; i < decls->length; i++) {
+    Ast_Decl* previous = &decls->base[i];
+    if (previous->name == name) {
+      Diag* diag = diag_error(parser->diags, Diag_Code_duplicate_declaration, loc);
+      if (diag) {
+        diag->data.name.name = name;
+        I32 parent = (I32)(diag - parser->diags->base);
+        Diag* note = diag_note(parser->diags, parent,
+                               Diag_Code_previous_declaration, previous->loc);
+        if (note) note->data.name.name = name;
+      }
+      return;
+    }
+  }
+  Ast_Decl decl = { name, rhs, loc };
   fa_extend(parser->decls_arena, decls, decl);
 }
 
@@ -559,11 +788,9 @@ Hash_Map* parse_decls_perm(Parser* parser, Ast_Decls* temp_list) {
   *map = hash_map_init(parser->perm_arena, temp_list->length+1);
   for (I32 i = 0; i < temp_list->length; i++) {
     Ast_Decl decl = temp_list->base[i];
-    {
-      Symbol* sym = hash_map_get(map, decl.name);
-      if (sym) assert(0);
-    }
-    Symbol* sym = arena_push(parser->perm_arena, sizeof(Symbol));
+    Symbol* sym = hash_map_get(map, decl.name);
+    if (sym) continue;
+    sym = arena_push_zero(parser->perm_arena, sizeof(Symbol));
     sym->ast = decl.rhs;
     hash_map_put(map, decl.name, sym);
   }
@@ -573,27 +800,36 @@ Hash_Map* parse_decls_perm(Parser* parser, Ast_Decls* temp_list) {
 
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_match);
 Ast_Node* parse_statement(Parser* parser);
-Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind);
+Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open);
 
 Ast_Node* parse_new_unary(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
   Ast_Node* node = ast_new_node(parser->perm_arena, kind);
   node->unary = lhs;
+  if (lhs) node->loc = lhs->loc;
   return node;
 }
 
 Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs, I32 token_flags) {
   I32 right_precedence = parse_right_precedence(kind, token_flags);
   Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+  if (rhs && rhs->kind == Ast_Kind_error) {
+    return rhs;
+  }
   Ast_Node* node = ast_new_node(parser->perm_arena, kind);
   node->binary.lhs = lhs;
   node->binary.rhs = rhs;
+  node->loc = loc_join(lhs ? lhs->loc : LOC_NONE, rhs ? rhs->loc : LOC_NONE);
   return node;
 }
 
 Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to_match) {
   Ast_Node* node = lhs;
+  if (node && node->kind == Ast_Kind_error) return node;
   while (true) {
-    Token token = parser->tokens.base[parser->tok++];
+    if (node && node->kind == Ast_Kind_error) return node;
+    if (parse_at_end(parser)) return node;
+    Token token = *parse_peek(parser);
+    parse_advance(parser);
     switch (token.kind) {
     case Token_Kind_arrow:
     case Token_Kind_dot:
@@ -611,7 +847,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
         node = parse_new_infix(parser, kind, lhs, token.flag);
       }
       else {
-        parser->tok--;
+        parse_retreat(parser);
         return node;
       }
     } break;
@@ -622,12 +858,14 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
         lhs = node;
         I32 right_precedence = parse_right_precedence(kind, token.flag);
         Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+        if (rhs && rhs->kind == Ast_Kind_error) return rhs;
         node = ast_new_node(parser->perm_arena, kind);
         node->binary.lhs = rhs;
         node->binary.rhs = lhs;
+        node->loc = loc_join(rhs ? rhs->loc : LOC_NONE, lhs ? lhs->loc : LOC_NONE);
       }
       else {
-        parser->tok--;
+        parse_retreat(parser);
         return node;
       }
     } break;
@@ -637,10 +875,11 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       if (precedence >= precedence_to_match) {
         lhs = node;
         node = parse_new_infix(parser, kind, lhs, token.flag);
-        parse_expect_token(parser, Token_Kind_brace_close);
+        if (node->kind == Ast_Kind_error) return node;
+        parse_expect_close(parser, token, Token_Kind_brace_close, token.indent);
       }
       else {
-        parser->tok--;
+        parse_retreat(parser);
         return node;
       }
     } break;
@@ -652,12 +891,12 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
         node = parse_new_unary(parser, kind, lhs);
       }
       else {
-        parser->tok--;
+        parse_retreat(parser);
         return node;
       }
     } break;
     default: {
-      parser->tok--;
+      parse_retreat(parser);
       if (has_flag(token.kind, Token_Kind_Flag_call_rhs) && !has_flag(token.flag, Token_Flag_wasnewline)) {
         Ast_Kind kind = Ast_Kind_call;
         I32 precedence = parse_left_precedence(kind, token.flag);
@@ -666,9 +905,11 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
           Token left_token = parser->tokens.base[parser->tok-1];
           I32 right_precedence = parse_right_precedence(kind, left_token.flag);
           Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+          if (rhs && rhs->kind == Ast_Kind_error) return rhs;
           node = ast_new_node(parser->perm_arena, Ast_Kind_call);
           node->binary.lhs = lhs;
           node->binary.rhs = rhs;
+          node->loc = loc_join(lhs ? lhs->loc : LOC_NONE, rhs ? rhs->loc : LOC_NONE);
         }
         else {
           return node;
@@ -683,21 +924,51 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
 }
 
 Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
-  {
-    Token next_token = get(parser->tokens, parser->tok);
-    if ((next_token.flag & Token_Flag_wasnewline) == 0) {
-      Ast_Node* node = parse_statement(parser);
-      return node;
-    }
+  if (parse_at_end(parser)) {
+    Token token = *parse_peek(parser);
+    parse_diag(parser, Diag_Code_expected_block, token.loc);
+    parser->panic = true;
+    return parse_error_node(parser, token.loc);
   }
+
+  Token next_token = *parse_peek(parser);
+  if ((next_token.flag & Token_Flag_wasnewline) == 0) {
+    return parse_statement(parser);
+  }
+
   Ast_List* fa_temp(parser->list_arena, temp);
-  while (true) {
-    Ast_Node* node = parse_statement(parser);
-    parse_list_push(parser, temp, node);
-    Token next_token = get(parser->tokens, parser->tok);
-    if (next_token.indent <= indent) {
+  while (!parse_at_end(parser)) {
+    parser->panic = false;
+    next_token = *parse_peek(parser);
+    if (has_flag(next_token.flag, Token_Flag_wasnewline)
+        && next_token.indent <= indent) {
       break;
     }
+    if (next_token.kind == Token_Kind_curly_close) {
+      break;
+    }
+    if (next_token.kind == Token_Kind_semicolon) {
+      parse_advance(parser);
+      continue;
+    }
+    I32 before = parser->tok;
+    Ast_Node* node = parse_statement(parser);
+    if (node) {
+      parse_list_push(parser, temp, node);
+    }
+    if (parser->tok == before) {
+      parse_sync(parser, next_token.indent);
+      if (parser->tok == before) {
+        parse_advance(parser);
+      }
+    }
+    while (parse_match_token(parser, Token_Kind_semicolon)) {}
+  }
+  if (temp->length == 0) {
+    Token token = *parse_peek(parser);
+    parse_diag(parser, Diag_Code_expected_block, token.loc);
+    parser->panic = true;
+    return parse_error_node(parser, token.loc);
   }
   Ast_Node* node = ast_new_node(parser->perm_arena, Ast_Kind_iblock);
   node->list = parse_list_perm(parser, temp);
@@ -705,15 +976,22 @@ Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
 }
 
 Ast_Node* parse_prefix_or_atom(Parser* parser) {
-  Ast_Node* node = 0;
-  Token token = parser->tokens.base[parser->tok++];
+  if (parse_at_end(parser)) return NULL;
+  Token token = *parse_peek(parser);
+  parse_advance(parser);
+  Ast_Node* node = NULL;
   switch (token.kind) {
+  case Token_Kind_error: {
+    node = ast_new_error(parser->perm_arena, token.loc);
+  } break;
   case Token_Kind_sharp: {
     Ast_Kind kind = Ast_Kind_run;
-    I32 precedence = parse_right_precedence(Ast_Kind_run, token.flag);
+    I32 precedence = parse_right_precedence(kind, token.flag);
     Ast_Node* unary = parse_new_expression(parser, precedence);
+    if (unary && unary->kind == Ast_Kind_error) return unary;
     node = ast_new_node(parser->perm_arena, kind);
     node->unary = unary;
+    node->loc = loc_join(token.loc, unary ? unary->loc : LOC_NONE);
   } break;
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
@@ -722,14 +1000,17 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind, token.flag);
     Ast_Node* unary = parse_new_expression(parser, precedence);
+    if (unary && unary->kind == Ast_Kind_error) return unary;
     node = ast_new_node(parser->perm_arena, kind);
     node->unary = unary;
+    node->loc = loc_join(token.loc, unary ? unary->loc : LOC_NONE);
   } break;
   case Token_Kind_str: case Token_Kind_int: case Token_Kind_float: case Token_Kind_name:
   {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
     node = ast_new_node(parser->perm_arena, kind);
     node->bits = token.bits;
+    node->loc  = token.loc;
   } break;
   case Token_Kind_backslash: {
     node = parse_new_expression(parser, 0);
@@ -741,12 +1022,16 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = ast_new_node(parser->perm_arena, Ast_Kind_if_value);
     node->binary.lhs = cond;
     node->binary.rhs = if_value;
+    node->loc = loc_join(token.loc,
+                         loc_join(cond ? cond->loc : LOC_NONE,
+                                  if_value ? if_value->loc : LOC_NONE));
     if (parse_match_token(parser, Token_Kind_else)) {
       Ast_Node* if_node = node;
       Ast_Node* else_value = parse_new_expression(parser, 0);
       node = ast_new_node(parser->perm_arena, Ast_Kind_else_value);
       node->binary.lhs = if_node;
       node->binary.rhs = else_value;
+      node->loc = loc_join(if_node->loc, else_value ? else_value->loc : LOC_NONE);
     }
   } break;
   case Token_Kind_while: {
@@ -756,28 +1041,54 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = ast_new_node(parser->perm_arena, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
+    node->loc = loc_join(token.loc,
+                         loc_join(cond ? cond->loc : LOC_NONE,
+                                  while_block ? while_block->loc : LOC_NONE));
   } break;
   case Token_Kind_paren_open: {
     Ast_List* fa_temp(parser->list_arena, temp);
     B8 is_record = false;
-    while (!parse_match_token(parser, Token_Kind_paren_close)) {
+    B8 closed = false;
+    while (!parse_at_end(parser)) {
+      if (parse_match_token(parser, Token_Kind_paren_close)) {
+        closed = true;
+        break;
+      }
+      if (parse_is_token(parser, Token_Kind_curly_close)) break;
+      I32 before = parser->tok;
       Ast_Node* exp = parse_new_expression(parser, 0);
       if (parse_match_token(parser, Token_Kind_colon)) {
         Ast_Node* lhs = exp;
-        if (lhs->kind == Ast_Kind_name) {
-          Ast_Node* rhs = parse_new_expression(parser, 0);
+        Ast_Node* rhs = parse_new_expression(parser, 0);
+        if (lhs && lhs->kind == Ast_Kind_name) {
           exp = ast_new_node(parser->perm_arena, Ast_Kind_declare);
           exp->declare.name = lhs->str;
           exp->declare.node = rhs;
+          exp->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
         }
         else {
-          assert(0);
+          Diag* diag = parse_diag(parser, Diag_Code_bad_declaration_target,
+                                  lhs ? lhs->loc : token.loc);
+          (void)diag;
+          exp = parse_error_node(parser, lhs ? lhs->loc : token.loc);
         }
       }
       if (parse_match_token(parser, Token_Kind_semicolon)) {
         is_record = true;
       }
-      parse_list_push(parser, temp, exp);
+      if (exp) {
+        parse_list_push(parser, temp, exp);
+      }
+      if (parser->tok == before) {
+        if (parse_is_token(parser, Token_Kind_paren_close)
+            || parse_is_token(parser, Token_Kind_curly_close)) {
+          break;
+        }
+        parse_advance(parser);
+      }
+    }
+    if (!closed) {
+      parse_expect_close(parser, token, Token_Kind_paren_close, token.indent);
     }
     if (!is_record && temp->length == 1) {
       node = temp->base[0];
@@ -786,32 +1097,44 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     else {
       node = ast_new_node(parser->perm_arena, Ast_Kind_record);
       node->list = parse_list_perm(parser, temp);
+      node->loc  = token.loc;
     }
   } break;
   case Token_Kind_curly_open: {
-    Ast_Block block = parse_scope(parser, Token_Kind_curly_close);
+    Ast_Block block = parse_scope(parser, Token_Kind_curly_close, token);
     node = ast_new_node(parser->perm_arena, Ast_Kind_block_value);
     node->block = block;
+    node->loc   = token.loc;
   } break;
   case Token_Kind_brace_open:
   case Token_Kind_brace_prefix_open: {
     Ast_Kind kind = Ast_Kind_array;
-    Ast_Node* lhs = parse_new_expression(parser, 0);
-    parse_expect_token(parser, Token_Kind_brace_close);
-    I32 right_precedence = parse_right_precedence(kind, token.flag);
-    Ast_Node* rhs = parse_new_expression(parser, right_precedence);
-    if (lhs) {
+    if (parse_match_token(parser, Token_Kind_brace_close)) {
+      I32 right_precedence = parse_right_precedence(Ast_Kind_span, token.flag);
+      Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+      if (rhs && rhs->kind == Ast_Kind_error) return rhs;
+      node = ast_new_node(parser->perm_arena, Ast_Kind_span);
+      node->unary = rhs;
+      node->loc = loc_join(token.loc, rhs ? rhs->loc : LOC_NONE);
+    }
+    else {
+      Ast_Node* lhs = parse_new_expression(parser, 0);
+      B8 closed = parse_expect_close(parser, token, Token_Kind_brace_close, token.indent);
+      if (!closed) return parse_error_node(parser, token.loc);
+      if (lhs && lhs->kind == Ast_Kind_error) return lhs;
+      I32 right_precedence = parse_right_precedence(kind, token.flag);
+      Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+      if (rhs && rhs->kind == Ast_Kind_error) return rhs;
       node = ast_new_node(parser->perm_arena, kind);
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
-    }
-    else {
-      node = ast_new_node(parser->perm_arena, Ast_Kind_span);
-      node->unary = rhs;
+      node->loc = loc_join(token.loc,
+                           loc_join(lhs ? lhs->loc : LOC_NONE,
+                                    rhs ? rhs->loc : LOC_NONE));
     }
   } break;
   default:
-    parser->tok--;
+    parse_retreat(parser);
   break;
   }
   return node;
@@ -819,13 +1142,23 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
 
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_match) {
   Ast_Node* prefix_or_atom = parse_prefix_or_atom(parser);
+  if (!prefix_or_atom) {
+    Token token = *parse_peek(parser);
+    parse_expected_expression(parser, token);
+    return parse_error_node(parser, token.loc);
+  }
+  if (prefix_or_atom->kind == Ast_Kind_error) {
+    return prefix_or_atom;
+  }
   Ast_Node* node = parse_infix_or_suffix(parser, prefix_or_atom, precedence_to_match);
   return node;
 }
 
 Ast_Node* parse_statement(Parser* parser) {
-  Ast_Node* node = 0;
-  Token token = parser->tokens.base[parser->tok++];
+  if (parse_at_end(parser)) return NULL;
+  Ast_Node* node = NULL;
+  Token token = *parse_peek(parser);
+  parse_advance(parser);
   switch (token.kind) {
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);
@@ -834,12 +1167,16 @@ Ast_Node* parse_statement(Parser* parser) {
     node = ast_new_node(parser->perm_arena, Ast_Kind_if);
     node->binary.lhs = cond;
     node->binary.rhs = if_block;
+    node->loc = loc_join(token.loc,
+                         loc_join(cond ? cond->loc : LOC_NONE,
+                                  if_block ? if_block->loc : LOC_NONE));
     if (parse_match_token(parser, Token_Kind_else)) {
       Ast_Node* if_node = node;
       Ast_Node* else_block = parse_indented_block(parser, token.indent);
       node = ast_new_node(parser->perm_arena, Ast_Kind_else);
       node->binary.lhs = if_node;
       node->binary.rhs = else_block;
+      node->loc = loc_join(if_node->loc, else_block ? else_block->loc : LOC_NONE);
     }
   } break;
   case Token_Kind_while: {
@@ -849,111 +1186,220 @@ Ast_Node* parse_statement(Parser* parser) {
     node = ast_new_node(parser->perm_arena, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
+    node->loc = loc_join(token.loc, loc_join(cond ? cond->loc : LOC_NONE, while_block ? while_block->loc : LOC_NONE));
   } break;
   // case Token_Kind_for:
   case Token_Kind_return: {
     if (token.flag & Token_Flag_willnewline) {
       node = ast_new_node(parser->perm_arena, Ast_Kind_return);
+      node->loc = token.loc;
     }
     else {
       Ast_Node* unary = parse_new_expression(parser, 0);
-      if (unary) {
-        node = parse_new_unary(parser, Ast_Kind_return_value, unary);
-      }
-      else {
-        node = ast_new_node(parser->perm_arena, Ast_Kind_return);
-      }
+      if (unary && unary->kind == Ast_Kind_error) return unary;
+      node = parse_new_unary(parser, Ast_Kind_return_value, unary);
+      node->loc = loc_join(token.loc, unary ? unary->loc : LOC_NONE);
     }
   } break;
   case Token_Kind_break: {
     if (token.flag & Token_Flag_willnewline) {
       node = ast_new_node(parser->perm_arena, Ast_Kind_break);
+      node->loc = token.loc;
     }
     else {
       Ast_Node* unary = parse_new_expression(parser, 0);
+      if (unary && unary->kind == Ast_Kind_error) return unary;
       node = parse_new_unary(parser, Ast_Kind_break_value, unary);
+      node->loc = loc_join(token.loc, unary ? unary->loc : LOC_NONE);
     }
   } break;
   case Token_Kind_curly_open: {
-    Ast_Block block = parse_scope(parser, Token_Kind_curly_close);
+    Ast_Block block = parse_scope(parser, Token_Kind_curly_close, token);
     node = ast_new_node(parser->perm_arena, Ast_Kind_block);
     node->block = block;
+    node->loc   = token.loc;
   } break;
   default: {
-    parser->tok--;
+    parse_retreat(parser);
     node = parse_new_expression(parser, 0);
-    if (parse_match_token(parser, Token_Kind_equal)) {
+    if (node && node->kind == Ast_Kind_error) return node;
+    if (parse_is_token(parser, Token_Kind_equal)) {
+      Token equal = *parse_peek(parser);
+      parse_advance(parser);
+      if (!parse_expression_is_available(parser, token.indent)) {
+        parse_expected_expression_eol(parser, equal.loc);
+        return parse_error_node(parser, equal.loc);
+      }
       Ast_Node* lhs = node;
       Ast_Node* rhs = parse_new_expression(parser, 0);
+      if (rhs && rhs->kind == Ast_Kind_error) return rhs;
       node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
+      node->loc = loc_join(lhs ? lhs->loc : LOC_NONE, rhs ? rhs->loc : LOC_NONE);
     }
   }
   }
   return node;
 }
 
-Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind) {
+Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
   Ast_Block block = {};
   Ast_List* fa_temp(parser->list_arena, temp);
   Ast_Decls* fa_temp(parser->decls_arena, temp_map);
-  while (!parse_match_token(parser, end_token_kind)) {
+  while (true) {
+    parser->panic = false;
+    if (parse_at_end(parser)) {
+      if (end_token_kind != Token_Kind_source_leave) {
+        parse_unclosed(parser, open, end_token_kind, parse_peek(parser)->loc);
+      }
+      break;
+    }
+
+    Token current = *parse_peek(parser);
+    if (current.kind == end_token_kind) {
+      parse_advance(parser);
+      break;
+    }
+    if (end_token_kind == Token_Kind_curly_close
+        && has_flag(current.flag, Token_Flag_wasnewline)
+        && current.indent <= open.indent) {
+      parse_unclosed(parser, open, end_token_kind, current.loc);
+      break;
+    }
+    if (current.kind == Token_Kind_curly_close
+        || current.kind == Token_Kind_paren_close
+        || current.kind == Token_Kind_brace_close) {
+      parse_unmatched(parser, current);
+      parse_advance(parser);
+      continue;
+    }
+    if (current.kind == Token_Kind_semicolon) {
+      parse_advance(parser);
+      continue;
+    }
+    if (current.kind == Token_Kind_else || current.kind == Token_Kind_do) {
+      parse_unexpected(parser, current);
+      parse_advance(parser);
+      continue;
+    }
+
+    I32 before = parser->tok;
     Ast_Node* node = parse_statement(parser);
-    if (parse_match_token(parser, Token_Kind_colon)) {
-      if (node->kind == Ast_Kind_name) {
-        if (parse_match_token(parser, Token_Kind_equal)) {
+    if (!node) {
+      parse_sync(parser, current.indent);
+      if (parser->tok == before) {
+        parse_advance(parser);
+      }
+      continue;
+    }
+    if (parser->tok == before) {
+      parse_sync(parser, current.indent);
+      if (parser->tok == before) {
+        parse_advance(parser);
+      }
+      continue;
+    }
+
+    if (parse_is_token(parser, Token_Kind_colon)) {
+      Token colon = *parse_peek(parser);
+      parse_advance(parser);
+      if (!parse_expression_is_available(parser, current.indent)) {
+        parse_expected_expression_eol(parser, colon.loc);
+        node = parse_error_node(parser, current.loc);
+      }
+      else if (node->kind == Ast_Kind_name) {
+        if (parse_is_token(parser, Token_Kind_equal)) {
           // name : = exp
-          Ast_Node* lhs = node;
-          Ast_Node* rhs = parse_new_expression(parser, 0);
-          parse_decls_push(parser, temp_map, lhs->str, rhs);
-          node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
-          node->binary.lhs = lhs;
-          node->binary.rhs = rhs;
-          parse_list_push(parser, temp, node);
+          Token equal = *parse_peek(parser);
+          parse_advance(parser);
+          if (!parse_expression_is_available(parser, current.indent)) {
+            parse_expected_expression_eol(parser, equal.loc);
+            node = parse_error_node(parser, equal.loc);
+          }
+          else {
+            Ast_Node* lhs = node;
+            Ast_Node* rhs = parse_new_expression(parser, 0);
+            if (rhs && rhs->kind == Ast_Kind_error) {
+              node = rhs;
+            }
+            else {
+              parse_decls_push(parser, temp_map, lhs->str, rhs, lhs->loc);
+              node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
+              node->binary.lhs = lhs;
+              node->binary.rhs = rhs;
+              node->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
+              parse_list_push(parser, temp, node);
+            }
+          }
         }
         else {
           // name : exp
           Ast_Node* decl_rhs = parse_new_expression(parser, 0);
-          parse_decls_push(parser, temp_map, node->str, decl_rhs);
-          if (parse_match_token(parser, Token_Kind_equal)) {
-            // name : exp = exp
-            Ast_Node* lhs = node;
-            Ast_Node* rhs = parse_new_expression(parser, 0);
-            node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
-            node->binary.lhs = lhs;
-            node->binary.rhs = rhs;
-            parse_list_push(parser, temp, node);
+          if (decl_rhs && decl_rhs->kind == Ast_Kind_error) {
+            node = decl_rhs;
           }
           else {
-            node = 0;
+            parse_decls_push(parser, temp_map, node->str, decl_rhs, node->loc);
+            if (parse_is_token(parser, Token_Kind_equal)) {
+              // name : exp = exp
+              Token equal = *parse_peek(parser);
+              parse_advance(parser);
+              if (!parse_expression_is_available(parser, current.indent)) {
+                parse_expected_expression_eol(parser, equal.loc);
+                node = parse_error_node(parser, equal.loc);
+              }
+              else {
+                Ast_Node* lhs = node;
+                Ast_Node* rhs = parse_new_expression(parser, 0);
+                if (rhs && rhs->kind == Ast_Kind_error) {
+                  node = rhs;
+                }
+                else {
+                  node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
+                  node->binary.lhs = lhs;
+                  node->binary.rhs = rhs;
+                  node->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
+                  parse_list_push(parser, temp, node);
+                }
+              }
+            }
+            else {
+              node = NULL;
+            }
           }
         }
       }
       else {
-        assert(0);
+        Diag* diag = parse_diag(parser, Diag_Code_bad_declaration_target, node->loc);
+        (void)diag;
+        parse_sync(parser, current.indent);
+        node = parse_error_node(parser, node->loc);
       }
     }
     else {
       parse_list_push(parser, temp, node);
     }
-    parse_match_token(parser, Token_Kind_semicolon);
+
+    while (parse_match_token(parser, Token_Kind_semicolon)) {}
   }
   block.list = parse_list_perm(parser, temp);
   block.scope = parse_decls_perm(parser, temp_map);
   return block;
 }
 
-Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
+Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens, Diags* diags) {
   Arena temp_ast_arena  = arena_init(perm_arena->capacity);
-  Arena temp_map_arena = arena_init(perm_arena->capacity);
+  Arena temp_map_arena  = arena_init(perm_arena->capacity);
   Parser parser = {0};
   parser.perm_arena = perm_arena;
   parser.list_arena = &temp_ast_arena;
   parser.decls_arena = &temp_map_arena;
   parser.tokens = tokens;
   parser.tok    = 1;
-  Ast_Block block = parse_scope(&parser, Token_Kind_source_leave);
+  parser.diags  = diags;
+  parser.last_error_tok = -1;
+  Ast_Block block = parse_scope(&parser, Token_Kind_source_leave, (Token){0});
   arena_free(&temp_ast_arena);
   arena_free(&temp_map_arena);
   return block;
@@ -963,8 +1409,11 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
   Arena arena = arena_init(KB(1) * source_length);
   str_init(&arena, 2*source_length);
-  Tokens    tokens = lex_source(&arena, file_name, source);
-  Ast_Block ast    = parse_tokens(&arena, tokens);
+  Source_Map sources = {0};
+  File_Id   file   = source_add(&sources, &arena, file_name, source, strlen(source));
+  Diags     diags  = diags_init(&arena, 256);
+  Tokens    tokens = lex_source(&arena, &sources, file, &diags);
+  Ast_Block ast    = parse_tokens(&arena, tokens, &diags);
   C8*       buffer = arena_push(&arena, 4*source_length);
   Cstr      result = cstr_from_ast(buffer, ast);
   test_at_source(result, expected, file_name, line, source);
@@ -973,12 +1422,124 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
+void _test_diag(Cstr source, I32 expected_errors, Diag_Code expected_code,
+                B8 expect_note, Cstr file_name, I32 line) {
+  I32 source_length = strlen(source) + 2;
+  Arena arena = arena_init(KB(1) * source_length);
+  str_init(&arena, 2*source_length);
+  Source_Map sources = {0};
+  File_Id file = source_add(&sources, &arena, file_name, source, strlen(source));
+  Diags diags = diags_init(&arena, 256);
+  Tokens tokens = lex_source(&arena, &sources, file, &diags);
+  parse_tokens(&arena, tokens, &diags);
+
+  B8 found_code = false;
+  B8 found_note = false;
+  for (I32 i = 0; i < diags.length; i++) {
+    Diag* diag = &diags.base[i];
+    if (diag->severity == Diag_Error && diag->code == expected_code) {
+      found_code = true;
+    }
+    if (diag->severity == Diag_Note) {
+      found_note = true;
+    }
+  }
+
+  if (diags.error_count != expected_errors
+  || (expected_errors > 0 && !found_code)
+  || (expect_note && !found_note)) {
+    printf("diagnostic test failed at %s:%d for source: %s\n", file_name, line, source);
+    printf("expected %d error(s) with code %s%s, got %d error(s)\n",
+           expected_errors, cstr_from_diag_code(expected_code),
+           expect_note ? " and a note" : "", diags.error_count);
+    for (I32 i = 0; i < diags.length; i++) {
+      Diag* diag = &diags.base[i];
+      printf("  %s[%s] at %d:%d\n",
+             diag->severity == Diag_Error ? "error" :
+             diag->severity == Diag_Warning ? "warning" : "note",
+             cstr_from_diag_code(diag->code),
+             source_line_index(source_get(&sources, diag->loc.file), diag->loc.start),
+             source_line_column(source_get(&sources, diag->loc.file), diag->loc.start));
+    }
+    fflush(stdout);
+    assert(0);
+  }
+  arena_free(&arena);
+}
+
+#define test_diag(source, errors, code, note) \
+  _test_diag(source, errors, code, note, __FILE__, __LINE__)
+
+void _test_diag_render(void) {
+  Cstr source = "a : 1\na : 2";
+  I32 source_length = strlen(source) + 2;
+  Arena arena = arena_init(KB(1) * source_length);
+  str_init(&arena, 2*source_length);
+  Source_Map sources = {0};
+  File_Id file = source_add(&sources, &arena, "test.i", source, strlen(source));
+  Diags diags = diags_init(&arena, 256);
+  Tokens tokens = lex_source(&arena, &sources, file, &diags);
+  parse_tokens(&arena, tokens, &diags);
+
+  FILE* out = tmpfile();
+  assert(out);
+  diag_print_all(&diags, &sources, out, false);
+  fflush(out);
+  rewind(out);
+  C8 buffer[4096];
+  Umi length = fread(buffer, 1, sizeof(buffer) - 1, out);
+  buffer[length] = '\0';
+  fclose(out);
+
+  Cstr expected =
+    "error[P006]: duplicate declaration of 'a'\n"
+    " --> test.i:2:1\n"
+    "  |\n"
+    "2 | a : 2\n"
+    "  | ^\n"
+    "note: 'a' was first declared here\n"
+    " --> test.i:1:1\n"
+    "  |\n"
+    "1 | a : 1\n"
+    "  | ^\n"
+    "1 error, 0 warnings\n";
+  if (strcmp(buffer, expected) != 0) {
+    printf("diagnostic render test failed\nexpected:\n%s\nactual:\n%s\n",
+           expected, buffer);
+    fflush(stdout);
+    assert(0);
+  }
+  arena_free(&arena);
+}
+
+void diag_test(void) {
+  test_diag("a : 1 $ 2", 1, Diag_Code_unknown_character, false);
+  test_diag("a : 1 $ 2", 1, Diag_Code_unknown_character, false);
+  test_diag("a : 0x", 1, Diag_Code_missing_digits, false);
+  test_diag("a : 0b102", 1, Diag_Code_invalid_digit, false);
+  test_diag("a : \"unterminated", 1, Diag_Code_unterminated_string, false);
+  test_diag("/* unterminated", 1, Diag_Code_unterminated_comment, false);
+  test_diag("a : ,", 1, Diag_Code_expected_expression, false);
+  test_diag("a :", 1, Diag_Code_expected_expression, false);
+  test_diag("a =", 1, Diag_Code_expected_expression, false);
+  test_diag("a : =\nb : 2", 1, Diag_Code_expected_expression, false);
+  test_diag("1 : 2", 1, Diag_Code_bad_declaration_target, false);
+  test_diag("a : (1", 1, Diag_Code_unclosed_delimiter, true);
+  test_diag("if 1\na : 2", 1, Diag_Code_expected_block, false);
+  test_diag("}", 1, Diag_Code_unmatched_delimiter, false);
+  test_diag("a : 1\na : 2", 1, Diag_Code_duplicate_declaration, true);
+  test_diag("#1", 0, Diag_Code_none, false);
+  _test_diag_render();
+}
+
 void parse_test(void) {
-  test("a b->c",     "(bits 32)");
-  test("foo \"Hi\"",     "(bits 32)");
-  test("[]1",     "(bits 32)");
-  test("bits 32",     "(bits 32)");
-  test("bits 32 (0..9)",     "(bits 32)");
+  test("a b->c",        "(a (b -> c))");
+  test("foo \"Hi\"",    "(foo \"Hi\")");
+  test("[]1",           "[]1");
+  test("bits 32",       "(bits 32)");
+  test("bits 32 (0..9)", "((bits 32) (0 .. 9))");
+
+  test("a[1]", "((bits 32) (0 .. 9))");
   return;
 
   test("a:1",            "a : 1; ");
