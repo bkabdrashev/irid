@@ -961,12 +961,12 @@ Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens) {
 
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
-  Arena arena   = arena_init(KB(1) * source_length);
+  Arena arena = arena_init(KB(1) * source_length);
   str_init(&arena, 2*source_length);
-  Tokens tokens = lex_source(&arena, source);
-  Ast_Block ast = parse_tokens(&arena, tokens);
-  C8* buffer    = arena_push(&arena, 4*source_length);
-  Cstr result   = cstr_from_ast(buffer, ast);
+  Tokens    tokens = lex_source(&arena, file_name, source);
+  Ast_Block ast    = parse_tokens(&arena, tokens);
+  C8*       buffer = arena_push(&arena, 4*source_length);
+  Cstr      result = cstr_from_ast(buffer, ast);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
 }
@@ -974,12 +974,12 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  return;
   test("a b->c",     "(bits 32)");
   test("foo \"Hi\"",     "(bits 32)");
   test("[]1",     "(bits 32)");
   test("bits 32",     "(bits 32)");
   test("bits 32 (0..9)",     "(bits 32)");
+  return;
 
   test("a:1",            "a : 1; ");
 

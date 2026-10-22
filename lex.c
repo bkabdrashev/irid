@@ -66,6 +66,9 @@ typedef struct {
   Token_Kind kind;
   Token_Flag flag;
   I16 indent;
+  Cstr file_path;
+  I32 line;
+  I32 column;
   union {
     U64  bits;
     I64  i64;
@@ -85,6 +88,8 @@ typedef struct {
   B8   wasnewline;
   B8   wasspace;
   I16  indent;
+  I32  line;
+  I32  column;
 } Lexer;
 
 void tokens_push(Tokens* tokens, Token item) {
@@ -105,34 +110,43 @@ Token* tokens_top(Tokens* token) {
 
 Lexer lexer = {0};
 
-Tokens lex_source(Arena* arena, Cstr source) {
+void lex_advance() {
+  lexer.stream++;
+  lexer.column++;
+}
+
+Tokens lex_source(Arena* arena, Cstr file_path, Cstr source) {
   Tokens slice_token = {0};
   Umi source_length = strlen(source);
   slice_token.base = arena_push(arena, sizeof(Token) * (source_length + 2));
   lexer.source = source;
   lexer.stream = source;
   lexer.wasnewline = true;
-  lexer.indent = 0;
-  tokens_push(&slice_token, (Token){Token_Kind_source_enter, 0, 0, {0}});
+  lexer.indent    = 0;
+  lexer.line      = 1;
+  lexer.column    = 1;
+  tokens_push(&slice_token, (Token){Token_Kind_source_enter, 0, 0, 0, 0, 0, {0}});
 
   while (*lexer.stream) {
     Token token = {0};
     switch (*lexer.stream) {
     case ' ':
-      lexer.stream++;
+      lex_advance();
       lexer.wasspace = true;
     continue;
     case '\t':
-      lexer.stream++;
+      lex_advance();
       lexer.wasspace = true;
     continue;
     case '\n': case '\r':
       lexer.indent = 0;
       lexer.wasnewline = true;
       while (true) {
-        lexer.stream++;
+        lex_advance();
         if (*lexer.stream == '\n' || *lexer.stream == '\r') {
           lexer.indent = 0;
+          lexer.column = 0;
+          lexer.line  += 1;
         }
         else if (*lexer.stream == ' ') {
           lexer.indent += 1;
@@ -151,13 +165,13 @@ Tokens lex_source(Arena* arena, Cstr source) {
       Cstr number_start = lexer.stream;
       I32 base = 10;
       if (*lexer.stream == '0') {
-        lexer.stream++;
+        lex_advance();
         if (tolower(*lexer.stream) == 'x') {
-          lexer.stream++;
+          lex_advance();
           base = 16;
         }
         else if (tolower(*lexer.stream) == 'b') {
-          lexer.stream++;
+          lex_advance();
           base = 2;
         }
         else if (isdigit(*lexer.stream)) {
@@ -167,7 +181,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
       U64 val = 0;
       for (;;) {
         if (*lexer.stream == '_') {
-          lexer.stream++;
+          lex_advance();
           continue;
         }
         if (base == 10 && (*lexer.stream == 'e' || *lexer.stream == 'E')
@@ -199,7 +213,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
           digit = 0;
         }
         val = val*base + digit;
-        lexer.stream++;
+        lex_advance();
       }
       B8 is_float = false;
       if (base == 10) {
@@ -222,24 +236,27 @@ Tokens lex_source(Arena* arena, Cstr source) {
           }
         }
         if (*lexer.stream == '.') {
-          buffer[length++] = *lexer.stream++;
+          buffer[length++] = *lexer.stream;
+          lex_advance();
           while (isdigit((U8)*lexer.stream) || *lexer.stream == '_') {
             if (*lexer.stream != '_') {
               buffer[length++] = *lexer.stream;
             }
-            lexer.stream++;
+            lex_advance();
           }
         }
         if (*lexer.stream == 'e' || *lexer.stream == 'E') {
-          buffer[length++] = *lexer.stream++;
+          buffer[length++] = *lexer.stream;
+          lex_advance();
           if (*lexer.stream == '+' || *lexer.stream == '-') {
-            buffer[length++] = *lexer.stream++;
+            buffer[length++] = *lexer.stream;
+            lex_advance();
           }
           while (isdigit((U8)*lexer.stream) || *lexer.stream == '_') {
             if (*lexer.stream != '_') {
               buffer[length++] = *lexer.stream;
             }
-            lexer.stream++;
+            lex_advance();
           }
         }
         assert(length < (I32)sizeof(buffer));
@@ -261,57 +278,57 @@ Tokens lex_source(Arena* arena, Cstr source) {
       Cstr start = lexer.stream;
       token.kind = Token_Kind_name;
       while (isalnum(*lexer.stream) || *lexer.stream == '_') {
-        lexer.stream++;
+        lex_advance();
       }
       token.str = str_from_range(start, lexer.stream);
       token.kind  = (Token_Kind)token.str->kind;
     } break;
     case '|': {
       token.kind = Token_Kind_pipe;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '^': {
       token.kind = Token_Kind_pike;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '&': {
       token.kind = Token_Kind_ampersand;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
       if (lexer.wasnewline && !isspace(lexer.stream[1])) {
         token.kind = Token_Kind_plus_prefix;
       }
-      lexer.stream++;
+      lex_advance();
     } break;
     case '-': {
       token.kind = Token_Kind_minus;
-      lexer.stream++;
+      lex_advance();
       if (lexer.wasnewline && !isspace(lexer.stream[1])) {
         token.kind = Token_Kind_minus_prefix;
       }
       else if (*lexer.stream == '>') {
         token.kind = Token_Kind_arrow;
-        lexer.stream++;
+        lex_advance();
       }
     } break;
     case '*': {
       token.kind = Token_Kind_star;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '/': {
       token.kind = Token_Kind_slash;
-      lexer.stream++;
+      lex_advance();
       if (*lexer.stream == '/') {
-        lexer.stream++;
+        lex_advance();
         while (*lexer.stream && *lexer.stream != '\n') {
-          lexer.stream++;
+          lex_advance();
         }
         continue;
       }
       else if (*lexer.stream == '*') {
-        lexer.stream++;
+        lex_advance();
         I32 level = 1;
         while (*lexer.stream && level > 0) {
           if (lexer.stream[0] == '/' && lexer.stream[1] == '*') {
@@ -323,7 +340,7 @@ Tokens lex_source(Arena* arena, Cstr source) {
             lexer.stream += 2;
           }
           else {
-            lexer.stream++;
+            lex_advance();
           }
         }
         continue;
@@ -331,120 +348,120 @@ Tokens lex_source(Arena* arena, Cstr source) {
     } break;
     case '%': {
       token.kind = Token_Kind_percent;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '!': {
       token.kind = Token_Kind_bang;
-      lexer.stream++;
+      lex_advance();
       if (*lexer.stream == '=') {
         token.kind = Token_Kind_bang_equal;
-        lexer.stream++;
+        lex_advance();
       }
     } break;
     case '=': {
       token.kind = Token_Kind_equal;
-      lexer.stream++;
+      lex_advance();
       if (*lexer.stream == '=') {
         token.kind = Token_Kind_equal_equal;
-        lexer.stream++;
+        lex_advance();
       }
     } break;
     case '<': {
       token.kind = Token_Kind_less;
-      lexer.stream++;
+      lex_advance();
       if (*lexer.stream == '=') {
         token.kind = Token_Kind_less_equal;
-        lexer.stream++;
+        lex_advance();
       }
     } break;
     case '>': {
       token.kind = Token_Kind_greater;
-      lexer.stream++;
+      lex_advance();
       if (*lexer.stream == '=') {
         token.kind = Token_Kind_greater_equal;
-        lexer.stream++;
+        lex_advance();
       }
     } break;
     case ':': {
       token.kind = Token_Kind_colon;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '.': {
       token.kind = Token_Kind_dot;
-      lexer.stream++;
+      lex_advance();
       if (*lexer.stream == '.') {
         token.kind = Token_Kind_dot_dot;
-        lexer.stream++;
+        lex_advance();
       }
     } break;
     case '(': {
       token.kind = Token_Kind_paren_open;
-      lexer.stream++;
+      lex_advance();
     } break;
     case ')': {
       token.kind = Token_Kind_paren_close;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '[': {
       token.kind = Token_Kind_brace_open;
       if (lexer.wasnewline) {
         token.kind = Token_Kind_brace_prefix_open;
       }
-      lexer.stream++;
+      lex_advance();
     } break;
     case ']': {
       token.kind = Token_Kind_brace_close;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '{': {
       token.kind = Token_Kind_curly_open;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '}': {
       token.kind = Token_Kind_curly_close;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '@': {
       token.kind = Token_Kind_at;
       if (lexer.wasnewline) {
         token.kind = Token_Kind_at_prefix;
       }
-      lexer.stream++;
+      lex_advance();
     } break;
     case ';': {
       token.kind = Token_Kind_semicolon;
-      lexer.stream++;
+      lex_advance();
     } break;
     case ',': {
       token.kind = Token_Kind_comma;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '\\': {
       token.kind = Token_Kind_backslash;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '\'': {
       token.kind = Token_Kind_quote;
-      lexer.stream++;
+      lex_advance();
     } break;
     case '"': {
-      lexer.stream++;
+      lex_advance();
       Cstr start = lexer.stream;
       token.kind = Token_Kind_str;
       while (*lexer.stream != '"') {
-        lexer.stream++;
+        lex_advance();
       }
       token.str = str_from_range(start, lexer.stream);
-      lexer.stream++;
+      lex_advance();
     } break;
     case '#': {
       token.kind = Token_Kind_sharp;
-      lexer.stream++;
+      lex_advance();
     } break;
     default: {
       printf("unknown character '%c'\n", *lexer.stream);
       assert(0);
-      lexer.stream++;
+      lex_advance();
     } break;
     }
     if (lexer.wasnewline) {
@@ -458,6 +475,8 @@ Tokens lex_source(Arena* arena, Cstr source) {
       top->flag |= Token_Flag_willspace;
     }
     token.indent = lexer.indent;
+    token.column = lexer.column;
+    token.line   = lexer.line;
 
     // NOTE: wasnewline checks whether rhs should be disabled
     lexer.wasnewline = false;

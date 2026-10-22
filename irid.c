@@ -8,10 +8,10 @@ void irid_run_path(Cstr path) {
   Arena arena         = arena_init(KB(4) * length);
                         str_init(&arena, 2*length);
 
-  Tokens builtin_tokens = lex_source(&arena, builtin);
+  Tokens builtin_tokens = lex_source(&arena, "basic.i", builtin);
   Ast_Block ast         = parse_tokens(&arena, builtin_tokens);
 
-  Tokens source_tokens = lex_source(&arena, source);
+  Tokens source_tokens = lex_source(&arena, path, source);
   Ast_Block source_ast = parse_tokens(&arena, source_tokens);
 
   Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);

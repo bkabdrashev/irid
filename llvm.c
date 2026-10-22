@@ -1011,10 +1011,10 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Arena arena          = arena_init(KB(4) * length);
                          str_init(&arena, 2*length);
 
-  Tokens basic_tokens   = lex_source(&arena, basic);
+  Tokens basic_tokens   = lex_source(&arena, "basic.i", basic);
   Ast_Block ast         = parse_tokens(&arena, basic_tokens);
 
-  Tokens source_tokens = lex_source(&arena, source);
+  Tokens source_tokens = lex_source(&arena, file_name, source);
   Ast_Block source_ast = parse_tokens(&arena, source_tokens);
 
   Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
