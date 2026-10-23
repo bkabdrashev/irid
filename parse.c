@@ -606,12 +606,9 @@ void parse_expected_expression_eol(Parser* parser, Loc loc) {
   parser->panic = true;
 }
 
-B8 parse_expression_is_available(Parser* parser, I16 indent) {
+B8 parse_expression_is_available(Parser* parser) {
   Token next = *parse_peek(parser);
   if (next.kind == Token_Kind_source_leave) return false;
-  if (has_flag(next.flag, Token_Flag_wasnewline) && next.indent <= indent) {
-    return false;
-  }
   return true;
 }
 
@@ -1226,7 +1223,7 @@ Ast_Node* parse_statement(Parser* parser) {
     if (parse_is_token(parser, Token_Kind_equal)) {
       Token equal = *parse_peek(parser);
       parse_advance(parser);
-      if (!parse_expression_is_available(parser, token.indent)) {
+      if (!parse_expression_is_available(parser)) {
         parse_expected_expression_eol(parser, equal.loc);
         return parse_error_node(parser, equal.loc);
       }
@@ -1298,7 +1295,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
     if (parse_is_token(parser, Token_Kind_colon)) {
       Token colon = *parse_peek(parser);
       parse_advance(parser);
-      if (!parse_expression_is_available(parser, current.indent)) {
+      if (!parse_expression_is_available(parser)) {
         parse_expected_expression_eol(parser, colon.loc);
         node = parse_error_node(parser, current.loc);
       }
@@ -1307,7 +1304,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
           // name : = exp
           Token equal = *parse_peek(parser);
           parse_advance(parser);
-          if (!parse_expression_is_available(parser, current.indent)) {
+          if (!parse_expression_is_available(parser)) {
             parse_expected_expression_eol(parser, equal.loc);
             node = parse_error_node(parser, equal.loc);
           }
@@ -1339,7 +1336,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
               // name : exp = exp
               Token equal = *parse_peek(parser);
               parse_advance(parser);
-              if (!parse_expression_is_available(parser, current.indent)) {
+              if (!parse_expression_is_available(parser)) {
                 parse_expected_expression_eol(parser, equal.loc);
                 node = parse_error_node(parser, equal.loc);
               }
@@ -1365,8 +1362,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
         }
       }
       else {
-        Diag* diag = parse_diag(parser, Diag_Code_bad_declaration_target, node->loc);
-        (void)diag;
+        parse_diag(parser, Diag_Code_bad_declaration_target, node->loc);
         parse_sync(parser, current.indent);
         node = parse_error_node(parser, node->loc);
       }
