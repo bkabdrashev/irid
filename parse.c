@@ -1483,6 +1483,14 @@ void _test_diag_render(void) {
   buffer[length] = '\0';
   fclose(out);
 
+#if DIAG_SHOW_COMPILER_LOCATION
+  if (!strstr(buffer, "error[P006]") || !strstr(buffer, "test.i:2:1")
+      || !strstr(buffer, "compiler:")) {
+    printf("diagnostic render test failed\nactual:\n%s\n", buffer);
+    fflush(stdout);
+    assert(0);
+  }
+#else
   Cstr expected =
     "error[P006]: duplicate declaration of 'a'\n"
     " --> test.i:2:1\n"
@@ -1501,6 +1509,7 @@ void _test_diag_render(void) {
     fflush(stdout);
     assert(0);
   }
+#endif
   arena_free(&arena);
 }
 

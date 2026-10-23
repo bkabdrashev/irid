@@ -488,24 +488,27 @@ void sem_fail(void) {
   assert(0);
 }
 
-Diag* sem_diag(Diag_Code code, Loc loc) {
-  return diag_error(sem.diags, code, loc);
+Diag* sem_diag_impl(Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_line) {
+  return diag_error_impl(sem.diags, code, loc, compiler_file, compiler_line);
 }
 
-void sem_error_name(Diag_Code code, Loc loc, Str* name) {
-  Diag* diag = sem_diag(code, loc);
+void sem_error_name_impl(Diag_Code code, Loc loc, Str* name,
+                         Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) diag->data.name.name = name;
   sem_fail();
 }
 
-void sem_error_text(Diag_Code code, Loc loc, Cstr text) {
-  Diag* diag = sem_diag(code, loc);
+void sem_error_text_impl(Diag_Code code, Loc loc, Cstr text,
+                         Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) diag->data.text.text = text;
   sem_fail();
 }
 
-void sem_error_types(Diag_Code code, Loc loc, Cstr expected, Cstr found) {
-  Diag* diag = sem_diag(code, loc);
+void sem_error_types_impl(Diag_Code code, Loc loc, Cstr expected, Cstr found,
+                          Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) {
     diag->data.types.expected = expected;
     diag->data.types.found    = found;
@@ -513,12 +516,16 @@ void sem_error_types(Diag_Code code, Loc loc, Cstr expected, Cstr found) {
   sem_fail();
 }
 
-void sem_error_type(Diag_Code code, Loc loc, Type* type) {
-  sem_error_types(code, loc, 0, sem_type_name(type));
+void sem_error_type_impl(Diag_Code code, Loc loc, Type* type,
+                         Cstr compiler_file, I32 compiler_line) {
+  sem_error_types_impl(code, loc, 0, sem_type_name(type),
+                       compiler_file, compiler_line);
 }
 
-void sem_error_operand(Loc loc, Cstr op, Type* type) {
-  Diag* diag = sem_diag(Diag_Code_invalid_operand, loc);
+void sem_error_operand_impl(Loc loc, Cstr op, Type* type,
+                            Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = sem_diag_impl(Diag_Code_invalid_operand, loc,
+                             compiler_file, compiler_line);
   if (diag) {
     diag->data.operand.op   = op;
     diag->data.operand.type = sem_type_name(type);
@@ -526,15 +533,40 @@ void sem_error_operand(Loc loc, Cstr op, Type* type) {
   sem_fail();
 }
 
-void sem_error_type_mismatch(Loc loc, Type* expected, Type* found) {
-  sem_error_types(Diag_Code_type_mismatch, loc,
-                  sem_type_name(expected), sem_type_name(found));
+void sem_error_type_mismatch_impl(Loc loc, Type* expected, Type* found,
+                                  Cstr compiler_file, I32 compiler_line) {
+  sem_error_types_impl(Diag_Code_type_mismatch, loc,
+                       sem_type_name(expected), sem_type_name(found),
+                       compiler_file, compiler_line);
 }
 
-void sem_error_call_mismatch(Loc loc, Type* expected, Type* found) {
-  sem_error_types(Diag_Code_call_argument_mismatch, loc,
-                  sem_type_name(expected), sem_type_name(found));
+void sem_error_call_mismatch_impl(Loc loc, Type* expected, Type* found,
+                                  Cstr compiler_file, I32 compiler_line) {
+  sem_error_types_impl(Diag_Code_call_argument_mismatch, loc,
+                       sem_type_name(expected), sem_type_name(found),
+                       compiler_file, compiler_line);
 }
+
+#define sem_diag(code, loc) \
+  sem_diag_impl((code), (loc), __FILE__, __LINE__)
+#define sem_error_name(code, loc, name) \
+  sem_error_name_impl((code), (loc), (name), __FILE__, __LINE__)
+#define sem_error_text(code, loc, text) \
+  sem_error_text_impl((code), (loc), (text), __FILE__, __LINE__)
+#define sem_error_types(code, loc, expected, found) \
+  sem_error_types_impl((code), (loc), (expected), (found), __FILE__, __LINE__)
+#define sem_error_type(code, loc, type) \
+  sem_error_type_impl((code), (loc), (type), __FILE__, __LINE__)
+#define sem_error_operand(loc, op, type) \
+  sem_error_operand_impl((loc), (op), (type), __FILE__, __LINE__)
+#define sem_error_type_mismatch(loc, expected, found) \
+  sem_error_type_mismatch_impl((loc), (expected), (found), __FILE__, __LINE__)
+#define sem_error_call_mismatch(loc, expected, found) \
+  sem_error_call_mismatch_impl((loc), (expected), (found), __FILE__, __LINE__)
+#define sem_error_binary_operand(ir, op) \
+  sem_error_binary_operand_impl((ir), (op), __FILE__, __LINE__)
+#define sem_error_unary_operand(ir, op) \
+  sem_error_unary_operand_impl((ir), (op), __FILE__, __LINE__)
 
 I64 scalar_max(Scalar* scalar) {
   return scalar->pairs[scalar->length-1].hi;
@@ -1507,15 +1539,18 @@ Type_Pair type_of_ir_binary(Ir* ir) {
   return result;
 }
 
-void sem_error_binary_operand(Ir* ir, Cstr op) {
+void sem_error_binary_operand_impl(Ir* ir, Cstr op,
+                                   Cstr compiler_file, I32 compiler_line) {
   Type_Pair types = type_of_ir_binary(ir);
   Type* bad = types.one;
   if (bad && bad->kind == Type_Kind_scalar) bad = types.two;
-  sem_error_operand(ir->loc, op, bad);
+  sem_error_operand_impl(ir->loc, op, bad, compiler_file, compiler_line);
 }
 
-void sem_error_unary_operand(Ir* ir, Cstr op) {
-  sem_error_operand(ir->loc, op, type_of_ir(ir->unary));
+void sem_error_unary_operand_impl(Ir* ir, Cstr op,
+                                  Cstr compiler_file, I32 compiler_line) {
+  sem_error_operand_impl(ir->loc, op, type_of_ir(ir->unary),
+                         compiler_file, compiler_line);
 }
 
 Type* type_of_ir_unary(Ir* ir) {

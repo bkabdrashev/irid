@@ -332,8 +332,8 @@ struct Irgen {
 
 Irgen irgen = {};
 
-Diag* irgen_diag(Diag_Code code, Loc loc) {
-  return diag_error(irgen.diags, code, loc);
+Diag* irgen_diag_impl(Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_line) {
+  return diag_error_impl(irgen.diags, code, loc, compiler_file, compiler_line);
 }
 
 void irgen_fail(void) {
@@ -343,22 +343,34 @@ void irgen_fail(void) {
   assert(0);
 }
 
-void irgen_error_name(Diag_Code code, Loc loc, Str* name) {
-  Diag* diag = irgen_diag(code, loc);
+void irgen_error_name_impl(Diag_Code code, Loc loc, Str* name,
+                           Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = irgen_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) diag->data.name.name = name;
   irgen_fail();
 }
 
-void irgen_error_text(Diag_Code code, Loc loc, Cstr text) {
-  Diag* diag = irgen_diag(code, loc);
+void irgen_error_text_impl(Diag_Code code, Loc loc, Cstr text,
+                           Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = irgen_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) diag->data.text.text = text;
   irgen_fail();
 }
 
-void irgen_error_simple(Diag_Code code, Loc loc) {
-  irgen_diag(code, loc);
+void irgen_error_simple_impl(Diag_Code code, Loc loc,
+                             Cstr compiler_file, I32 compiler_line) {
+  irgen_diag_impl(code, loc, compiler_file, compiler_line);
   irgen_fail();
 }
+
+#define irgen_diag(code, loc) \
+  irgen_diag_impl((code), (loc), __FILE__, __LINE__)
+#define irgen_error_name(code, loc, name) \
+  irgen_error_name_impl((code), (loc), (name), __FILE__, __LINE__)
+#define irgen_error_text(code, loc, text) \
+  irgen_error_text_impl((code), (loc), (text), __FILE__, __LINE__)
+#define irgen_error_simple(code, loc) \
+  irgen_error_simple_impl((code), (loc), __FILE__, __LINE__)
 
 Ir_Field irgen_record_get_by_position(Rec* record, I32 position) {
   Ir_Field field = {};

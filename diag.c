@@ -71,7 +71,16 @@ typedef struct {
   Loc           loc;
   Diag_Data     data;
   I32           note_of;
+  Cstr          compiler_file;
+  I32           compiler_line;
 } Diag;
+
+// Toggle this to include the compiler source location that emitted each
+// diagnostic. Useful when a diagnostic points at compiler code rather than
+// user source, or when tracking down an unexpected error.
+#ifndef DIAG_SHOW_COMPILER_LOCATION
+#define DIAG_SHOW_COMPILER_LOCATION 1
+#endif
 
 #define DIAG_ERROR_LIMIT 50
 
@@ -92,7 +101,8 @@ Diags diags_init(Arena* arena, I32 cap) {
   return result;
 }
 
-Diag* diag_push(Diags* diags, Diag_Severity severity, Diag_Code code, Loc loc, I32 note_of) {
+Diag* diag_push_impl(Diags* diags, Diag_Severity severity, Diag_Code code, Loc loc,
+                     I32 note_of, Cstr compiler_file, I32 compiler_line) {
   if (!diags || diags->limit_hit) return NULL;
   if (severity == Diag_Error && diags->error_count >= DIAG_ERROR_LIMIT) {
     diags->limit_hit = true;
@@ -106,10 +116,12 @@ Diag* diag_push(Diags* diags, Diag_Severity severity, Diag_Code code, Loc loc, I
   }
   Diag* diag = &diags->base[diags->length++];
   *diag = (Diag){
-    .severity = severity,
-    .code     = code,
-    .loc      = loc,
-    .note_of  = note_of,
+    .severity      = severity,
+    .code          = code,
+    .loc           = loc,
+    .note_of       = note_of,
+    .compiler_file = compiler_file,
+    .compiler_line = compiler_line,
   };
   if (severity == Diag_Error) {
     diags->error_count += 1;
@@ -124,17 +136,30 @@ B8 diags_has_errors(Diags* diags) {
   return diags && (diags->error_count > 0 || diags->limit_hit);
 }
 
-Diag* diag_error(Diags* diags, Diag_Code code, Loc loc) {
-  return diag_push(diags, Diag_Error, code, loc, -1);
+Diag* diag_error_impl(Diags* diags, Diag_Code code, Loc loc,
+                      Cstr compiler_file, I32 compiler_line) {
+  return diag_push_impl(diags, Diag_Error, code, loc, -1,
+                        compiler_file, compiler_line);
 }
 
-Diag* diag_warning(Diags* diags, Diag_Code code, Loc loc) {
-  return diag_push(diags, Diag_Warning, code, loc, -1);
+Diag* diag_warning_impl(Diags* diags, Diag_Code code, Loc loc,
+                        Cstr compiler_file, I32 compiler_line) {
+  return diag_push_impl(diags, Diag_Warning, code, loc, -1,
+                        compiler_file, compiler_line);
 }
 
-Diag* diag_note(Diags* diags, I32 parent, Diag_Code code, Loc loc) {
-  return diag_push(diags, Diag_Note, code, loc, parent);
+Diag* diag_note_impl(Diags* diags, I32 parent, Diag_Code code, Loc loc,
+                     Cstr compiler_file, I32 compiler_line) {
+  return diag_push_impl(diags, Diag_Note, code, loc, parent,
+                        compiler_file, compiler_line);
 }
+
+#define diag_error(diags, code, loc) \
+  diag_error_impl((diags), (code), (loc), __FILE__, __LINE__)
+#define diag_warning(diags, code, loc) \
+  diag_warning_impl((diags), (code), (loc), __FILE__, __LINE__)
+#define diag_note(diags, parent, code, loc) \
+  diag_note_impl((diags), (parent), (code), (loc), __FILE__, __LINE__)
 
 Cstr cstr_from_diag_code(Diag_Code code) {
   switch (code) {
@@ -546,6 +571,11 @@ static void diag_print_one(FILE* out, Diags* diags, I32 index, Source_Map* sourc
             sev_color, sev, cstr_from_diag_code(diag->code), reset);
   }
   diag_print_message(out, diag, sources);
+#if DIAG_SHOW_COMPILER_LOCATION
+  if (diag->compiler_file) {
+    fprintf(out, " (compiler: %s:%d)", diag->compiler_file, diag->compiler_line);
+  }
+#endif
   fputc('\n', out);
   Cstr caret_color = diag_color_error();
   if (diag->severity == Diag_Warning) caret_color = diag_color_warn();
