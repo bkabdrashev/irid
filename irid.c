@@ -48,8 +48,7 @@ I32 irid_run_path(Cstr path) {
     return 1;
   }
   {
-    C8* buffer           = arena_push(&arena, 64 * length);
-    Cstr result          = cstr_from_funs(funs, buffer);
+    Cstr result          = cstr_from_funs(&arena, funs);
     printf("\n%s", result);
   }
                          sem_funs(&arena, funs, &diags);
@@ -59,8 +58,7 @@ I32 irid_run_path(Cstr path) {
     return 1;
   }
   {
-    C8* buffer           = arena_push(&arena, 64 * length);
-    Cstr result          = cstr_from_sem(funs, buffer);
+    Cstr result          = cstr_from_sem(&arena, funs);
     printf("\n%s", result);
   }
   diag_print_all(&diags, &sources, stderr, color);

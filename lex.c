@@ -570,8 +570,7 @@ Tokens lex_source(Arena* arena, Source_Map* sources, File_Id file, Diags* diags)
 }
 
 Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
-  C8* buffer = arena_push(arena, 64 * slice.length);
-  String_Builder sb = string_builder_begin(buffer);
+  String_Builder sb = string_builder_begin(arena);
   for (Token* token = slice.base; token < slice.base + slice.length; token++) {
     switch (token->kind) {
     case Token_Kind_source_leave:

@@ -1039,8 +1039,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
     assert(0);
   }
   {
-    C8* buffer           = arena_push(&arena, 64 * length);
-    Cstr result          = cstr_from_sem(funs, buffer);
+    Cstr result          = cstr_from_sem(&arena, funs);
     printf("\n%s", result);
   }
                          llvm_funs(&arena, funs);

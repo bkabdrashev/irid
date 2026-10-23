@@ -370,8 +370,8 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   }
 }
 
-Cstr cstr_from_ast(C8* buffer, Ast_Block ast) {
-  String_Builder sb = string_builder_begin(buffer);
+Cstr cstr_from_ast(Arena* arena, Ast_Block ast) {
+  String_Builder sb = string_builder_begin(arena);
   Hash_Map* scope = ast.scope;
   for (I32 i = 0; i < scope->len; i++) {
     Str* str = scope->list[i];
@@ -1406,8 +1406,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   Diags     diags  = diags_init(&arena, 256);
   Tokens    tokens = lex_source(&arena, &sources, file, &diags);
   Ast_Block ast    = parse_tokens(&arena, tokens, &diags);
-  C8*       buffer = arena_push(&arena, 4*source_length);
-  Cstr      result = cstr_from_ast(buffer, ast);
+  Cstr      result = cstr_from_ast(&arena, ast);
   test_at_source(result, expected, file_name, line, source);
   arena_free(&arena);
 }

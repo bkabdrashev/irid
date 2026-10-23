@@ -343,16 +343,16 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
     string_builder_push_cstr(sb, "(");
     string_builder_push_type(sb, block, type->array->of_type);
     string_builder_push_cstr(sb, ")");
-    I32 length = type->array->length;
-    string_builder_push_cstr(sb, "(");
-    for (I32 i = 0; i < length; i++) {
-      Type* item = type->array->types[i];
-      string_builder_push_type(sb, block, item);
-      if (i+1 < length) {
-        string_builder_push_cstr(sb, ", ");
-      }
-    }
-    string_builder_push_cstr(sb, ")");
+    // I32 length = type->array->length;
+    // string_builder_push_cstr(sb, "(");
+    // for (I32 i = 0; i < length; i++) {
+    //   Type* item = type->array->types[i];
+    //   string_builder_push_type(sb, block, item);
+    //   if (i+1 < length) {
+    //     string_builder_push_cstr(sb, ", ");
+    //   }
+    // }
+    // string_builder_push_cstr(sb, ")");
   } break;
   case Type_Kind_join_records: {
     Join* join = type->join;
@@ -370,8 +370,8 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   }
 }
 
-Cstr cstr_from_sem(Funs funs, C8* buffer) {
-  String_Builder sb = string_builder_begin(buffer);
+Cstr cstr_from_sem(Arena* arena, Funs funs) {
+  String_Builder sb = string_builder_begin(arena);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
@@ -462,10 +462,13 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
 
 Cstr sem_type_name(Type* type) {
   if (!type) return "unknown";
-  C8* buffer = arena_push(sem.perm_arena, 8192);
-  String_Builder sb = string_builder_begin(buffer);
+  Arena* temp = sem.temp_arena;
+  String_Builder sb = string_builder_begin(temp);
   string_builder_push_type(&sb, sem.current_block, type);
-  return string_builder_end(&sb);
+  Cstr built = string_builder_end(&sb);
+  C8* result = arena_push(sem.perm_arena, sb.size + 1);
+  memcpy(result, built, sb.size + 1);
+  return result;
 }
 
 Loc sem_loc(Ir* ir) {
@@ -4524,8 +4527,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
     assert(0);
   }
   {
-    C8* buffer           = arena_push(&arena, 64 * length);
-    Cstr result          = cstr_from_funs(funs, buffer);
+    Cstr result          = cstr_from_funs(&arena, funs);
     printf("\n%s", result);
   }
 
@@ -4535,8 +4537,7 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
     assert(0);
   }
   {
-    C8* buffer           = arena_push(&arena, 64 * length);
-    Cstr result          = cstr_from_sem(funs, buffer);
+    Cstr result          = cstr_from_sem(&arena, funs);
     test_at_source(result, expected, file_name, line, source);
   }
   arena_free(&arena);

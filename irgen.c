@@ -651,8 +651,8 @@ void string_builder_push_block(String_Builder* sb, Block* block, I32 indent) {
   }
 }
 
-Cstr cstr_from_funs(Funs funs, C8* buffer) {
-  String_Builder sb = string_builder_begin(buffer);
+Cstr cstr_from_funs(Arena* arena, Funs funs) {
+  String_Builder sb = string_builder_begin(arena);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
     string_builder_push_fun(&sb, fun);
@@ -1604,8 +1604,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 
   Funs funs            = irgen_ast(&arena, ast, length, &diags);
   {
-    C8* buffer           = arena_push(&arena, KB(1) * source_length);
-    Cstr result          = cstr_from_funs(funs, buffer);
+    Cstr result          = cstr_from_funs(&arena, funs);
     test_at_source(result, expected, file_name, line, source);
   }
   arena_free(&arena);
@@ -1615,7 +1614,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a:(x:I32; y:x)", "");
+  // test("a:1; a@.b", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
