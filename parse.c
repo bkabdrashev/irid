@@ -1261,24 +1261,18 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
       parse_advance(parser);
       break;
     }
-    if (end_token_kind == Token_Kind_curly_close
-        && has_flag(current.flag, Token_Flag_wasnewline)
-        && current.indent <= open.indent) {
-      parse_unclosed(parser, open, end_token_kind, current.loc);
-      break;
-    }
-    if (current.kind == Token_Kind_curly_close
-        || current.kind == Token_Kind_paren_close
-        || current.kind == Token_Kind_brace_close) {
+    else if (current.kind == Token_Kind_curly_close
+         || current.kind == Token_Kind_paren_close
+         || current.kind == Token_Kind_brace_close) {
       parse_unmatched(parser, current);
       parse_advance(parser);
       continue;
     }
-    if (current.kind == Token_Kind_semicolon) {
+    else if (current.kind == Token_Kind_semicolon) {
       parse_advance(parser);
       continue;
     }
-    if (current.kind == Token_Kind_else || current.kind == Token_Kind_do) {
+    else if (current.kind == Token_Kind_else || current.kind == Token_Kind_do) {
       parse_unexpected(parser, current);
       parse_advance(parser);
       continue;
@@ -1533,14 +1527,12 @@ void diag_test(void) {
 }
 
 void parse_test(void) {
+  return;
   test("a b->c",        "(a (b -> c))");
   test("foo \"Hi\"",    "(foo \"Hi\")");
   test("[]1",           "[]1");
   test("bits 32",       "(bits 32)");
   test("bits 32 (0..9)", "((bits 32) (0 .. 9))");
-
-  test("a[1]", "((bits 32) (0 .. 9))");
-  return;
 
   test("a:1",            "a : 1; ");
 

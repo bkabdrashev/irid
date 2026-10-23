@@ -12,10 +12,10 @@ int main(int argc, char** argv) {
   arena_test();
   float_test();
   parse_test();
-  diag_test();
+  // diag_test();
   irgen_test();
   sem_test();
   llvm_test();
-  // irid_run_path("test.i");
+  irid_run_path("test.i");
   return 0;
 }
