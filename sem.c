@@ -3396,7 +3396,11 @@ void sem_ir(Block* block, Ir* ir) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         Range one = scalar_limits(pair.one);
         Range two = scalar_limits(pair.two);
-        Range range = { one.lo-two.lo, one.hi-two.hi };
+        I64 a = one.hi - two.hi;
+        I64 b = one.hi - two.lo;
+        I64 c = one.lo - two.hi;
+        I64 d = one.lo - two.lo;
+        Range range = { min(min(min(a, b), c), d), max(max(max(a, b), c), d) };
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
     }

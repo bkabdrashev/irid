@@ -208,6 +208,7 @@ new_food : () -> {
           empty[e].y = F32 (i / game.height)
           e = e + 1
         }
+        i = i + 1
 
       r: I32 = rand(empty_n)
       game.food_p[game.food_n].x = empty[r].x
