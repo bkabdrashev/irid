@@ -1129,7 +1129,7 @@ Type* type_type(Type* type) {
 Record* type_record_init(I32 length) {
   Record* result = arena_push(sem.perm_arena, sizeof(Record));
   result->length  = length;
-  result->names   = arena_push(sem.perm_arena, length * sizeof(Str*));
+  result->names   = arena_push_zero(sem.perm_arena, length * sizeof(Str*));
   result->types   = arena_push(sem.perm_arena, length * sizeof(Type*));
   result->offsets = arena_push(sem.perm_arena, length * sizeof(I32));
   result->position_from_name   = hash_map_init(sem.perm_arena, length);

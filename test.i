@@ -309,6 +309,17 @@ while game.running do {
     i = i + 1
   }
 
+  {
+    i: I32 = 0
+    r: FRect = (0.0; 0.0; BLOCK_PIXELS; BLOCK_PIXELS)
+  while i < game.food_n do
+    r.x = game.food_p[i].x * (r.w + 2.0)
+    r.y = game.food_p[i].y * (r.h + 2.0)
+    SetRenderDrawColor(renderer; 127; 16; 16; ALPHA_OPAQUE)
+    RenderFillRect(renderer; @r)
+    i = i + 1
+  }
+
   // for i in 1..game.snake_n-1 do {
   //   r.x = game.snake[i].x * (r.w + 2)
   //   r.y = game.snake[i].y * (r.h + 2)
