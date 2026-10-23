@@ -135,6 +135,7 @@ init            : #foreign.c "SDL_Init"            (flags: InitFlags)->B8
 CreateWindow    : #foreign.c "SDL_CreateWindow"    (title: @I8; w: I32; h: I32; flags: WindowFlags)->@Window
 CreateRenderer  : #foreign.c "SDL_CreateRenderer"  (window: @Window; name: @I8)->@Renderer
 GetTicks        : #foreign.c "SDL_GetTicks"        ()->U64
+rand            : #foreign.c "SDL_rand"            (n: I32)->I32
 PollEvent       : #foreign.c "SDL_PollEvent"       (event: @Event)->B8
 Delay           : #foreign.c "SDL_Delay"           (ms: U32)->()
 DestroyRenderer : #foreign.c "SDL_DestroyRenderer" (renderer: @Renderer)->()
@@ -172,10 +173,10 @@ intersection : (x0: F32; y0: F32; x1: F32; y1: F32) -> {
   return xOverlap * yOverlap
 }
 
-new_food : (game: @Game) -> {
+new_food : () -> {
   empty_n: I32 = game@.size - game@.snake_n - game@.food_n
   if empty_n > 0 do {
-    board = [game@.size]B8
+    board: [game@.size]B8
     { i:I32 = 0
     while i < game@.size do
       board[i] = 1

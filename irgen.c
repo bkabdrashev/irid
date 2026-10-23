@@ -1255,6 +1255,41 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_block_link_jump_to_block(&jump_from_eqz->jump, merge_block);
     irgen_block_link_jump_to_block(&jump_from_nez->jump, merge_block);
   } break;
+  case Ast_Kind_if_value: {
+    assert(0);
+  } break;
+
+  case Ast_Kind_else_value: {
+    Var* else_var = irgen_var_new();
+    else_var->name = str_from_cstr("__else");
+    Ir* else_ir = irgen_push_var(else_var);
+    irgen_push_binary(Ir_Kind_store, else_ir, irgen.irid_none);
+
+    Ast_Node* cond = node->binary.lhs->binary.lhs;
+    Ast_Node* then_node = node->binary.lhs->binary.rhs;
+    Ast_Node* else_node = node->binary.rhs;
+    Ir* cond_ir = irgen_ast_node(cond);
+    Block* branch_from_block = irgen_block_branch(cond_ir);
+    Block* nez_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&branch_from_block->branch.nez, nez_block);
+    Ir* if_value = irgen_ast_node(then_node);
+    irgen_push_binary(Ir_Kind_store, else_ir, if_value);
+    Block* jump_from_nez = irgen_block_jump();
+    Block* eqz_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&branch_from_block->branch.eqz, eqz_block);
+    Ir* else_value = irgen_ast_node(else_node);
+    irgen_push_binary(Ir_Kind_store, else_ir, else_value);
+    Block* jump_from_eqz = irgen_block_jump();
+    Block* merge_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&jump_from_eqz->jump, merge_block);
+    irgen_block_link_jump_to_block(&jump_from_nez->jump, merge_block);
+
+    result = irgen_push_unary(Ir_Kind_load, else_ir);
+    else_var->declared_ir = result;
+    irgen_push_declare(else_var);
+
+  } break;
+
   case Ast_Kind_while: {
     Ast_Node* cond = node->binary.lhs;
     Ast_Node* then = node->binary.rhs;
@@ -1334,7 +1369,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_block_return();
   } break;
   case Ast_Kind_break: case Ast_Kind_break_value:
-  case Ast_Kind_if_value: case Ast_Kind_else_value:
   case Ast_Kind_none: { assert(0); }
   }
   return result;
