@@ -400,6 +400,8 @@ typedef struct {
   Tokens tokens;
   I32  tok;
 
+  Ast_Decls* decls;
+
   Diags* diags;
   I32    last_error_tok;
   B8     panic;
@@ -450,7 +452,6 @@ I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
   case Ast_Kind_load:
     result = 26;
   break;
-  case Ast_Kind_subscript:
   case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
@@ -761,9 +762,9 @@ Ast_List* parse_list_perm(Parser* parser, Ast_List* temp_list) {
   return perm_list;
 }
 
-void parse_decls_push(Parser* parser, Ast_Decls* decls, Str* name, Ast_Node* rhs, Loc loc) {
-  for (I32 i = 0; i < decls->length; i++) {
-    Ast_Decl* previous = &decls->base[i];
+void parse_decls_push(Parser* parser, Str* name, Ast_Node* rhs, Loc loc) {
+  for (I32 i = 0; i < parser->decls->length; i++) {
+    Ast_Decl* previous = &parser->decls->base[i];
     if (previous->name == name) {
       Diag* diag = diag_error(parser->diags, Diag_Code_duplicate_declaration, loc);
       if (diag) {
@@ -777,21 +778,21 @@ void parse_decls_push(Parser* parser, Ast_Decls* decls, Str* name, Ast_Node* rhs
     }
   }
   Ast_Decl decl = { name, rhs, loc };
-  fa_extend(parser->decls_arena, decls, decl);
+  fa_extend(parser->decls_arena, parser->decls, decl);
 }
 
-Hash_Map* parse_decls_perm(Parser* parser, Ast_Decls* temp_list) {
+Hash_Map* parse_decls_perm(Parser* parser) {
   Hash_Map* map = arena_push(parser->perm_arena, sizeof(Hash_Map));
-  *map = hash_map_init(parser->perm_arena, temp_list->length+1);
-  for (I32 i = 0; i < temp_list->length; i++) {
-    Ast_Decl decl = temp_list->base[i];
+  *map = hash_map_init(parser->perm_arena, parser->decls->length+1);
+  for (I32 i = 0; i < parser->decls->length; i++) {
+    Ast_Decl decl = parser->decls->base[i];
     Symbol* sym = hash_map_get(map, decl.name);
     if (sym) continue;
     sym = arena_push_zero(parser->perm_arena, sizeof(Symbol));
     sym->ast = decl.rhs;
     hash_map_put(map, decl.name, sym);
   }
-  arena_release_mark(parser->decls_arena, temp_list);
+  arena_release_mark(parser->decls_arena, parser->decls);
   return map;
 }
 
@@ -1019,9 +1020,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = ast_new_node(parser->perm_arena, Ast_Kind_if_value);
     node->binary.lhs = cond;
     node->binary.rhs = if_value;
-    node->loc = loc_join(token.loc,
-                         loc_join(cond ? cond->loc : LOC_NONE,
-                                  if_value ? if_value->loc : LOC_NONE));
+    node->loc = loc_join(token.loc, loc_join(cond ? cond->loc : LOC_NONE, if_value ? if_value->loc : LOC_NONE));
     if (parse_match_token(parser, Token_Kind_else)) {
       Ast_Node* if_node = node;
       Ast_Node* else_value = parse_new_expression(parser, 0);
@@ -1220,6 +1219,7 @@ Ast_Node* parse_statement(Parser* parser) {
     parse_retreat(parser);
     node = parse_new_expression(parser, 0);
     if (node && node->kind == Ast_Kind_error) return node;
+    Token current = *parse_peek(parser);
     if (parse_is_token(parser, Token_Kind_equal)) {
       Token equal = *parse_peek(parser);
       parse_advance(parser);
@@ -1235,15 +1235,90 @@ Ast_Node* parse_statement(Parser* parser) {
       node->binary.rhs = rhs;
       node->loc = loc_join(lhs ? lhs->loc : LOC_NONE, rhs ? rhs->loc : LOC_NONE);
     }
+    else if (parse_is_token(parser, Token_Kind_colon)) {
+      Token colon = *parse_peek(parser);
+      parse_advance(parser);
+      if (!parse_expression_is_available(parser)) {
+        parse_expected_expression_eol(parser, colon.loc);
+        node = parse_error_node(parser, current.loc);
+      }
+      else if (node->kind == Ast_Kind_name) {
+        if (parse_is_token(parser, Token_Kind_equal)) {
+          // name : = exp
+          Token equal = *parse_peek(parser);
+          parse_advance(parser);
+          if (!parse_expression_is_available(parser)) {
+            parse_expected_expression_eol(parser, equal.loc);
+            node = parse_error_node(parser, equal.loc);
+          }
+          else {
+            Ast_Node* lhs = node;
+            Ast_Node* rhs = parse_new_expression(parser, 0);
+            if (rhs && rhs->kind == Ast_Kind_error) {
+              node = rhs;
+            }
+            else {
+              parse_decls_push(parser, lhs->str, rhs, lhs->loc);
+              node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
+              node->binary.lhs = lhs;
+              node->binary.rhs = rhs;
+              node->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
+            }
+          }
+        }
+        else {
+          // name : exp
+          Ast_Node* decl_rhs = parse_new_expression(parser, 0);
+          if (decl_rhs && decl_rhs->kind == Ast_Kind_error) {
+            node = decl_rhs;
+          }
+          else {
+            parse_decls_push(parser, node->str, decl_rhs, node->loc);
+            if (parse_is_token(parser, Token_Kind_equal)) {
+              // name : exp = exp
+              Token equal = *parse_peek(parser);
+              parse_advance(parser);
+              if (!parse_expression_is_available(parser)) {
+                parse_expected_expression_eol(parser, equal.loc);
+                node = parse_error_node(parser, equal.loc);
+              }
+              else {
+                Ast_Node* lhs = node;
+                Ast_Node* rhs = parse_new_expression(parser, 0);
+                if (rhs && rhs->kind == Ast_Kind_error) {
+                  node = rhs;
+                }
+                else {
+                  node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
+                  node->binary.lhs = lhs;
+                  node->binary.rhs = rhs;
+                  node->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
+                }
+              }
+            }
+            else {
+              node = NULL;
+            }
+          }
+        }
+      }
+      else {
+        parse_diag(parser, Diag_Code_bad_declaration_target, node->loc);
+        parse_sync(parser, current.indent);
+        node = parse_error_node(parser, node->loc);
+      }
+    }
   }
   }
   return node;
 }
 
 Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
+  Ast_Decls* save_decls = parser->decls;
+
   Ast_Block block = {};
   Ast_List* fa_temp(parser->list_arena, temp);
-  Ast_Decls* fa_temp(parser->decls_arena, temp_map);
+  fa_temp(parser->decls_arena, parser->decls);
   while (true) {
     parser->panic = false;
     if (parse_at_end(parser)) {
@@ -1291,82 +1366,6 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
       }
       continue;
     }
-
-    if (parse_is_token(parser, Token_Kind_colon)) {
-      Token colon = *parse_peek(parser);
-      parse_advance(parser);
-      if (!parse_expression_is_available(parser)) {
-        parse_expected_expression_eol(parser, colon.loc);
-        node = parse_error_node(parser, current.loc);
-      }
-      else if (node->kind == Ast_Kind_name) {
-        if (parse_is_token(parser, Token_Kind_equal)) {
-          // name : = exp
-          Token equal = *parse_peek(parser);
-          parse_advance(parser);
-          if (!parse_expression_is_available(parser)) {
-            parse_expected_expression_eol(parser, equal.loc);
-            node = parse_error_node(parser, equal.loc);
-          }
-          else {
-            Ast_Node* lhs = node;
-            Ast_Node* rhs = parse_new_expression(parser, 0);
-            if (rhs && rhs->kind == Ast_Kind_error) {
-              node = rhs;
-            }
-            else {
-              parse_decls_push(parser, temp_map, lhs->str, rhs, lhs->loc);
-              node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
-              node->binary.lhs = lhs;
-              node->binary.rhs = rhs;
-              node->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
-              parse_list_push(parser, temp, node);
-            }
-          }
-        }
-        else {
-          // name : exp
-          Ast_Node* decl_rhs = parse_new_expression(parser, 0);
-          if (decl_rhs && decl_rhs->kind == Ast_Kind_error) {
-            node = decl_rhs;
-          }
-          else {
-            parse_decls_push(parser, temp_map, node->str, decl_rhs, node->loc);
-            if (parse_is_token(parser, Token_Kind_equal)) {
-              // name : exp = exp
-              Token equal = *parse_peek(parser);
-              parse_advance(parser);
-              if (!parse_expression_is_available(parser)) {
-                parse_expected_expression_eol(parser, equal.loc);
-                node = parse_error_node(parser, equal.loc);
-              }
-              else {
-                Ast_Node* lhs = node;
-                Ast_Node* rhs = parse_new_expression(parser, 0);
-                if (rhs && rhs->kind == Ast_Kind_error) {
-                  node = rhs;
-                }
-                else {
-                  node = ast_new_node(parser->perm_arena, Ast_Kind_assign);
-                  node->binary.lhs = lhs;
-                  node->binary.rhs = rhs;
-                  node->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
-                  parse_list_push(parser, temp, node);
-                }
-              }
-            }
-            else {
-              node = NULL;
-            }
-          }
-        }
-      }
-      else {
-        parse_diag(parser, Diag_Code_bad_declaration_target, node->loc);
-        parse_sync(parser, current.indent);
-        node = parse_error_node(parser, node->loc);
-      }
-    }
     else {
       parse_list_push(parser, temp, node);
     }
@@ -1374,7 +1373,8 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
     while (parse_match_token(parser, Token_Kind_semicolon)) {}
   }
   block.list = parse_list_perm(parser, temp);
-  block.scope = parse_decls_perm(parser, temp_map);
+  block.scope = parse_decls_perm(parser);
+  parser->decls = save_decls;
   return block;
 }
 
@@ -1524,6 +1524,7 @@ void diag_test(void) {
 
 void parse_test(void) {
   return;
+  test("arr[a@]",        "");
   test("a b->c",        "(a (b -> c))");
   test("foo \"Hi\"",    "(foo \"Hi\")");
   test("[]1",           "[]1");
