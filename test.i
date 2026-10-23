@@ -174,45 +174,45 @@ intersection : (x0: F32; y0: F32; x1: F32; y1: F32) -> {
 }
 
 new_food : () -> {
-  empty_n: I32 = game@.size - game@.snake_n - game@.food_n
+  empty_n: I32 = game.size - game.snake_n - game.food_n
   if empty_n > 0 do {
-    board: [game@.size]B8
+    board: [game.size]B8
     { i:I32 = 0
-    while i < game@.size do
+    while i < game.size do
       board[i] = 1
       i = i + 1
     }
 
     { i:I32 = 0
-    while i < game@.snake_n do
-      k:I32 = game@.snake_p[i].x'I32 + game@.snake_p[i].y'I32 * game@.width
+    while i < game.snake_n do
+      k:I32 = game.snake_p[i].x'I32 + game.snake_p[i].y'I32 * game.width
       board[k] = 0
       i = i + 1
     }
 
     { i:I32 = 0
-    while i < game@.food_n do
-      k:I32 = game@.food_p[i].x'I32 + game@.food_p[i].y'I32 * game@.width
+    while i < game.food_n do
+      k:I32 = game.food_p[i].x'I32 + game.food_p[i].y'I32 * game.width
       board[k] = 0
       i = i + 1
     }
 
     {
-      empty: [game@.size]Vec2
+      empty: [game.size]Vec2
       e: I32 = 0
       i: I32 = 0
 
-      while i < game@.size do
+      while i < game.size do
         if board[i] do {
-          empty[e].x = F32 (i % game@.width)
-          empty[e].y = F32 (i / game@.height)
+          empty[e].x = F32 (i % game.width)
+          empty[e].y = F32 (i / game.height)
           e = e + 1
         }
 
       r: I32 = rand(empty_n)
-      game@.food[game@.food_n].x = empty[r].x
-      game@.food[game@.food_n].y = empty[r].y
-      game@.food_n = game@.food_n + 1
+      game.food_p[game.food_n].x = empty[r].x
+      game.food_p[game.food_n].y = empty[r].y
+      game.food_n = game.food_n + 1
     }
   }
 }
@@ -231,7 +231,7 @@ game : (
   snake_v : Vec2
   snake_n : I32
 
-  food   : [size]Vec2
+  food_p : [size]Vec2
   food_n : I32
 
   running : B8
