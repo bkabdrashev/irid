@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <setjmp.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

@@ -90,6 +90,7 @@ struct Symbol {
   Symbol_Kind kind;
   Ast_Node* ast;
   Ir* ir;
+  Loc loc;
 };
 
 typedef struct Ast_Block Ast_Block;
@@ -790,6 +791,7 @@ Hash_Map* parse_decls_perm(Parser* parser) {
     if (sym) continue;
     sym = arena_push_zero(parser->perm_arena, sizeof(Symbol));
     sym->ast = decl.rhs;
+    sym->loc = decl.loc;
     hash_map_put(map, decl.name, sym);
   }
   arena_release_mark(parser->decls_arena, parser->decls);
@@ -1594,3 +1596,4 @@ void parse_test(void) {
 }
 
 #undef test
+#undef test_diag

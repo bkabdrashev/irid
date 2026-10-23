@@ -189,6 +189,13 @@ struct Sem {
   I32 sccid;
   Blocks* scc_stack;
   Fun* current_fun;
+
+  Diags* diags;
+  jmp_buf fatal;
+  B8 fatal_ready;
+  Ir* current_ir;
+  Loc current_loc;
+  Block* current_block;
 };
 
 Sem sem = {};
@@ -453,6 +460,82 @@ Cstr cstr_from_sem(Funs funs, C8* buffer) {
   return result;
 }
 
+Cstr sem_type_name(Type* type) {
+  if (!type) return "unknown";
+  C8* buffer = arena_push(sem.perm_arena, 8192);
+  String_Builder sb = string_builder_begin(buffer);
+  string_builder_push_type(&sb, sem.current_block, type);
+  return string_builder_end(&sb);
+}
+
+Loc sem_loc(Ir* ir) {
+  if (ir && loc_is_valid(ir->loc)) return ir->loc;
+  if (loc_is_valid(sem.current_loc)) return sem.current_loc;
+  return LOC_NONE;
+}
+
+Loc sem_loc_for_var(Var* var) {
+  if (var && var->declared_ir && loc_is_valid(var->declared_ir->loc)) {
+    return var->declared_ir->loc;
+  }
+  return sem_loc(0);
+}
+
+void sem_fail(void) {
+  if (sem.fatal_ready) {
+    longjmp(sem.fatal, 1);
+  }
+  assert(0);
+}
+
+Diag* sem_diag(Diag_Code code, Loc loc) {
+  return diag_error(sem.diags, code, loc);
+}
+
+void sem_error_name(Diag_Code code, Loc loc, Str* name) {
+  Diag* diag = sem_diag(code, loc);
+  if (diag) diag->data.name.name = name;
+  sem_fail();
+}
+
+void sem_error_text(Diag_Code code, Loc loc, Cstr text) {
+  Diag* diag = sem_diag(code, loc);
+  if (diag) diag->data.text.text = text;
+  sem_fail();
+}
+
+void sem_error_types(Diag_Code code, Loc loc, Cstr expected, Cstr found) {
+  Diag* diag = sem_diag(code, loc);
+  if (diag) {
+    diag->data.types.expected = expected;
+    diag->data.types.found    = found;
+  }
+  sem_fail();
+}
+
+void sem_error_type(Diag_Code code, Loc loc, Type* type) {
+  sem_error_types(code, loc, 0, sem_type_name(type));
+}
+
+void sem_error_operand(Loc loc, Cstr op, Type* type) {
+  Diag* diag = sem_diag(Diag_Code_invalid_operand, loc);
+  if (diag) {
+    diag->data.operand.op   = op;
+    diag->data.operand.type = sem_type_name(type);
+  }
+  sem_fail();
+}
+
+void sem_error_type_mismatch(Loc loc, Type* expected, Type* found) {
+  sem_error_types(Diag_Code_type_mismatch, loc,
+                  sem_type_name(expected), sem_type_name(found));
+}
+
+void sem_error_call_mismatch(Loc loc, Type* expected, Type* found) {
+  sem_error_types(Diag_Code_call_argument_mismatch, loc,
+                  sem_type_name(expected), sem_type_name(found));
+}
+
 I64 scalar_max(Scalar* scalar) {
   return scalar->pairs[scalar->length-1].hi;
 }
@@ -596,6 +679,10 @@ B8 type_is_same_rec(Type* one, Type* two, Subtype_Visited* visited) {
           Field field_two;
           if (field_one.name) {
             field_two = type_record_get_by_name(two->record, field_one.name);
+            if (field_two.pos < 0) {
+              result = false;
+              break;
+            }
           }
           else {
             field_two = type_record_get_by_position(two->record, i);
@@ -713,7 +800,6 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
           for (I32 i = 0; i < one->pointer->stack_vars.len; i++) {
             Var* var = one->pointer->stack_vars.list[i];
             if (!hash_set_exists(&two->pointer->stack_vars, var)) {
-              assert(0);
               result = false;
             }
           }
@@ -722,7 +808,6 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
         Type* two_declared = type_pointer_declared(two->pointer);
         if (one_declared && two_declared) {
           if (!type_is_subtype_rec(one_declared, two_declared, visited)) {
-            assert(0);
             result = false;
           }
         }
@@ -730,17 +815,27 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
     } break;
     case Type_Kind_record: {
       result = true;
+      if (one->record->length > two->record->length) {
+        result = false;
+      }
       for (I32 i = 0; i < one->record->length; i++) {
         Field field_one = type_record_get_by_position(one->record, i);
         Field field_two;
         if (field_one.name) {
           field_two = type_record_get_by_name(two->record, field_one.name);
+          if (field_two.pos < 0) {
+            result = false;
+            break;
+          }
         }
         else {
+          if (i >= two->record->length) {
+            result = false;
+            break;
+          }
           field_two = type_record_get_by_position(two->record, i);
         }
         if (!type_is_subtype_rec(field_one.type, field_two.type, visited)) {
-          assert(0);
           result = false;
         }
       }
@@ -754,7 +849,6 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
       else {
         result = false;
       }
-      assert(result);
     } break;
     case Type_Kind_span: {
       if (type_is_subtype_rec(one->span->length, two->span->length, visited)) {
@@ -764,10 +858,8 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
       else {
         result = false;
       }
-      assert(result);
     } break;
     case Type_Kind_fun: {
-      assert(0);
       result = false;
     } break;
     case Type_Kind_join_records: {
@@ -796,10 +888,8 @@ B8 type_is_subtype_rec(Type* one, Type* two, Subtype_Visited* visited) {
     else {
       result = false;
     }
-    assert(result);
   }
   else {
-    assert(0);
     result = false;
   }
 
@@ -821,7 +911,7 @@ B8 type_is_false(Type* type) {
       result = false;
     }
   } break;
-  default: assert(0);
+  default: result = false;
   }
   return result;
 }
@@ -837,7 +927,7 @@ B8 type_is_true(Type* type) {
       result = !scalar_have(type->scalar, 0);
     }
   } break;
-  default: assert(0);
+  default: result = false;
   }
   return result;
 }
@@ -1289,7 +1379,7 @@ Type* type_float_join(Type* one, Type* two) {
     scalar = sem_scalar_merge(one->scalar, sem_scalar_float_widen(two->scalar));
   }
   else {
-    assert(0);
+    sem_error_type_mismatch(sem_loc(0), two, one);
   }
   return type_float_scalar(F64_EXP, F64_MAN, scalar);
 }
@@ -1308,7 +1398,7 @@ Type* type_float_cast(Type* from, Type* to) {
     full->pairs[0].hi = I32_MAX;
     return type_float_scalar(F32_EXP, F32_MAN, full);
   }
-  assert(0);
+  sem_error_type_mismatch(sem_loc(0), to, from);
   return 0;
 }
 
@@ -1415,6 +1505,17 @@ Type_Pair type_of_ir_binary(Ir* ir) {
   Type* two = type_of_ir(ir->binary.two);
   Type_Pair result = { one, two };
   return result;
+}
+
+void sem_error_binary_operand(Ir* ir, Cstr op) {
+  Type_Pair types = type_of_ir_binary(ir);
+  Type* bad = types.one;
+  if (bad && bad->kind == Type_Kind_scalar) bad = types.two;
+  sem_error_operand(ir->loc, op, bad);
+}
+
+void sem_error_unary_operand(Ir* ir, Cstr op) {
+  sem_error_operand(ir->loc, op, type_of_ir(ir->unary));
 }
 
 Type* type_of_ir_unary(Ir* ir) {
@@ -1599,6 +1700,12 @@ Field type_record_get_by_position(Record* record, I32 position) {
 
 Field type_record_get_by_name(Record* record, Str* name) {
   I32 position = hash_map_get_i32(&record->position_from_name, name);
+  if (position < 0) {
+    Field missing = {0};
+    missing.name = name;
+    missing.pos  = -1;
+    return missing;
+  }
   return type_record_get_by_position(record, position);
 }
 
@@ -1626,6 +1733,9 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
     I32 position = hash_map_get_i32(&record->position_from_name, name);
+    if (position < 0) {
+      sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
+    }
     return var->vars[position];
   }
   else if (var->declared->kind == Type_Kind_join_records) {
@@ -1650,25 +1760,22 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
       Record* record  = element->record;
       if (record->length != 0) {
         I32 position = hash_map_get_i32(&record->position_from_name, name);
-        Type* type = record->types[position];
         if (position < 0) {
-          printf("field '%s' is not present in every possible record\n", name->base);
-          assert(0);
+          sem_error_name(Diag_Code_join_field_missing, sem_loc(0), name);
         }
+        Type* type = record->types[position];
         if (is_first) {
           offset_join = record->offsets[position];
           bits_size   = type->bits_size;
           is_first    = false;
         }
         else if (offset_join != record->offsets[position]) {
-          printf("field '%s' has different offsets in joined records\n", name->base);
-          assert(0);
+          sem_error_name(Diag_Code_join_field_mismatch, sem_loc(0), name);
         }
         if (type_joined == sem.type_none) {
         }
         else if (bits_size != type->bits_size) {
-          printf("field '%s' has different sizes in joined records\n", name->base);
-          assert(0);
+          sem_error_name(Diag_Code_join_field_mismatch, sem_loc(0), name);
         }
         is_size_defined |= has_flag(type->flag, Type_Flag_size_defined);
         type_joined = type_join(type_joined, type);
@@ -1677,8 +1784,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
     }
 
     if (is_first) {
-      printf("narrowed record is empty; trying to access field '%s'\n", name->base);
-      assert(0);
+      sem_error_name(Diag_Code_empty_narrowed_record, sem_loc(0), name);
     }
 
     if (is_size_defined) {
@@ -1705,7 +1811,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
       return var->vars[-1];
     }
     else {
-      assert(0);
+      sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
     }
   }
   else if (var->declared->kind == Type_Kind_span) {
@@ -1713,11 +1819,11 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
       return var->vars[0];
     }
     else {
-      assert(0);
+      sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
     }
   }
   else {
-    assert(0);
+    sem_error_type(Diag_Code_invalid_field_base, sem_loc(0), var->declared);
   }
   return 0;
 }
@@ -1728,6 +1834,9 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
     I32 position = hash_map_get_i32(&record->position_from_name, name);
+    if (position < 0) {
+      sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
+    }
     result = record->offsets[position];
   }
   else if (var->declared->kind == Type_Kind_join_records) {
@@ -1739,22 +1848,19 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
       if (record->length > 0) {
         I32 position = hash_map_get_i32(&record->position_from_name, name);
         if (position < 0) {
-          printf("field '%s' is not present in every possible record\n", name->base);
-          assert(0);
+          sem_error_name(Diag_Code_join_field_missing, sem_loc(0), name);
         }
         if (result < 0) {
           result = record->offsets[position];
           first_element = element;
         }
         else if (result != record->offsets[position]) {
-          printf("field '%s' has different offsets in joined records\n", name->base);
-          assert(0);
+          sem_error_name(Diag_Code_join_field_mismatch, sem_loc(0), name);
         }
       }
     }
     if (!first_element) {
-      printf("narrowed record is empty; trying to access field '%s'\n", name->base);
-      assert(0);
+      sem_error_name(Diag_Code_empty_narrowed_record, sem_loc(0), name);
     }
     sem_element_of_join_put(ir, first_element);
   }
@@ -1763,7 +1869,7 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
       result = -8;
     }
     else {
-      assert(0);
+      sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
     }
   }
   else if (var->declared->kind == Type_Kind_span) {
@@ -1771,11 +1877,11 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
       result = 0;
     }
     else {
-      assert(0);
+      sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
     }
   }
   else {
-    assert(0);
+    sem_error_type(Diag_Code_invalid_field_base, sem_loc(0), var->declared);
   }
 
   return result;
@@ -1936,7 +2042,7 @@ Type* type_join(Type* one, Type* two) {
   }
   else if (one->kind == Type_Kind_scalar && two->kind == Type_Kind_scalar) {
     if (one->scalar->kind != two->scalar->kind) {
-      assert(0);
+      sem_error_type_mismatch(sem_loc(0), two, one);
     }
     else if (one->scalar->kind == Scalar_Kind_float) {
       result = type_float_join(one, two);
@@ -1969,7 +2075,7 @@ Type* type_join(Type* one, Type* two) {
       result = type_pointer(pointer);
     }
     else {
-      assert(0);
+      sem_error_type_mismatch(sem_loc(0), two, one);
     }
   }
   else if (one->kind == Type_Kind_type && two->kind == Type_Kind_type) {
@@ -1999,10 +2105,10 @@ Type* type_join(Type* one, Type* two) {
     result = type_join_records(join);
   }
   else if (one->kind == Type_Kind_array && two->kind == Type_Kind_array) {
-    assert(0);
+    sem_error_text(Diag_Code_unsupported_semantics, sem_loc(0), "joining arrays");
   }
   else {
-    assert(0);
+    sem_error_type_mismatch(sem_loc(0), two, one);
   }
   return result;
 }
@@ -2538,7 +2644,7 @@ void sem_type_narrow_int_cmp(Sem_Tasks* tasks, Ir* ir, Ir_Kind op) {
     nb = sem_type_clamp(pair.two, I64_MIN, amax);
   break;
   default:
-    assert(0);
+    sem_error_text(Diag_Code_unsupported_semantics, ir->loc, "this comparison");
   break;
   }
   sem_type_of_ir_binary_narrow(tasks, ir, na, nb);
@@ -2599,7 +2705,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
       sem_type_narrow_ptr_eq(tasks, cond_ir);
     }
     else {
-      assert(0);
+      sem_error_binary_operand(cond_ir, "comparison");
     }
   } break;
   case Ir_Kind_ne: {
@@ -2610,7 +2716,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
       sem_type_narrow_ptr_ne(tasks, cond_ir);
     }
     else {
-      assert(0);
+      sem_error_binary_operand(cond_ir, "comparison");
     }
   } break;
   case Ir_Kind_lt: case Ir_Kind_le:
@@ -2644,7 +2750,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
       sem_type_narrow_ptr_ne(tasks, cond_ir);
     }
     else {
-      assert(0);
+      sem_error_binary_operand(cond_ir, "comparison");
     }
   } break;
   case Ir_Kind_ne: {
@@ -2655,7 +2761,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
       sem_type_narrow_ptr_eq(tasks, cond_ir);
     }
     else {
-      assert(0);
+      sem_error_binary_operand(cond_ir, "comparison");
     }
   } break;
   case Ir_Kind_lt: case Ir_Kind_le:
@@ -2803,10 +2909,16 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
         Field field_var;
         if (field.name) {
           field_var = type_record_get_by_name(to->record, field.name);
+          if (field_var.pos < 0) {
+            sem_error_name(Diag_Code_unknown_field, sem_loc(0), field.name);
+          }
           new_record->names[i] = field_var.name;
           hash_map_put_i32(&new_record->position_from_name, field_var.name, i);
         }
         else {
+          if (i >= to->record->length) {
+            sem_error_type_mismatch(sem_loc(0), to, from);
+          }
           field_var = type_record_get_by_position(to->record, i);
         }
         if (type_is_same(field.type, field_var.type)) {
@@ -2842,7 +2954,9 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
         *ir = sem_push_array_cast(block, *ir, result);
       }
     } break;
-    default: assert(0);
+    default: {
+      sem_error_type_mismatch(sem_loc(0), to, from);
+    }
     }
   }
   else if (to->kind == Type_Kind_ptr) {
@@ -2851,7 +2965,7 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
       result = type_pointer_to(declared);
     }
     else {
-      assert(0);
+      sem_error_type_mismatch(sem_loc(0), to, from);
     }
   }
   else if (to->kind == Type_Kind_span) {
@@ -2904,14 +3018,11 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
       }
     }
     else {
-      assert(0);
+      sem_error_type_mismatch(sem_loc(0), to, from);
     }
   }
   else {
-    printf("type_auto_cast kind mismatch: from kind %d float %d bits %d, to kind %d float %d bits %d\n",
-      from->kind, type_is_float(from), from->bits_size,
-      to->kind, type_is_float(to), to->bits_size);
-    assert(0);
+    sem_error_type_mismatch(sem_loc(0), to, from);
   }
   return result;
 }
@@ -2927,14 +3038,16 @@ Type* type_cast(Block* block, Ir** ir, Type* from, Type* to) {
           *ir = sem_push_int_from_float_cast(block, *ir, result);
         }
         else {
-          assert(0);
+          sem_error_type_mismatch(sem_loc(0), to, from);
         }
       } break;
-      default: assert(0);
+      default: {
+        sem_error_type_mismatch(sem_loc(0), to, from);
+      }
       }
     }
     else {
-      assert(0);
+      sem_error_type_mismatch(sem_loc(0), to, from);
     }
   }
   return result;
@@ -2942,8 +3055,7 @@ Type* type_cast(Block* block, Ir** ir, Type* from, Type* to) {
 
 void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
   if (var->kind == Var_Kind_constant) {
-    printf("cannot assign a constant '%s'\n", var->name->base);
-    assert(0);
+    sem_error_name(Diag_Code_assign_to_constant, sem_loc(0), var->name);
   }
   if (var->kind == Var_Kind_none || var->kind == Var_Kind_pointee) {
     var->declared = type_join(var->declared, type);
@@ -2959,8 +3071,14 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
           Field field_var;
           if (field.name) {
             field_var = type_record_get_by_name(var->declared->record, field.name);
+            if (field_var.pos < 0) {
+              sem_error_name(Diag_Code_unknown_field, sem_loc(0), field.name);
+            }
           }
           else {
+            if (i >= var->declared->record->length) {
+              sem_error_type_mismatch(sem_loc(0), var->declared, type);
+            }
             field_var = type_record_get_by_position(var->declared->record, i);
           }
           type_of_var_put(block, 0, var->vars[field_var.pos], field.type);
@@ -2976,14 +3094,7 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
       var->block_types[block->id] = type;
     }
     else {
-      C8 buffer_declared[4096];
-      C8 buffer_type[4096];
-      String_Builder sb_declared = string_builder_begin(buffer_declared);
-      String_Builder sb_type = string_builder_begin(buffer_type);
-      string_builder_push_type(&sb_declared, block, var->declared);
-      string_builder_push_type(&sb_type, block, type);
-      printf("not subtype: declared %s, got %s\n", string_builder_end(&sb_declared), string_builder_end(&sb_type));
-      assert(0);
+      sem_error_type_mismatch(sem_loc(0), var->declared, type);
     }
   }
 }
@@ -3099,7 +3210,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
 Type* sem_var_declare(Var* var) {
   if (var->state == Var_State_resolved) return var->declared;
   if (var->state == Var_State_resolving) {
-    assert(0);
+    sem_error_name(Diag_Code_cyclic_declaration, sem_loc_for_var(var), var->name);
   }
   var->state = Var_State_resolving;
 
@@ -3128,6 +3239,10 @@ Type* sem_fun(Fun* fun);
 
 void sem_ir(Block* block, Ir* ir) {
   // printf("  r%ld\n", ir-irgen.irs.base);
+  Ir* saved_ir = sem.current_ir;
+  Loc saved_loc = sem.current_loc;
+  sem.current_ir = ir;
+  if (loc_is_valid(ir->loc)) sem.current_loc = ir->loc;
   Type* result = sem.type_none;
   switch (ir->kind) {
   case Ir_Kind_none: {
@@ -3159,9 +3274,13 @@ void sem_ir(Block* block, Ir* ir) {
       C8 val = 0;
       if (raw == '\\') {
         i++;
+        if (i >= ir->str->length) {
+          sem_error_text(Diag_Code_invalid_escape, ir->loc, "\\");
+        }
         raw = ir->str->base[i];
         if (raw == 'x') {
-          assert(0);
+          sem_error_text(Diag_Code_unsupported_semantics, ir->loc,
+                         "hex escapes in string literals");
         }
         else {
           C8 escape_to_char[256] = {
@@ -3179,8 +3298,11 @@ void sem_ir(Block* block, Ir* ir) {
           I8 index = raw;
           val = escape_to_char[index];
           if (val == 0 && raw != '0') {
-            printf("Invalid string literal escape '\\%c'\n", raw);
-            assert(0);
+            C8* text = arena_push(sem.perm_arena, 3);
+            text[0] = '\\';
+            text[1] = raw;
+            text[2] = '\0';
+            sem_error_text(Diag_Code_invalid_escape, ir->loc, text);
           }
         }
       }
@@ -3223,7 +3345,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "+");
     }
   } break;
   case Ir_Kind_sub: {
@@ -3241,7 +3363,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "-");
     }
   } break;
   case Ir_Kind_mul: {
@@ -3254,17 +3376,27 @@ void sem_ir(Block* block, Ir* ir) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         Range one = scalar_limits(pair.one);
         Range two = scalar_limits(pair.two);
-        I64 a = one.lo * two.lo;
-        I64 b = one.hi * two.lo;
-        I64 c = one.lo * two.hi;
-        I64 d = one.hi * two.hi;
-        // TODO: check that this works, even with undeflow/overflow
-        Range range = { .lo = min(a, min(b, min(c, d))), .hi = max(a, max(b, max(c, d))) };
+        I64 a = 0;
+        I64 b = 0;
+        I64 c = 0;
+        I64 d = 0;
+        B8 overflow = false;
+        overflow |= __builtin_mul_overflow(one.lo, two.lo, &a);
+        overflow |= __builtin_mul_overflow(one.hi, two.lo, &b);
+        overflow |= __builtin_mul_overflow(one.lo, two.hi, &c);
+        overflow |= __builtin_mul_overflow(one.hi, two.hi, &d);
+        Range range;
+        if (overflow) {
+          range = (Range){ .lo = I64_MIN, .hi = I64_MAX };
+        }
+        else {
+          range = (Range){ .lo = min(a, min(b, min(c, d))), .hi = max(a, max(b, max(c, d))) };
+        }
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "*");
     }
   } break;
   case Ir_Kind_div: {
@@ -3286,7 +3418,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "/");
     }
   } break;
   case Ir_Kind_rem: {
@@ -3303,7 +3435,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "%");
     }
   } break;
   case Ir_Kind_or: {
@@ -3325,14 +3457,16 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "|");
     }
   } break;
   case Ir_Kind_xor: {
-    assert(0);
+    sem_error_text(Diag_Code_unsupported_semantics, ir->loc,
+                   "the bitwise xor operator");
   } break;
   case Ir_Kind_and: {
-    assert(0);
+    sem_error_text(Diag_Code_unsupported_semantics, ir->loc,
+                   "the bitwise and operator");
   } break;
   case Ir_Kind_eq: case Ir_Kind_ne:
   case Ir_Kind_lt: case Ir_Kind_le:
@@ -3381,13 +3515,26 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      assert(0);
+      Cstr op = "comparison";
+      switch (ir->kind) {
+      case Ir_Kind_eq: op = "=="; break;
+      case Ir_Kind_ne: op = "!="; break;
+      case Ir_Kind_lt: op = "<";  break;
+      case Ir_Kind_le: op = "<="; break;
+      case Ir_Kind_gt: op = ">";  break;
+      case Ir_Kind_ge: op = ">="; break;
+      default: break;
+      }
+      sem_error_binary_operand(ir, op);
     }
   } break;
   case Ir_Kind_pos: {
     Type* one = type_of_ir(ir->unary);
     if (one->kind == Type_Kind_scalar) {
       result = one;
+    }
+    else {
+      sem_error_unary_operand(ir, "+");
     }
   } break;
   case Ir_Kind_neg: {
@@ -3399,7 +3546,7 @@ void sem_ir(Block* block, Ir* ir) {
       // TODO: overflow/underflow
       Range limits = scalar_limits(one->scalar);
       if (limits.lo == I64_MIN) {
-        assert(0);
+        sem_error_unary_operand(ir, "-");
       }
       Type* unsized = type_range(-limits.hi, -limits.lo);
       if (has_flag(one->flag, Type_Flag_size_defined)) {
@@ -3408,6 +3555,9 @@ void sem_ir(Block* block, Ir* ir) {
       else {
         result = unsized;
       }
+    }
+    else {
+      sem_error_unary_operand(ir, "-");
     }
   } break;
   case Ir_Kind_record: {
@@ -3449,6 +3599,9 @@ void sem_ir(Block* block, Ir* ir) {
     if (one_type->kind == Type_Kind_scalar) {
       if (scalar_is_single(one_type->scalar)) {
         I64 length = scalar_min(one_type->scalar);
+        if (length < 0 || length > I32_MAX) {
+          sem_error_type(Diag_Code_invalid_array_length, ir->loc, one_type);
+        }
         Array* array = type_array_init(length);
         if (two_type->kind == Type_Kind_type) {
           two_type = two_type->type;
@@ -3460,11 +3613,11 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_array(array);
       }
       else {
-        assert(0);
+        sem_error_type(Diag_Code_invalid_array_length, ir->loc, one_type);
       }
     }
     else {
-      assert(0);
+      sem_error_type(Diag_Code_invalid_array_length, ir->loc, one_type);
     }
   } break;
   case Ir_Kind_ptr_offset: {
@@ -3484,7 +3637,7 @@ void sem_ir(Block* block, Ir* ir) {
           declared_of_type = declared->span->of_type;
         }
         else {
-          assert(0);
+          sem_error_type(Diag_Code_invalid_field_base, ir->loc, declared);
         }
         Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
         pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
@@ -3492,7 +3645,7 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_pointer(pointer);
       }
       else {
-        assert(0);
+        sem_error_operand(ir->loc, "[]", at_type);
       }
     }
     else if (of_type->kind == Type_Kind_array) {
@@ -3502,7 +3655,7 @@ void sem_ir(Block* block, Ir* ir) {
       result = type_pointer_to(of_type->span->of_type);
     }
     else {
-      assert(0);
+      sem_error_operand(ir->loc, "[]", of_type);
     }
   } break;
   case Ir_Kind_position_offset: {
@@ -3514,6 +3667,10 @@ void sem_ir(Block* block, Ir* ir) {
         pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
 
         Var* first_var        = of_type->pointer->stack_vars.list[0];
+        if (!first_var->declared || first_var->declared->kind != Type_Kind_record
+            || at < 0 || at >= first_var->declared->record->length) {
+          sem_error_operand(ir->loc, ".", of_type);
+        }
         I32  first_offset     = first_var->declared->record->offsets[at];
         Var* first_var_field  = first_var->vars[at];
             pointer->declared = first_var_field->declared;
@@ -3523,8 +3680,7 @@ void sem_ir(Block* block, Ir* ir) {
           I32  offset = var->declared->record->offsets[at];
 
           if (offset != first_offset) {
-            printf("field offsets don't match\n");
-            assert(0);
+            sem_error_text(Diag_Code_join_layout_mismatch, ir->loc, 0);
           }
 
           Var* field_var = var->vars[at];
@@ -3533,15 +3689,18 @@ void sem_ir(Block* block, Ir* ir) {
         }
       }
       else {
-        assert(0);
+        sem_error_operand(ir->loc, ".", of_type);
       }
       result = type_pointer(pointer);
     }
     else if (of_type->kind == Type_Kind_record) {
+      if (at < 0 || at >= of_type->record->length) {
+        sem_error_operand(ir->loc, ".", of_type);
+      }
       result = of_type->record->types[at];
     }
     else {
-      assert(0);
+      sem_error_operand(ir->loc, ".", of_type);
     }
   } break;
   case Ir_Kind_name_offset: {
@@ -3555,13 +3714,11 @@ void sem_ir(Block* block, Ir* ir) {
           Var* var = of_type->pointer->stack_vars.list[i];
           I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
           if (offset != first_offset) {
-            printf("field offsets don't match\n");
-            assert(0);
+            sem_error_name(Diag_Code_join_field_mismatch, ir->loc, ir->name_offset.at);
           }
         }
 
         Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-        assert(of_type->pointer->stack_vars.len > 0);
         pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
         pointer->declared = first_var_field->declared;
         hash_set_put(&pointer->stack_vars, first_var_field);
@@ -3578,17 +3735,26 @@ void sem_ir(Block* block, Ir* ir) {
         Type* declared = type_pointer_declared(of_type->pointer);
         if (declared->kind == Type_Kind_record) {
           Field field = type_record_get_by_name(declared->record, ir->name_offset.at);
+          if (field.pos < 0) {
+            sem_error_name(Diag_Code_unknown_field, ir->loc, ir->name_offset.at);
+          }
           result = type_pointer_to(field.type);
         }
         else {
-          assert(0);
+          sem_error_type(Diag_Code_invalid_field_base, ir->loc, declared);
         }
       }
 
     }
     else if (of_type->kind == Type_Kind_record) {
       Field field = type_record_get_by_name(of_type->record, ir->name_offset.at);
+      if (field.pos < 0) {
+        sem_error_name(Diag_Code_unknown_field, ir->loc, ir->name_offset.at);
+      }
       result = field.type;
+    }
+    else {
+      sem_error_operand(ir->loc, ".", of_type);
     }
   } break;
   case Ir_Kind_load: {
@@ -3611,10 +3777,13 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else if (ptr_type->kind == Type_Kind_array) {
+      if (ptr_type->array->length == 0) {
+        sem_error_type(Diag_Code_invalid_dereference, ir->loc, ptr_type);
+      }
       result = ptr_type->array->types[0];
     }
     else {
-      assert(0);
+      sem_error_type(Diag_Code_invalid_dereference, ir->loc, ptr_type);
     }
   } break;
   case Ir_Kind_store: {
@@ -3641,12 +3810,12 @@ void sem_ir(Block* block, Ir* ir) {
           type_auto_cast(block, &ir->binary.two, rhs, declared);
         }
         else {
-          assert(0);
+          sem_error_type_mismatch(sem_loc(0), declared, rhs);
         }
       }
     }
     else {
-      assert(0);
+      sem_error_type(Diag_Code_invalid_store, ir->loc, lhs);
     }
     result = rhs;
   } break;
@@ -3662,7 +3831,7 @@ void sem_ir(Block* block, Ir* ir) {
         result = ptr_type;
       }
       else {
-        assert(0);
+        sem_error_operand(ir->loc, "&", ptr_type);
       }
     }
     else {
@@ -3702,7 +3871,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (arg_type->kind == Type_Kind_scalar) {
         if (scalar_is_single(arg_type->scalar)) {
           I64 val = scalar_min(arg_type->scalar);
-          if (val < I16_MAX) {
+          if (0 <= val && val <= I16_MAX) {
             Type* type = &new(sem.types);
             type->kind = Type_Kind_none;
             type->flag = Type_Flag_size_defined;
@@ -3712,15 +3881,19 @@ void sem_ir(Block* block, Ir* ir) {
             result = type_in_set(type);
           }
           else {
-            assert(0);
+            sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                            "an integer constant between 0 and 32767",
+                            sem_type_name(arg_type));
           }
         }
         else {
-          assert(0);
+          sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                          "a single integer constant", sem_type_name(arg_type));
         }
       }
       else {
-        assert(0);
+        sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                        "a single integer constant", sem_type_name(arg_type));
       }
     }
     else if (fun_type == sem.fun_float) {
@@ -3735,15 +3908,21 @@ void sem_ir(Block* block, Ir* ir) {
             result = type_float_full((I16)exp, (I16)mant);
           }
           else {
-            assert(0);
+            sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                            "positive integer constants below 32767",
+                            sem_type_name(arg_type));
           }
         }
         else {
-          assert(0);
+          sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                          "a record of two single integer constants",
+                          sem_type_name(arg_type));
         }
       }
       else {
-        assert(0);
+        sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                        "a record of two integer constants",
+                        sem_type_name(arg_type));
       }
     }
     else if (fun_type == sem.fun_len) {
@@ -3754,7 +3933,8 @@ void sem_ir(Block* block, Ir* ir) {
         result = type_int(arg_type->array->length);
       }
       else {
-        assert(0);
+        sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                        "a record or array", sem_type_name(arg_type));
       }
     }
     else if (fun_type == sem.fun_foreign_c) {
@@ -3764,15 +3944,18 @@ void sem_ir(Block* block, Ir* ir) {
         if (array->of_type == sem.bytes_range) {
           C8* chars = arena_push(sem.perm_arena, length * sizeof(C8));
           for (I32 i = 0; i < length; i++) {
-            if (!scalar_is_single(array->types[i]->scalar)) {
-              assert(0);
+            Type* char_type = array->types[i];
+            if (char_type->kind != Type_Kind_scalar || !scalar_is_single(char_type->scalar)) {
+              sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                              "a single integer constant", sem_type_name(char_type));
             }
-            I64 val = scalar_min(array->types[i]->scalar);
-            if (0 < val && val < I8_MAX) {
+            I64 val = scalar_min(char_type->scalar);
+            if (I8_MIN <= val && val <= I8_MAX) {
               chars[i] = (I8)val;
             }
             else {
-              assert(0);
+              sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                              "a byte value between -128 and 127", sem_type_name(char_type));
             }
           }
           Str* str = str_from_range(chars, chars+length);
@@ -3782,11 +3965,13 @@ void sem_ir(Block* block, Ir* ir) {
           result = type_in_set(type);
         }
         else {
-          assert(0);
+          sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                          "a byte array", sem_type_name(arg_type));
         }
       }
       else {
-        assert(0);
+        sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                        "a byte array", sem_type_name(arg_type));
       }
     }
     else if (fun_type == sem.fun_type_type) {
@@ -3817,19 +4002,12 @@ void sem_ir(Block* block, Ir* ir) {
           result = fun->ret;
         }
         else {
-          C8 buffer_arg[4096];
-          C8 buffer_par[4096];
-          String_Builder sb_arg = string_builder_begin(buffer_arg);
-          String_Builder sb_par = string_builder_begin(buffer_par);
-          string_builder_push_type(&sb_arg, block, arg_type);
-          string_builder_push_type(&sb_par, block, fun->arg);
-          printf("call not subtype at block %d: arg %s, par %s\n", block->id, string_builder_end(&sb_arg), string_builder_end(&sb_par));
-          assert(0);
+          sem_error_call_mismatch(ir->loc, fun->arg, arg_type);
         }
       }
     }
     else if (fun_type->kind == Type_Kind_record) {
-      assert(0); // TODO
+      sem_error_text(Diag_Code_unsupported_semantics, ir->loc, "calling a record");
     }
     else if (fun_type->kind == Type_Kind_none) {
       if (fun_type->flag == Type_Flag_size_defined) { // NOTE: bits function
@@ -3842,13 +4020,17 @@ void sem_ir(Block* block, Ir* ir) {
         if (arg_type->kind == Type_Kind_fun) { // NOTE: foreign.c "c_name"
           result = type_function_foreign(arg_type->function, fun_type->str);
         }
+        else {
+          sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
+                          "a function type", sem_type_name(arg_type));
+        }
       }
       else {
-        assert(0);
+        sem_error_operand(ir->loc, "()", fun_type);
       }
     }
     else {
-      assert(0);
+      sem_error_operand(ir->loc, "()", fun_type);
     }
   } break;
   case Ir_Kind_run: {
@@ -3857,8 +4039,8 @@ void sem_ir(Block* block, Ir* ir) {
       result = type;
     }
     else {
-      // TODO: generate code and run it
-      assert(0);
+      sem_error_text(Diag_Code_unsupported_semantics, ir->loc,
+                     "#run on a non-constant expression");
     }
   } break;
   case Ir_Kind_range: {
@@ -3872,31 +4054,42 @@ void sem_ir(Block* block, Ir* ir) {
           result = type_range(val_one, val_two);
         }
         else {
-          assert(0);
+          sem_error_binary_operand(ir, "..");
         }
       }
       else {
-        assert(0);
+        sem_error_binary_operand(ir, "..");
       }
     }
     else {
-      assert(0);
+      sem_error_binary_operand(ir, "..");
     }
   } break;
-  default: assert(0);
+  default: {
+    sem_error_text(Diag_Code_unsupported_semantics, ir->loc, "this expression");
+  }
   }
   fa_add(block->sem_irs, ir);
   type_of_ir_put(ir, result);
-  assert(result);
+  if (!result) {
+    sem_error_text(Diag_Code_unsupported_semantics, ir->loc, "this expression");
+  }
+  sem.current_ir = saved_ir;
+  sem.current_loc = saved_loc;
 }
 
 void sem_block(Block* block) {
+  Block* saved_block = sem.current_block;
+  sem.current_block = block;
   for (I32 i = 0; i < block->irs->length; i++) {
     sem_ir(block, block->irs->base[i]);
   }
   if (block->state == Block_State_reachable) {
     if (block->kind == Block_Kind_branch) {
       Type* cond_type = type_of_ir(block->branch.cond);
+      if (!cond_type || cond_type->kind != Type_Kind_scalar) {
+        sem_error_type(Diag_Code_invalid_condition, block->branch.cond->loc, cond_type);
+      }
       if (type_is_true(cond_type)) {
         block->branch.nez.to_block->state = Block_State_reachable;
         if (block->branch.eqz.to_block->state == Block_State_unknown) {
@@ -3918,6 +4111,7 @@ void sem_block(Block* block) {
       block->jump.to_block->state = Block_State_reachable;
     }
   }
+  sem.current_block = saved_block;
 }
 
 void sem_worklist_push(Block* block) {
@@ -4159,10 +4353,14 @@ Type* sem_fun(Fun* fun) {
   return fun->type;
 }
 
-void sem_funs(Arena* arena, Funs funs) {
+void sem_funs(Arena* arena, Funs funs, Diags* diags) {
   Arena temp = arena_init(arena->capacity);
   sem.perm_arena = arena;
   sem.temp_arena = &temp;
+  sem.diags = diags;
+  sem.current_ir = 0;
+  sem.current_loc = LOC_NONE;
+  sem.current_block = 0;
   sem.funs = funs;
   sem.sccid = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
@@ -4242,12 +4440,20 @@ void sem_funs(Arena* arena, Funs funs) {
   //   sem_ensure_declared(sym->var_ir->var);
   // }
 
+  if (setjmp(sem.fatal) != 0) {
+    sem.fatal_ready = false;
+    arena_free(&temp);
+    return;
+  }
+  sem.fatal_ready = true;
+
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
     if (fun->kind != Fun_Kind_macro) {
       sem_fun(fun);
     }
   }
+  sem.fatal_ready = false;
   arena_free(&temp);
 }
 
@@ -4277,14 +4483,22 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   fa_init(&arena, ast.list, 1);
   fa_add(ast.list, node);
 
-  Funs funs            = irgen_ast(&arena, ast, length);
+  Funs funs            = irgen_ast(&arena, ast, length, &diags);
+  if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stdout, false);
+    assert(0);
+  }
   {
     C8* buffer           = arena_push(&arena, 64 * length);
     Cstr result          = cstr_from_funs(funs, buffer);
     printf("\n%s", result);
   }
 
-                         sem_funs(&arena, funs);
+                         sem_funs(&arena, funs, &diags);
+  if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stdout, false);
+    assert(0);
+  }
   {
     C8* buffer           = arena_push(&arena, 64 * length);
     Cstr result          = cstr_from_sem(funs, buffer);
@@ -4293,9 +4507,72 @@ void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   arena_free(&arena);
 }
 
+void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) {
+  Cstr builtin        = file_read("basic.i");
+  I32  builtin_length = (I32)file_size("basic.i");
+  I32  source_length  = strlen(source);
+  I32  length         = source_length + builtin_length + 32;
+
+  Arena arena         = arena_init(KB(4) * length);
+                        str_init(&arena, 2*length);
+
+  Source_Map sources = {0};
+  Diags diags = diags_init(&arena, 256);
+  File_Id builtin_file = source_add(&sources, &arena, "basic.i", builtin, builtin_length);
+
+  Tokens builtin_tokens = lex_source(&arena, &sources, builtin_file, &diags);
+  Ast_Block ast         = parse_tokens(&arena, builtin_tokens, &diags);
+
+  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
+  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
+  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
+
+  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
+  node->block    = source_ast;
+
+  fa_init(&arena, ast.list, 1);
+  fa_add(ast.list, node);
+
+  Funs funs = irgen_ast(&arena, ast, length, &diags);
+  if (!diags_has_errors(&diags)) {
+    sem_funs(&arena, funs, &diags);
+  }
+
+  B8 found = false;
+  for (I32 i = 0; i < diags.length; i++) {
+    if (diags.base[i].code == code) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    printf("pipeline diagnostic test failed at %s:%d: expected %s\n",
+           file_name, line, cstr_from_diag_code(code));
+    diag_print_all(&diags, &sources, stdout, false);
+    fflush(stdout);
+    assert(0);
+  }
+  arena_free(&arena);
+}
+
+#define test_diag(source, code) _test_pipeline_diag(source, code, __FILE__, __LINE__)
+
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // test_diag("a", Diag_Code_undefined_name);
+  // test_diag("a : 1\n{ a : 2 }", Diag_Code_shadowed_declaration);
+  // test_diag("a : 1\na = 2", Diag_Code_assign_to_constant);
+  // test_diag("a : (x:I32)\na.y", Diag_Code_unknown_field);
+  // test_diag("a : (x:I32)\na = (y:I32)", Diag_Code_type_mismatch);
+  // test_diag("a : \"\\q\"", Diag_Code_invalid_escape);
+  // test_diag("f : (x:I32) -> x\nf(\"s\")", Diag_Code_call_argument_mismatch);
+  // test_diag("a : 1 + \"s\"", Diag_Code_invalid_operand);
+  // test_diag("if (x:1) do 1", Diag_Code_invalid_condition);
+  // test_diag("a : b\nb : a", Diag_Code_cyclic_declaration);
+  // test_diag("1 = 2", Diag_Code_invalid_assignment_target);
+  // test_diag("a : (if 1 do 2)", Diag_Code_unsupported_construct);
+  // test_diag("break", Diag_Code_unsupported_construct);
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.y else { if 4 do a.z }", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");

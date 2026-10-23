@@ -24,6 +24,32 @@ typedef enum {
   Diag_Code_expected_block,
   Diag_Code_too_many_errors,
 
+  Diag_Code_undefined_name,
+  Diag_Code_not_assignable,
+  Diag_Code_shadowed_declaration,
+  Diag_Code_invalid_function_parameter,
+  Diag_Code_unsupported_construct,
+  Diag_Code_invalid_assignment_target,
+  Diag_Code_invalid_field_access,
+
+  Diag_Code_type_mismatch,
+  Diag_Code_unknown_field,
+  Diag_Code_join_field_missing,
+  Diag_Code_join_field_mismatch,
+  Diag_Code_empty_narrowed_record,
+  Diag_Code_invalid_escape,
+  Diag_Code_call_argument_mismatch,
+  Diag_Code_invalid_operand,
+  Diag_Code_assign_to_constant,
+  Diag_Code_invalid_store,
+  Diag_Code_invalid_dereference,
+  Diag_Code_unsupported_semantics,
+  Diag_Code_cyclic_declaration,
+  Diag_Code_invalid_condition,
+  Diag_Code_invalid_array_length,
+  Diag_Code_invalid_field_base,
+  Diag_Code_join_layout_mismatch,
+
   Diag_Code_opened_here,
   Diag_Code_previous_declaration,
 } Diag_Code;
@@ -35,6 +61,8 @@ typedef union {
   struct { U32 byte; }                               unknown_char;
   struct { Str* name; }                              name;
   struct { Cstr text; }                              text;
+  struct { Cstr expected; Cstr found; }              types;
+  struct { Cstr op; Cstr type; }                     operand;
 } Diag_Data;
 
 typedef struct {
@@ -92,6 +120,10 @@ Diag* diag_push(Diags* diags, Diag_Severity severity, Diag_Code code, Loc loc, I
   return diag;
 }
 
+B8 diags_has_errors(Diags* diags) {
+  return diags && (diags->error_count > 0 || diags->limit_hit);
+}
+
 Diag* diag_error(Diags* diags, Diag_Code code, Loc loc) {
   return diag_push(diags, Diag_Error, code, loc, -1);
 }
@@ -102,10 +134,6 @@ Diag* diag_warning(Diags* diags, Diag_Code code, Loc loc) {
 
 Diag* diag_note(Diags* diags, I32 parent, Diag_Code code, Loc loc) {
   return diag_push(diags, Diag_Note, code, loc, parent);
-}
-
-B8 diags_has_errors(Diags* diags) {
-  return diags && (diags->error_count > 0 || diags->limit_hit);
 }
 
 Cstr cstr_from_diag_code(Diag_Code code) {
@@ -125,6 +153,30 @@ Cstr cstr_from_diag_code(Diag_Code code) {
   case Diag_Code_bad_declaration_target: return "P007";
   case Diag_Code_expected_block:         return "P008";
   case Diag_Code_too_many_errors:        return "P009";
+  case Diag_Code_undefined_name:         return "G001";
+  case Diag_Code_not_assignable:         return "G002";
+  case Diag_Code_shadowed_declaration:   return "G003";
+  case Diag_Code_invalid_function_parameter: return "G004";
+  case Diag_Code_unsupported_construct:  return "G005";
+  case Diag_Code_invalid_assignment_target: return "G006";
+  case Diag_Code_invalid_field_access:   return "G007";
+  case Diag_Code_type_mismatch:          return "S001";
+  case Diag_Code_unknown_field:          return "S002";
+  case Diag_Code_join_field_missing:     return "S003";
+  case Diag_Code_join_field_mismatch:    return "S004";
+  case Diag_Code_empty_narrowed_record:  return "S005";
+  case Diag_Code_invalid_escape:         return "S006";
+  case Diag_Code_call_argument_mismatch: return "S007";
+  case Diag_Code_invalid_operand:        return "S008";
+  case Diag_Code_assign_to_constant:     return "S009";
+  case Diag_Code_invalid_store:          return "S010";
+  case Diag_Code_invalid_dereference:    return "S011";
+  case Diag_Code_unsupported_semantics:  return "S012";
+  case Diag_Code_cyclic_declaration:     return "S013";
+  case Diag_Code_invalid_condition:      return "S014";
+  case Diag_Code_invalid_array_length:   return "S015";
+  case Diag_Code_invalid_field_base:     return "S016";
+  case Diag_Code_join_layout_mismatch:   return "S017";
   case Diag_Code_opened_here:            return "N001";
   case Diag_Code_previous_declaration:   return "N002";
   default:                               return "????";
@@ -242,6 +294,101 @@ static void diag_print_message(FILE* out, Diag* diag, Source_Map* sources) {
   break;
   case Diag_Code_too_many_errors:
     fputs("too many errors emitted; stopping now", out);
+  break;
+  case Diag_Code_undefined_name:
+    fprintf(out, "use of undeclared name '%s'",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_not_assignable:
+    fprintf(out, "cannot assign to '%s'",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_shadowed_declaration:
+    fprintf(out, "declaration of '%s' shadows a previous declaration",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_invalid_function_parameter:
+    fprintf(out, "invalid function parameter: %s",
+            diag->data.text.text ? diag->data.text.text : "expected a name or record");
+  break;
+  case Diag_Code_unsupported_construct:
+    fprintf(out, "%s is not supported yet",
+            diag->data.text.text ? diag->data.text.text : "this construct");
+  break;
+  case Diag_Code_invalid_assignment_target:
+    fputs("cannot assign to this expression", out);
+  break;
+  case Diag_Code_invalid_field_access:
+    fputs("field access requires a name or an integer index", out);
+  break;
+  case Diag_Code_type_mismatch:
+    fprintf(out, "type mismatch: expected %s, found %s",
+            diag->data.types.expected ? diag->data.types.expected : "unknown",
+            diag->data.types.found ? diag->data.types.found : "unknown");
+  break;
+  case Diag_Code_unknown_field:
+    fprintf(out, "record has no field named '%s'",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_join_field_missing:
+    fprintf(out, "field '%s' is not present in every possible record",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_join_field_mismatch:
+    fprintf(out, "field '%s' has an inconsistent layout across joined records",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_empty_narrowed_record:
+    fprintf(out, "cannot access field '%s' of an empty narrowed record",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_invalid_escape:
+    fprintf(out, "invalid escape sequence '%s' in string literal",
+            diag->data.text.text ? diag->data.text.text : "?");
+  break;
+  case Diag_Code_call_argument_mismatch:
+    fprintf(out, "invalid argument: expected %s, found %s",
+            diag->data.types.expected ? diag->data.types.expected : "unknown",
+            diag->data.types.found ? diag->data.types.found : "unknown");
+  break;
+  case Diag_Code_invalid_operand:
+    fprintf(out, "invalid operand of type %s for '%s'",
+            diag->data.operand.type ? diag->data.operand.type : "unknown",
+            diag->data.operand.op ? diag->data.operand.op : "?");
+  break;
+  case Diag_Code_assign_to_constant:
+    fprintf(out, "cannot assign to constant '%s'",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_invalid_store:
+    fputs("cannot assign to this expression", out);
+  break;
+  case Diag_Code_invalid_dereference:
+    fprintf(out, "cannot dereference a value of type %s",
+            diag->data.types.found ? diag->data.types.found : "unknown");
+  break;
+  case Diag_Code_unsupported_semantics:
+    fprintf(out, "%s is not supported yet",
+            diag->data.text.text ? diag->data.text.text : "this construct");
+  break;
+  case Diag_Code_cyclic_declaration:
+    fprintf(out, "cyclic declaration of '%s'",
+            diag->data.name.name ? diag->data.name.name->base : "?");
+  break;
+  case Diag_Code_invalid_condition:
+    fprintf(out, "condition must have a scalar type, found %s",
+            diag->data.types.found ? diag->data.types.found : "unknown");
+  break;
+  case Diag_Code_invalid_array_length:
+    fprintf(out, "array length must be a single constant, found %s",
+            diag->data.types.found ? diag->data.types.found : "unknown");
+  break;
+  case Diag_Code_invalid_field_base:
+    fprintf(out, "cannot access a field of type %s",
+            diag->data.types.found ? diag->data.types.found : "unknown");
+  break;
+  case Diag_Code_join_layout_mismatch:
+    fputs("field has an inconsistent layout across joined records", out);
   break;
   case Diag_Code_opened_here:
     fprintf(out, "'%s' opened here",

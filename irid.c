@@ -29,8 +29,8 @@ I32 irid_run_path(Cstr path) {
   Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
 
   B8 color = isatty(STDERR_FILENO) && !getenv("NO_COLOR");
-  diag_print_all(&diags, &sources, stderr, color);
   if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stderr, color);
     arena_free(&arena);
     return 1;
   }
@@ -41,18 +41,29 @@ I32 irid_run_path(Cstr path) {
   fa_init(&arena, ast.list, 1);
   fa_add(ast.list, node);
 
-  Funs funs            = irgen_ast(&arena, ast, length);
+  Funs funs            = irgen_ast(&arena, ast, length, &diags);
+  if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stderr, color);
+    arena_free(&arena);
+    return 1;
+  }
   {
     C8* buffer           = arena_push(&arena, 64 * length);
     Cstr result          = cstr_from_funs(funs, buffer);
     printf("\n%s", result);
   }
-                         sem_funs(&arena, funs);
+                         sem_funs(&arena, funs, &diags);
+  if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stderr, color);
+    arena_free(&arena);
+    return 1;
+  }
   {
     C8* buffer           = arena_push(&arena, 64 * length);
     Cstr result          = cstr_from_sem(funs, buffer);
     printf("\n%s", result);
   }
+  diag_print_all(&diags, &sources, stderr, color);
                          llvm_funs(&arena, funs);
 
   arena_free(&arena);

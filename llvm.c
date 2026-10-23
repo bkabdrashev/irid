@@ -1028,8 +1028,16 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   fa_init(&arena, ast.list, 1);
   fa_add(ast.list, node);
 
-  Funs funs            = irgen_ast(&arena, ast, length);
-                         sem_funs(&arena, funs);
+  Funs funs            = irgen_ast(&arena, ast, length, &diags);
+  if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stdout, false);
+    assert(0);
+  }
+                         sem_funs(&arena, funs, &diags);
+  if (diags_has_errors(&diags)) {
+    diag_print_all(&diags, &sources, stdout, false);
+    assert(0);
+  }
   {
     C8* buffer           = arena_push(&arena, 64 * length);
     Cstr result          = cstr_from_sem(funs, buffer);
