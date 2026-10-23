@@ -249,7 +249,7 @@ game.snake_p[0].y = game.height'F32 / 2.0 - 1.0
 game.snake_v.x = 0.0
 game.snake_v.y = 0.0
 game.last_tick = F32 GetTicks()
-game'new_food
+new_food()
 
 while game.running do {
   event: Event
