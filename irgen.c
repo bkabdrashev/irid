@@ -1301,16 +1301,16 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_logic_or: {
     /*
-    if A then .1 else .2
-    .true_block:
+    if A then .true else .rhs
+    .true:
       store 1
     jump merge
-    .lhs_eqz_block:
-    if B then .1 else .3
-    .false_block:
+    .rhs:
+    if B then .true else .false
+    .false:
       store 0
-    jump end
-    .end:
+    jump merge
+    .merge:
     */
     Var* or_var = irgen_var_new();
     or_var->name = str_from_cstr("__or_result");
@@ -1350,6 +1350,53 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_push_declare(or_var);
   } break;
   case Ast_Kind_logic_and: {
+    /*
+    if A then .rhs else .false
+    .rhs:
+    if B then .true else .false
+    .true:
+      store 1
+    jump merge
+    .false:
+      store 0
+    jump merge
+    .merge:
+    */
+    Var* and_var = irgen_var_new();
+    and_var->name = str_from_cstr("__and_result");
+    Ir* and_var_ir = irgen_push_var(and_var);
+
+    Ast_Node* lhs = node->binary.lhs;
+    Ast_Node* rhs = node->binary.rhs;
+
+    Ir* lhs_ir = irgen_ast_node(lhs);
+    Block* lhs_branch_from_block = irgen_block_branch(lhs_ir);
+
+    Block* rhs_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&lhs_branch_from_block->branch.nez, rhs_block);
+
+    Ir* rhs_ir = irgen_ast_node(rhs);
+    Block* rhs_branch_from_block = irgen_block_branch(rhs_ir);
+    Block* true_block = irgen_block_new();
+    Ir* true_value = irgen_push_int(1);
+    irgen_push_binary(Ir_Kind_store, and_var_ir, true_value);
+    irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.nez, true_block);
+    Block* jump_from_true_block = irgen_block_jump();
+
+    Block* false_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&lhs_branch_from_block->branch.eqz, false_block);
+    irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.eqz, false_block);
+    Ir* false_value = irgen_push_int(0);
+    irgen_push_binary(Ir_Kind_store, and_var_ir, false_value);
+    Block* jump_from_false_block = irgen_block_jump();
+
+    Block* merge_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&jump_from_true_block->jump,  merge_block);
+    irgen_block_link_jump_to_block(&jump_from_false_block->jump, merge_block);
+
+    result = irgen_push_unary(Ir_Kind_load, and_var_ir);
+    and_var->declared_ir = result;
+    irgen_push_declare(and_var);
   } break;
   case Ast_Kind_if: {
     Ast_Node* cond = node->binary.lhs;

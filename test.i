@@ -204,6 +204,12 @@ WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 min : (a:F32; b:F32) -> if a < b do a else b
 max : (a:F32; b:F32) -> if a > b do a else b
 round : (a: F32) -> if a < 0.0 do F32(I32(a-0.5)) else F32(I32(a+0.5))
+equal : (a: F32; b: F32) -> B8 {
+  epsilon:F32 = 0.1
+  result:B8 = a+epsilon >= b && a-epsilon <= b
+  return result
+}
+
 
 intersection : (x0: F32; y0: F32; x1: F32; y1: F32) -> {
   xa: F32 = 1.0 + min(x0; x1) - max(x0; x1)
@@ -301,6 +307,15 @@ update : () -> {
     while i < game.snake_n do
       game.snake_p[i].x = round(game.snake_p[i].x)
       game.snake_p[i].y = round(game.snake_p[i].y)
+      i = i + 1
+    }
+    {
+      i: I32 = 1
+    while i < game.snake_n do
+      if equal(game.snake_p[0].x; game.snake_p[i].x)
+      && equal(game.snake_p[0].y; game.snake_p[i].y) do {
+        print_str("lost")
+      }
       i = i + 1
     }
 
