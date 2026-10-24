@@ -25,6 +25,45 @@ print_i64:(n:I64) -> {
   putchar 10
 }
 
+print_f32:(n:F32) -> {
+  if n < 0.0 do {
+    putchar 45 // -
+    n = -n
+  }
+
+  whole: I64 = I64 n
+  frac: I32 = I32 ((n - F32 whole) * 1000.0 + 0.5) // three decimal places
+  if frac >= 1000 do {
+    frac = 0
+    whole = whole + 1
+  }
+
+  if whole == 0 do
+    putchar 48
+  else {
+    buf: [20](0..9)
+    i:I8 = 0
+    while whole > 0 do {
+      buf[i] = whole % 10
+      whole = whole / 10
+      i = i + 1
+    }
+    while i > 0 do {
+      i = i - 1
+      putchar(buf[i] + 48)
+    }
+  }
+
+  putchar 46 // .
+
+  div: I32 = 100
+  while div > 0 do {
+    putchar(frac / div % 10 + 48)
+    div = div / 10
+  }
+  putchar 10
+}
+
 print_str:(str: Str) -> {
   i:I32 = 0
   while i < str.len do {
@@ -158,12 +197,13 @@ RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->
 print_str("Hello World!")
 
 BLOCK_PIXELS   : 24
-BLOCKS_PER_MS  : 0.015
+BLOCKS_PER_MS  : 0.005
 WINDOW_WIDTH   : BLOCK_PIXELS * game.width
 WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
 min : (a:F32; b:F32) -> if a < b do a else b
 max : (a:F32; b:F32) -> if a > b do a else b
+round : (a: F32) -> if a < 0.0 do F32(I32(a-0.5)) else F32(I32(a+0.5))
 
 intersection : (x0: F32; y0: F32; x1: F32; y1: F32) -> {
   xa: F32 = 1.0 + min(x0; x1) - max(x0; x1)
@@ -172,6 +212,29 @@ intersection : (x0: F32; y0: F32; x1: F32; y1: F32) -> {
   yOverlap: F32 = max(0.0; ya)
   return xOverlap * yOverlap
 }
+
+Vec2 : #type (
+  x: F32
+  y: F32
+)
+
+game : (
+  width   : 12
+  height  : 12
+  size    : width * height
+
+  snake_p : [size]Vec2
+  snake_v : [size]Vec2
+  next_v  : Vec2
+  snake_n : I32
+
+  food_p : [size]Vec2
+  food_n : I32
+
+  running : B8
+  last_tick : F32
+  last_time : F32
+)
 
 new_food : () -> {
   empty_n: I32 = game.size - game.snake_n - game.food_n
@@ -218,29 +281,6 @@ new_food : () -> {
   }
 }
 
-Vec2 : #type (
-  x: F32
-  y: F32
-)
-
-game : (
-  width   : 12
-  height  : 12
-  size    : width * height
-
-  snake_p : [size]Vec2
-  snake_v : [size]Vec2
-  next_v  : Vec2
-  snake_n : I32
-
-  food_p : [size]Vec2
-  food_n : I32
-
-  running : B8
-  last_tick : F32
-  last_time : F32
-)
-
 update : () -> {
   now: F32 = F32 GetTicks()
   dt:  F32 = now - game.last_tick
@@ -249,19 +289,49 @@ update : () -> {
   {
     i: I32 = 0
   while i < game.snake_n do
-    j : I32 = game.snake_n - 1 - i
-    game.snake_p[j].x = game.snake_p[j].x + game.snake_v[j].x * dt
-    game.snake_p[j].y = game.snake_p[j].y + game.snake_v[j].y * dt
+    game.snake_p[i].x = game.snake_p[i].x + game.snake_v[i].x * dt
+    game.snake_p[i].y = game.snake_p[i].y + game.snake_v[i].y * dt
     i = i + 1
   }
 
-  game.last_time = now - game.last_time
+  game.last_time = game.last_time + dt
   if (game.last_time * BLOCKS_PER_MS) >= 1.0 do { // one block is passed
-    game.last_time = now
+    {
+      i: I32 = 0
+    while i < game.snake_n do
+      game.snake_p[i].x = round(game.snake_p[i].x)
+      game.snake_p[i].y = round(game.snake_p[i].y)
+      i = i + 1
+    }
+
+    { // is food eaten?
+      i: I32 = 0
+    while i < game.food_n do
+      if intersection(game.snake_p[0].x; game.snake_p[0].y; game.food_p[i].x; game.food_p[i].y) > 0.2 do {
+        game.food_p[i].x = game.food_p[game.food_n-1].x
+        game.food_p[i].y = game.food_p[game.food_n-1].y
+        game.food_n = game.food_n - 1
+        game.snake_n = game.snake_n + 1
+        new_food()
+        game.snake_p[game.snake_n-1].x = game.snake_p[game.snake_n-2].x
+        game.snake_p[game.snake_n-1].y = game.snake_p[game.snake_n-2].y
+      }
+      i = i + 1
+    }
+
     game.snake_v[0].x = game.next_v.x
     game.snake_v[0].y = game.next_v.y
-    print_str "Turn"
-    print_f32 game.last_time
+
+    { i: I32 = 1
+    while i < game.snake_n do
+      dx: F32 = game.snake_p[i-1].x - game.snake_p[i].x
+      dy: F32 = game.snake_p[i-1].y - game.snake_p[i].y
+      game.snake_v[i].x = BLOCKS_PER_MS * dx
+      game.snake_v[i].y = BLOCKS_PER_MS * dy
+      i = i + 1
+    }
+
+    game.last_time = 0
   }
 }
 
@@ -283,19 +353,18 @@ draw : () -> {
   {
     r: FRect = (0.0; 0.0; BLOCK_PIXELS - 2.0; BLOCK_PIXELS - 2.0)
     i: I32 = 0
-    r.x = game.snake_p[i].x * (r.w + 2.0)
-    r.y = game.snake_p[i].y * (r.h + 2.0)
-    SetRenderDrawColor(renderer; 127; 127; 16; ALPHA_OPAQUE)
-    RenderFillRect(renderer; @r)
-    i = i + 1
-
   while i < game.snake_n do
     r.x = game.snake_p[i].x * (r.w + 2.0)
     r.y = game.snake_p[i].y * (r.h + 2.0)
     SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
     RenderFillRect(renderer; @r)
     i = i + 1
+  r.x = game.snake_p[0].x * (r.w + 2.0)
+  r.y = game.snake_p[0].y * (r.h + 2.0)
+  SetRenderDrawColor(renderer; 127; 127; 16; ALPHA_OPAQUE)
+  RenderFillRect(renderer; @r)
   }
+
 
   RenderPresent(renderer)
 }

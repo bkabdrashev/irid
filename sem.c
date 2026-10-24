@@ -3386,12 +3386,12 @@ void sem_ir(Block* block, Ir* ir) {
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
       else if (type_is_float(types.one)) {
-        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
-        result = casted;
+        type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
       else if (type_is_float(types.two)) {
-        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
-        result = casted;
+        type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = type_float_full(types.two->scalar->bits_exp, types.two->scalar->bits_man);
       }
     }
     else {
@@ -3416,12 +3416,12 @@ void sem_ir(Block* block, Ir* ir) {
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
       else if (type_is_float(types.one)) {
-        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
-        result = casted;
+        type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
       else if (type_is_float(types.two)) {
-        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
-        result = casted;
+        type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = type_float_full(types.two->scalar->bits_exp, types.two->scalar->bits_man);
       }
     }
     else {
@@ -3457,12 +3457,12 @@ void sem_ir(Block* block, Ir* ir) {
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
       else if (type_is_float(types.one)) {
-        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
-        result = casted;
+        type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
       else if (type_is_float(types.two)) {
-        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
-        result = casted;
+        type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = type_float_full(types.two->scalar->bits_exp, types.two->scalar->bits_man);
       }
     }
     else {
@@ -3487,12 +3487,12 @@ void sem_ir(Block* block, Ir* ir) {
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
       else if (type_is_float(types.one)) {
-        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
-        result = casted;
+        type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
       else if (type_is_float(types.two)) {
-        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
-        result = casted;
+        type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = type_float_full(types.two->scalar->bits_exp, types.two->scalar->bits_man);
       }
     }
     else {
@@ -3512,12 +3512,12 @@ void sem_ir(Block* block, Ir* ir) {
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
       else if (type_is_float(types.one)) {
-        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
-        result = casted;
+        type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
       else if (type_is_float(types.two)) {
-        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
-        result = casted;
+        type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = type_float_full(types.two->scalar->bits_exp, types.two->scalar->bits_man);
       }
     }
     else {
