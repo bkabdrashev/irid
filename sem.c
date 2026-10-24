@@ -1341,7 +1341,11 @@ Type* type_float_full(I16 bits_exp, I16 bits_man) {
 }
 
 B8 type_is_float(Type* type) {
-  return type->kind == Type_Kind_scalar && type->scalar->kind == Scalar_Kind_float;
+  return type->scalar->kind == Scalar_Kind_float;
+}
+
+B8 type_is_int(Type* type) {
+  return type->scalar->kind == Scalar_Kind_int;
 }
 
 Scalar* sem_scalar_float_widen(Scalar* scalar) {
@@ -3374,12 +3378,20 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_float(types.one) && type_is_float(types.two)) {
         result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
-      else {
+      else if (type_is_int(types.one) && type_is_int(types.two)) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         Range one = scalar_limits(pair.one);
         Range two = scalar_limits(pair.two);
         Range range = { one.lo+two.lo, one.hi+two.hi };
         result = sem_scalar_reflow_binary(block, ir, range, types);
+      }
+      else if (type_is_float(types.one)) {
+        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = casted;
+      }
+      else if (type_is_float(types.two)) {
+        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = casted;
       }
     }
     else {
@@ -3392,7 +3404,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_float(types.one) && type_is_float(types.two)) {
         result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
-      else {
+      else if (type_is_int(types.one) && type_is_int(types.two)) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         Range one = scalar_limits(pair.one);
         Range two = scalar_limits(pair.two);
@@ -3402,6 +3414,14 @@ void sem_ir(Block* block, Ir* ir) {
         I64 d = one.lo - two.lo;
         Range range = { min(min(min(a, b), c), d), max(max(max(a, b), c), d) };
         result = sem_scalar_reflow_binary(block, ir, range, types);
+      }
+      else if (type_is_float(types.one)) {
+        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = casted;
+      }
+      else if (type_is_float(types.two)) {
+        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = casted;
       }
     }
     else {
@@ -3414,7 +3434,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_float(types.one) && type_is_float(types.two)) {
         result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
-      else {
+      else if (type_is_int(types.one) && type_is_int(types.two)) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         Range one = scalar_limits(pair.one);
         Range two = scalar_limits(pair.two);
@@ -3436,6 +3456,14 @@ void sem_ir(Block* block, Ir* ir) {
         }
         result = sem_scalar_reflow_binary(block, ir, range, types);
       }
+      else if (type_is_float(types.one)) {
+        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = casted;
+      }
+      else if (type_is_float(types.two)) {
+        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = casted;
+      }
     }
     else {
       sem_error_binary_operand(ir, "*");
@@ -3447,7 +3475,7 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_float(types.one) && type_is_float(types.two)) {
         result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
-      else {
+      else if (type_is_int(types.one) && type_is_int(types.two)) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         I64 max_one = scalar_max(pair.one);
         I64 max_two = scalar_max(pair.two);
@@ -3457,6 +3485,14 @@ void sem_ir(Block* block, Ir* ir) {
         I64 min = min_one / max_two;
         Range range = { .lo = min, .hi = max };
         result = sem_scalar_reflow_binary(block, ir, range, types);
+      }
+      else if (type_is_float(types.one)) {
+        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = casted;
+      }
+      else if (type_is_float(types.two)) {
+        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = casted;
       }
     }
     else {
@@ -3469,11 +3505,19 @@ void sem_ir(Block* block, Ir* ir) {
       if (type_is_float(types.one) && type_is_float(types.two)) {
         result = type_float_full(types.one->scalar->bits_exp, types.one->scalar->bits_man);
       }
-      else {
+      else if (type_is_int(types.one) && type_is_int(types.two)) {
         Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
         I64 max_two = scalar_max(pair.two);
         Range range  = { .lo = 0, .hi = max_two-1 };
         result = sem_scalar_reflow_binary(block, ir, range, types);
+      }
+      else if (type_is_float(types.one)) {
+        Type* casted = type_auto_cast(block, &ir->binary.two, types.two, types.one);
+        result = casted;
+      }
+      else if (type_is_float(types.two)) {
+        Type* casted = type_auto_cast(block, &ir->binary.one, types.one, types.two);
+        result = casted;
       }
     }
     else {

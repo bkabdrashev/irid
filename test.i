@@ -158,7 +158,7 @@ RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->
 print_str("Hello World!")
 
 BLOCK_PIXELS   : 24
-BLOCKS_PER_MS  : 0.005
+BLOCKS_PER_MS  : 0.015
 WINDOW_WIDTH   : BLOCK_PIXELS * game.width
 WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
@@ -229,7 +229,8 @@ game : (
   size    : width * height
 
   snake_p : [size]Vec2
-  snake_v : Vec2
+  snake_v : [size]Vec2
+  next_v  : Vec2
   snake_n : I32
 
   food_p : [size]Vec2
@@ -237,7 +238,67 @@ game : (
 
   running : B8
   last_tick : F32
+  last_time : F32
 )
+
+update : () -> {
+  now: F32 = F32 GetTicks()
+  dt:  F32 = now - game.last_tick
+  game.last_tick = now
+
+  {
+    i: I32 = 0
+  while i < game.snake_n do
+    j : I32 = game.snake_n - 1 - i
+    game.snake_p[j].x = game.snake_p[j].x + game.snake_v[j].x * dt
+    game.snake_p[j].y = game.snake_p[j].y + game.snake_v[j].y * dt
+    i = i + 1
+  }
+
+  game.last_time = now - game.last_time
+  if (game.last_time * BLOCKS_PER_MS) >= 1.0 do { // one block is passed
+    game.last_time = now
+    game.snake_v[0].x = game.next_v.x
+    game.snake_v[0].y = game.next_v.y
+    print_str "Turn"
+    print_f32 game.last_time
+  }
+}
+
+draw : () -> {
+  SetRenderDrawColor(renderer; 15; 15; 15; ALPHA_OPAQUE)
+  RenderClear(renderer)
+
+  {
+    r: FRect = (0.0; 0.0; BLOCK_PIXELS - 2.0; BLOCK_PIXELS - 2.0)
+    i: I32 = 0
+  while i < game.food_n do
+    r.x = game.food_p[i].x * (r.w + 2.0)
+    r.y = game.food_p[i].y * (r.h + 2.0)
+    SetRenderDrawColor(renderer; 127; 16; 16; ALPHA_OPAQUE)
+    RenderFillRect(renderer; @r)
+    i = i + 1
+  }
+
+  {
+    r: FRect = (0.0; 0.0; BLOCK_PIXELS - 2.0; BLOCK_PIXELS - 2.0)
+    i: I32 = 0
+    r.x = game.snake_p[i].x * (r.w + 2.0)
+    r.y = game.snake_p[i].y * (r.h + 2.0)
+    SetRenderDrawColor(renderer; 127; 127; 16; ALPHA_OPAQUE)
+    RenderFillRect(renderer; @r)
+    i = i + 1
+
+  while i < game.snake_n do
+    r.x = game.snake_p[i].x * (r.w + 2.0)
+    r.y = game.snake_p[i].y * (r.h + 2.0)
+    SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
+    RenderFillRect(renderer; @r)
+    i = i + 1
+  }
+
+  RenderPresent(renderer)
+}
 
 init(INIT_VIDEO | INIT_EVENTS)
 window:   @Window   = CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
@@ -245,11 +306,14 @@ renderer: @Renderer = CreateRenderer(window; @ "\0"[0])
 
 game.running = 1
 game.snake_n = 1
-game.snake_p[0].x = game.width'F32  / 2.0 - 1.0
-game.snake_p[0].y = game.height'F32 / 2.0 - 1.0
-game.snake_v.x = 0.0
-game.snake_v.y = 0.0
+game.snake_p[0].x = game.width  / 2.0 - 1.0
+game.snake_p[0].y = game.height / 2.0 - 1.0
+game.snake_v[0].x = 0.0
+game.snake_v[0].y = 0.0
+game.next_v.x = 0.0
+game.next_v.y = 0.0
 game.last_tick = F32 GetTicks()
+game.last_time = 0.0
 new_food()
 
 while game.running do {
@@ -267,72 +331,31 @@ while game.running do {
       }
       else if event.scancode == SCANCODE_H do {
         print_str("Left")
-        game.snake_v.x = -BLOCKS_PER_MS
-        game.snake_v.y = 0.0
+        game.next_v.x = -BLOCKS_PER_MS
+        game.next_v.y = 0.0
       }
       else if event.scancode == SCANCODE_L do {
         print_str("Right")
-        game.snake_v.x = +BLOCKS_PER_MS
-        game.snake_v.y = 0
+        game.next_v.x = +BLOCKS_PER_MS
+        game.next_v.y = 0
       }
       else if event.scancode == SCANCODE_K do {
         print_str("Up")
-        game.snake_v.x = 0
-        game.snake_v.y = -BLOCKS_PER_MS
+        game.next_v.x = 0
+        game.next_v.y = -BLOCKS_PER_MS
       }
       else if event.scancode == SCANCODE_J do {
         print_str("Down")
-        game.snake_v.x = 0
-        game.snake_v.y = +BLOCKS_PER_MS
+        game.next_v.x = 0
+        game.next_v.y = +BLOCKS_PER_MS
       }
     }
     else if event.type == MOUSE_MOTION do {
     }
   }
-  SetRenderDrawColor(renderer; 15; 15; 15; ALPHA_OPAQUE)
-  RenderClear(renderer)
 
-  {
-    i: I32 = 0
-    r: FRect = (0.0; 0.0; BLOCK_PIXELS; BLOCK_PIXELS)
-    now: F32 = F32 GetTicks()
-    dt: F32 = now - game.last_tick
-    game.last_tick = now
-  while i < game.snake_n do
-    r.x = game.snake_p[i].x * (r.w + 2.0)
-    r.y = game.snake_p[i].y * (r.h + 2.0)
-    SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
-    RenderFillRect(renderer; @r)
-
-    game.snake_p[i].x = game.snake_p[i].x + game.snake_v.x * dt
-    game.snake_p[i].y = game.snake_p[i].y + game.snake_v.y * dt
-
-    i = i + 1
-  }
-
-  {
-    i: I32 = 0
-    r: FRect = (0.0; 0.0; BLOCK_PIXELS; BLOCK_PIXELS)
-  while i < game.food_n do
-    r.x = game.food_p[i].x * (r.w + 2.0)
-    r.y = game.food_p[i].y * (r.h + 2.0)
-    SetRenderDrawColor(renderer; 127; 16; 16; ALPHA_OPAQUE)
-    RenderFillRect(renderer; @r)
-    i = i + 1
-  }
-
-  // for i in 1..game.snake_n-1 do {
-  //   r.x = game.snake[i].x * (r.w + 2)
-  //   r.y = game.snake[i].y * (r.h + 2)
-  //   sdl.SetRenderDrawColor(renderer, 0, 128, 0, sdl.ALPHA_OPAQUE)
-  //   sdl.RenderFillRect(renderer, r)
-  // }
-  // r.x = game.snake.0.x * (r.w + 2)
-  // r.y = game.snake.0.y * (r.h + 2)
-  // SetRenderDrawColor(renderer; 128; 128; 0; ALPHA_OPAQUE)
-  // RenderFillRect(renderer; r)
-
-  RenderPresent(renderer)
+  update()
+  draw()
   Delay(10)
   // game.running = 0;
 }
