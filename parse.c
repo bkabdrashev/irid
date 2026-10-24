@@ -21,7 +21,10 @@ typedef enum Ast_Kind {
 
   Ast_Kind_or        = Token_Kind_pipe,
   Ast_Kind_xor       = Token_Kind_pike,
-  Ast_Kind_and       = Token_Kind_ampersand,
+  Ast_Kind_and       = Token_Kind_amp,
+
+  Ast_Kind_logic_and = Token_Kind_amp_amp,
+  Ast_Kind_logic_or  = Token_Kind_pipe_pipe,
 
   Ast_Kind_eq        = Token_Kind_equal_equal,
   Ast_Kind_ne        = Token_Kind_bang_equal,
@@ -165,6 +168,8 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_or:           result = "|"; break;
   case Ast_Kind_xor:          result = "^"; break;
   case Ast_Kind_and:          result = "&"; break;
+  case Ast_Kind_logic_or:     result = "||"; break;
+  case Ast_Kind_logic_and:    result = "&&"; break;
   case Ast_Kind_eq:           result = "=="; break;
   case Ast_Kind_ne:           result = "!="; break;
   case Ast_Kind_lt:           result = "<"; break;
@@ -314,6 +319,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_mul:
   case Ast_Kind_dot:
   case Ast_Kind_fun:
+  case Ast_Kind_logic_and: case Ast_Kind_logic_or:
   case Ast_Kind_meet: case Ast_Kind_join: case Ast_Kind_range:
     {
     string_builder_push_cstr(sb, "(");
@@ -417,46 +423,52 @@ I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
   case Ast_Kind_meet:
     result = 6;
   break;
-  case Ast_Kind_or:
+  case Ast_Kind_logic_or:
     result = 8;
   break;
-  case Ast_Kind_xor:
+  case Ast_Kind_logic_and:
     result = 10;
   break;
-  case Ast_Kind_and:
+  case Ast_Kind_or:
     result = 12;
+  break;
+  case Ast_Kind_xor:
+    result = 14;
+  break;
+  case Ast_Kind_and:
+    result = 16;
   break;
   case Ast_Kind_ne: case Ast_Kind_eq:
   case Ast_Kind_lt: case Ast_Kind_le:
   case Ast_Kind_gt: case Ast_Kind_ge:
-    result = 14;
+    result = 18;
   break;
   case Ast_Kind_join:
   case Ast_Kind_range:
-    result = 16;
+    result = 20;
   break;
   case Ast_Kind_sub:
   case Ast_Kind_add:
-    result = 20;
+    result = 24;
   break;
   case Ast_Kind_mul:
   case Ast_Kind_div: case Ast_Kind_rem:
-    result = 22;
+    result = 26;
   break;
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:
   case Ast_Kind_array:
   case Ast_Kind_span:
-    result = 24;
+    result = 28;
   break;
   case Ast_Kind_load:
-    result = 26;
+    result = 30;
   break;
   case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
-    result = 28;
+    result = 32;
   break;
   default :
     result = 0;
@@ -477,40 +489,46 @@ I32 parse_left_precedence(Ast_Kind kind, I32 token_flags) {
   case Ast_Kind_meet:
     result = 5;
   break;
-  case Ast_Kind_or:
+  case Ast_Kind_logic_or:
     result = 7;
   break;
-  case Ast_Kind_xor:
+  case Ast_Kind_logic_and:
     result = 9;
   break;
-  case Ast_Kind_and:
+  case Ast_Kind_or:
     result = 11;
+  break;
+  case Ast_Kind_xor:
+    result = 13;
+  break;
+  case Ast_Kind_and:
+    result = 15;
   break;
   case Ast_Kind_ne: case Ast_Kind_eq:
   case Ast_Kind_lt: case Ast_Kind_le:
   case Ast_Kind_gt: case Ast_Kind_ge:
-    result = 13;
+    result = 17;
   break;
   case Ast_Kind_join:
   case Ast_Kind_range:
-    result = 15;
+    result = 19;
   break;
   case Ast_Kind_sub:
   case Ast_Kind_add:
-    result = 19;
+    result = 23;
   break;
   case Ast_Kind_mul:
   case Ast_Kind_div: case Ast_Kind_rem:
-    result = 21;
+    result = 25;
   break;
   case Ast_Kind_load:
-    result = 25;
+    result = 29;
   break;
   case Ast_Kind_subscript:
   case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
-    result = 27;
+    result = 31;
   break;
   default :
     result = 0;
@@ -663,7 +681,7 @@ B8 parse_token_starts_statement(Token_Kind kind) {
   case Token_Kind_percent:
   case Token_Kind_pipe:
   case Token_Kind_pike:
-  case Token_Kind_ampersand:
+  case Token_Kind_amp:
   case Token_Kind_dot:
   case Token_Kind_dot_dot:
   case Token_Kind_arrow:
@@ -837,7 +855,8 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     case Token_Kind_bang_equal: case Token_Kind_equal_equal:
     case Token_Kind_less_equal: case Token_Kind_less:
     case Token_Kind_greater_equal: case Token_Kind_greater:
-    case Token_Kind_pipe: case Token_Kind_pike: case Token_Kind_ampersand:
+    case Token_Kind_pipe: case Token_Kind_pike: case Token_Kind_amp:
+    case Token_Kind_pipe_pipe: case Token_Kind_amp_amp:
     case Token_Kind_plus: case Token_Kind_minus: case Token_Kind_star: case Token_Kind_slash: case Token_Kind_percent:
     {
       Ast_Kind kind = (Ast_Kind)token.kind;
@@ -1039,9 +1058,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node = ast_new_node(parser->perm_arena, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
-    node->loc = loc_join(token.loc,
-                         loc_join(cond ? cond->loc : LOC_NONE,
-                                  while_block ? while_block->loc : LOC_NONE));
+    node->loc = loc_join(token.loc, loc_join(cond ? cond->loc : LOC_NONE, while_block ? while_block->loc : LOC_NONE));
   } break;
   case Token_Kind_paren_open: {
     Ast_List* fa_temp(parser->list_arena, temp);
@@ -1533,6 +1550,7 @@ void diag_test(void) {
 }
 
 void parse_test(void) {
+  test("if a < 1\n || b < 2 do 3",        "");
   return;
   test("arr[a@]",        "");
   test("a b->c",        "(a (b -> c))");

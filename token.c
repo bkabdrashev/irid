@@ -45,7 +45,9 @@ typedef enum Token_Kind {
   Token_Kind_dot_dot            = 57,
   Token_Kind_pipe               = 59,
   Token_Kind_pike               = 61,
-  Token_Kind_ampersand          = 63,
+  Token_Kind_amp                = 63,
+  Token_Kind_pipe_pipe          = 65,
+  Token_Kind_amp_amp            = 67,
 
   Token_Kind_name               = String_Kind_name | Token_Kind_Flag_call_rhs,
   Token_Kind_if                 = String_Kind_if | Token_Kind_Flag_call_rhs,
@@ -98,8 +100,10 @@ Cstr cstr_from_token_kind(Token_Kind kind) {
   case Token_Kind_percent:           return "%";
   case Token_Kind_dot_dot:           return "..";
   case Token_Kind_pipe:              return "|";
+  case Token_Kind_pipe_pipe:         return "||";
+  case Token_Kind_amp_amp:           return "&&";
   case Token_Kind_pike:              return "^";
-  case Token_Kind_ampersand:         return "&";
+  case Token_Kind_amp:               return "&";
   case Token_Kind_name:              return "identifier";
   case Token_Kind_if:                return "if";
   case Token_Kind_do:                return "do";

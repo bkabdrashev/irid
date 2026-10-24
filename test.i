@@ -304,6 +304,14 @@ update : () -> {
       i = i + 1
     }
 
+    if game.snake_p[0].x < 0.0
+    || game.snake_p[0].y < 0.0
+    || game.snake_p[0].x >= F32(game.width)
+    || game.snake_p[0].y >= F32(game.height) do { // game over
+      print_str("lost")
+      game.running = 0
+    }
+
     { // is food eaten?
       i: I32 = 0
     while i < game.food_n do
@@ -383,6 +391,8 @@ game.next_v.x = 0.0
 game.next_v.y = 0.0
 game.last_tick = F32 GetTicks()
 game.last_time = 0.0
+new_food()
+new_food()
 new_food()
 
 while game.running do {

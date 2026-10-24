@@ -1299,6 +1299,58 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs = irgen_ast_node(node->binary.rhs);
     result = irgen_push_binary((Ir_Kind)node->kind | Ir_Flag_binary, lhs, rhs);
   } break;
+  case Ast_Kind_logic_or: {
+    /*
+    if A then .1 else .2
+    .true_block:
+      store 1
+    jump merge
+    .lhs_eqz_block:
+    if B then .1 else .3
+    .false_block:
+      store 0
+    jump end
+    .end:
+    */
+    Var* or_var = irgen_var_new();
+    or_var->name = str_from_cstr("__or_result");
+    Ir* or_var_ir = irgen_push_var(or_var);
+
+    Ast_Node* lhs = node->binary.lhs;
+    Ir* lhs_ir = irgen_ast_node(lhs);
+    Ast_Node* rhs = node->binary.rhs;
+    Block* lhs_branch_from_block = irgen_block_branch(lhs_ir);
+
+    Block* true_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&lhs_branch_from_block->branch.nez, true_block);
+    Ir* lhs_true = irgen_push_int(1);
+    irgen_push_binary(Ir_Kind_store, or_var_ir, lhs_true);
+
+    Block* jump_from_true_block = irgen_block_jump();
+    Block* lhs_eqz_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&lhs_branch_from_block->branch.eqz, lhs_eqz_block);
+
+
+    Ir* rhs_ir = irgen_ast_node(rhs);
+    Block* rhs_branch_from_block = irgen_block_branch(rhs_ir);
+    irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.nez, true_block);
+
+    Block* false_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.eqz, false_block);
+    Ir* false_value = irgen_push_int(0);
+    irgen_push_binary(Ir_Kind_store, or_var_ir, false_value);
+
+    Block* jump_from_false_block = irgen_block_jump();
+    Block* merge_block = irgen_block_new();
+    irgen_block_link_jump_to_block(&jump_from_true_block->jump,  merge_block);
+    irgen_block_link_jump_to_block(&jump_from_false_block->jump, merge_block);
+
+    result = irgen_push_unary(Ir_Kind_load, or_var_ir);
+    or_var->declared_ir = result;
+    irgen_push_declare(or_var);
+  } break;
+  case Ast_Kind_logic_and: {
+  } break;
   case Ast_Kind_if: {
     Ast_Node* cond = node->binary.lhs;
     Ast_Node* then = node->binary.rhs;

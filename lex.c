@@ -319,14 +319,22 @@ Tokens lex_source(Arena* arena, Source_Map* sources, File_Id file, Diags* diags)
     case '|': {
       token.kind = Token_Kind_pipe;
       lex_advance();
+      if (*lexer.stream == '|') {
+        token.kind = Token_Kind_pipe_pipe;
+        lex_advance();
+      }
     } break;
     case '^': {
       token.kind = Token_Kind_pike;
       lex_advance();
     } break;
     case '&': {
-      token.kind = Token_Kind_ampersand;
+      token.kind = Token_Kind_amp;
       lex_advance();
+      if (*lexer.stream == '&') {
+        token.kind = Token_Kind_amp_amp;
+        lex_advance();
+      }
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
@@ -539,7 +547,9 @@ Tokens lex_source(Arena* arena, Source_Map* sources, File_Id file, Diags* diags)
     }
     if (lexer.wasnewline) {
       token.flag |= Token_Flag_wasnewline;
+      token.flag |= Token_Flag_wasspace;
       Token* top = tokens_top(&slice_token);
+      top->flag |= Token_Flag_willspace;
       top->flag |= Token_Flag_willnewline;
     }
     if (lexer.wasspace) {
@@ -621,11 +631,17 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     case Token_Kind_pipe:
       string_builder_push_cstr(&sb, "|");
     break;
-    case Token_Kind_pike:
-      string_builder_push_cstr(&sb, "|");
+    case Token_Kind_pipe_pipe:
+      string_builder_push_cstr(&sb, "||");
     break;
-    case Token_Kind_ampersand:
+    case Token_Kind_pike:
+      string_builder_push_cstr(&sb, "^");
+    break;
+    case Token_Kind_amp:
       string_builder_push_cstr(&sb, "&");
+    break;
+    case Token_Kind_amp_amp:
+      string_builder_push_cstr(&sb, "&&");
     break;
     case Token_Kind_equal_equal:
       string_builder_push_cstr(&sb, "==");
