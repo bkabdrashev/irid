@@ -196,8 +196,8 @@ RenderPresent      : #foreign.c "SDL_RenderPresent"      (renderer: @Renderer)->
 
 print_str("Hello World!")
 
-BLOCK_PIXELS   : 24
-BLOCKS_PER_MS  : 0.005
+BLOCK_PIXELS   : 64
+BLOCKS_PER_MS  : 0.004
 WINDOW_WIDTH   : BLOCK_PIXELS * game.width
 WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 
@@ -205,7 +205,7 @@ min : (a:F32; b:F32) -> if a < b do a else b
 max : (a:F32; b:F32) -> if a > b do a else b
 round : (a: F32) -> if a < 0.0 do F32(I32(a-0.5)) else F32(I32(a+0.5))
 equal : (a: F32; b: F32) -> B8 {
-  epsilon:F32 = 0.1
+  epsilon:F32 = 0.00001
   result:B8 = a+epsilon >= b && a-epsilon <= b
   return result
 }
@@ -225,8 +225,8 @@ Vec2 : #type (
 )
 
 game : (
-  width   : 12
-  height  : 12
+  width   : 8
+  height  : 8
   size    : width * height
 
   snake_p : [size]Vec2
@@ -312,12 +312,19 @@ update : () -> {
     {
       i: I32 = 1
     while i < game.snake_n do
-      if equal(game.snake_p[0].x; game.snake_p[i].x) && equal(game.snake_p[0].y; game.snake_p[i].y) do {
+      if equal(game.snake_p[0].x; game.snake_p[i].x)
+      && equal(game.snake_p[0].y; game.snake_p[i].y) do {
         print_str("lost")
         game.running = 0
       }
       i = i + 1
     }
+
+    if game.snake_n >= game.size do { // game is won
+      print_str("won")
+      game.running = 0
+    }
+
 
     if game.snake_p[0].x < 0.0
     || game.snake_p[0].y < 0.0
@@ -406,9 +413,8 @@ game.next_v.x = 0.0
 game.next_v.y = 0.0
 game.last_tick = F32 GetTicks()
 game.last_time = 0.0
-new_food()
-new_food()
-new_food()
+new_food(); new_food()
+new_food(); new_food()
 
 while game.running do {
   event: Event
@@ -423,25 +429,33 @@ while game.running do {
         print_str("Escape")
         game.running = 0
       }
-      else if event.scancode == SCANCODE_H && game.snake_v[0].x == 0 do {
-        print_str("Left")
-        game.next_v.x = -BLOCKS_PER_MS
-        game.next_v.y = 0.0
+      /* FIX: && breaks the join records narrowing. It thinks .scancode doesn't appear all records
+      else if event.scancode == SCANCODE_H && equal(game.snake_v[0].x; 0.0) do
+      else if event.scancode == SCANCODE_L do && equal(game.snake_v[0].x; 0.0) do
+      */
+      else if event.scancode == SCANCODE_H do {
+        if equal(game.snake_v[0].x; 0.0) do {
+          game.next_v.x = -BLOCKS_PER_MS
+          game.next_v.y = 0.0
+        }
       }
-      else if event.scancode == SCANCODE_L && game.snake_v[0].x == 0 do {
-        print_str("Right")
-        game.next_v.x = +BLOCKS_PER_MS
-        game.next_v.y = 0
+      else if event.scancode == SCANCODE_L do {
+        if equal(game.snake_v[0].x; 0.0) do {
+          game.next_v.x = +BLOCKS_PER_MS
+          game.next_v.y = 0
+        }
       }
-      else if event.scancode == SCANCODE_K && game.snake_v[0].y == 0 do {
-        print_str("Up")
-        game.next_v.x = 0
-        game.next_v.y = -BLOCKS_PER_MS
+      else if event.scancode == SCANCODE_K do {
+        if equal(game.snake_v[0].y; 0.0) do {
+          game.next_v.x = 0
+          game.next_v.y = -BLOCKS_PER_MS
+        }
       }
-      else if event.scancode == SCANCODE_J && game.snake_v[0].y == 0 do {
-        print_str("Down")
-        game.next_v.x = 0
-        game.next_v.y = +BLOCKS_PER_MS
+      else if event.scancode == SCANCODE_J do {
+        if equal(game.snake_v[0].y; 0.0) do {
+          game.next_v.x = 0
+          game.next_v.y = +BLOCKS_PER_MS
+        }
       }
     }
     else if event.type == MOUSE_MOTION do {

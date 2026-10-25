@@ -924,7 +924,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   }
 
   printf("Generated LLVM IR:\n");
-  // LLVMDumpModule(llvm_gen.module);
+  LLVMDumpModule(llvm_gen.module);
 
   char *verify_error = NULL;
   if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &verify_error)) {
@@ -1028,12 +1028,12 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   fa_init(&arena, ast.list, 1);
   fa_add(ast.list, node);
 
-  Funs funs            = irgen_ast(&arena, ast, length, &diags);
+  Funs funs = irgen_ast(&arena, ast, length, &diags);
   if (diags_has_errors(&diags)) {
     diag_print_all(&diags, &sources, stdout, false);
     assert(0);
   }
-                         sem_funs(&arena, funs, &diags);
+  sem_funs(&arena, funs, &diags);
   if (diags_has_errors(&diags)) {
     diag_print_all(&diags, &sources, stdout, false);
     assert(0);
