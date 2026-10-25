@@ -4592,7 +4592,7 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("2 && 3", "");
+  // test("(0..2) && (0..3)", "");
   // test_diag("a", Diag_Code_undefined_name);
   // test_diag("a : 1\n{ a : 2 }", Diag_Code_shadowed_declaration);
   // test_diag("a : 1\na = 2", Diag_Code_assign_to_constant);

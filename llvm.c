@@ -924,7 +924,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   }
 
   printf("Generated LLVM IR:\n");
-  LLVMDumpModule(llvm_gen.module);
+  // LLVMDumpModule(llvm_gen.module);
 
   char *verify_error = NULL;
   if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &verify_error)) {

@@ -207,10 +207,6 @@ round : (a: F32) -> if a < 0.0 do F32(I32(a-0.5)) else F32(I32(a+0.5))
 equal : (a: F32; b: F32) -> B8 {
   epsilon:F32 = 0.1
   result:B8 = a+epsilon >= b && a-epsilon <= b
-  print_str("equal?")
-  print_i64(a+epsilon >= b)
-  print_i64(a-epsilon <= b)
-  print_i64(result)
   return result
 }
 
@@ -318,9 +314,6 @@ update : () -> {
     while i < game.snake_n do
       if equal(game.snake_p[0].x; game.snake_p[i].x) && equal(game.snake_p[0].y; game.snake_p[i].y) do {
         print_str("lost")
-        print_i64 equal(game.snake_p[0].x; game.snake_p[i].x)
-        print_i64 equal(game.snake_p[0].y; game.snake_p[i].y)
-        print_i64 equal(game.snake_p[0].x; game.snake_p[i].x)&&equal(game.snake_p[0].y; game.snake_p[i].y)
         game.running = 0
       }
       i = i + 1
@@ -430,22 +423,22 @@ while game.running do {
         print_str("Escape")
         game.running = 0
       }
-      else if event.scancode == SCANCODE_H do {
+      else if event.scancode == SCANCODE_H && game.snake_v[0].x == 0 do {
         print_str("Left")
         game.next_v.x = -BLOCKS_PER_MS
         game.next_v.y = 0.0
       }
-      else if event.scancode == SCANCODE_L do {
+      else if event.scancode == SCANCODE_L && game.snake_v[0].x == 0 do {
         print_str("Right")
         game.next_v.x = +BLOCKS_PER_MS
         game.next_v.y = 0
       }
-      else if event.scancode == SCANCODE_K do {
+      else if event.scancode == SCANCODE_K && game.snake_v[0].y == 0 do {
         print_str("Up")
         game.next_v.x = 0
         game.next_v.y = -BLOCKS_PER_MS
       }
-      else if event.scancode == SCANCODE_J do {
+      else if event.scancode == SCANCODE_J && game.snake_v[0].y == 0 do {
         print_str("Down")
         game.next_v.x = 0
         game.next_v.y = +BLOCKS_PER_MS

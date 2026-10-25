@@ -392,6 +392,11 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "@");
     string_builder_push_var(sb, ir->var);
   }
+  else if (ir->kind == Ir_Kind_load) {
+    if (ir->unary->kind == Ir_Kind_var) {
+      string_builder_push_var(sb, ir->unary->var);
+    }
+  }
   else if (ir == irgen.irid_len) {
     string_builder_push_cstr(sb, "len");
   }
@@ -1324,6 +1329,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Var* or_var = irgen_var_new();
     or_var->name = str_from_cstr("__or_result");
     Ir* or_var_ir = irgen_push_var(or_var);
+    Ir* false_value = irgen_push_int(0);
+    Ir* true_value = irgen_push_int(1);
+    or_var->declared_ir = irgen_push_binary(Ir_Kind_range, false_value, true_value);
 
     Ast_Node* lhs = node->binary.lhs;
     Ir* lhs_ir = irgen_ast_node(lhs);
@@ -1332,8 +1340,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
 
     Block* true_block = irgen_block_new();
     irgen_block_link_jump_to_block(&lhs_branch_from_block->branch.nez, true_block);
-    Ir* lhs_true = irgen_push_int(1);
-    irgen_push_binary(Ir_Kind_store, or_var_ir, lhs_true);
+    irgen_push_binary(Ir_Kind_store, or_var_ir, true_value);
 
     Block* jump_from_true_block = irgen_block_jump();
     Block* lhs_eqz_block = irgen_block_new();
@@ -1346,7 +1353,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
 
     Block* false_block = irgen_block_new();
     irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.eqz, false_block);
-    Ir* false_value = irgen_push_int(0);
     irgen_push_binary(Ir_Kind_store, or_var_ir, false_value);
 
     Block* jump_from_false_block = irgen_block_jump();
@@ -1374,6 +1380,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Var* and_var = irgen_var_new();
     and_var->name = str_from_cstr("__and_result");
     Ir* and_var_ir = irgen_push_var(and_var);
+    Ir* false_value = irgen_push_int(0);
+    Ir* true_value = irgen_push_int(1);
+    and_var->declared_ir = irgen_push_binary(Ir_Kind_range, false_value, true_value);
+    irgen_push_declare(and_var);
 
     Ast_Node* lhs = node->binary.lhs;
     Ast_Node* rhs = node->binary.rhs;
@@ -1387,7 +1397,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* rhs_ir = irgen_ast_node(rhs);
     Block* rhs_branch_from_block = irgen_block_branch(rhs_ir);
     Block* true_block = irgen_block_new();
-    Ir* true_value = irgen_push_int(1);
     irgen_push_binary(Ir_Kind_store, and_var_ir, true_value);
     irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.nez, true_block);
     Block* jump_from_true_block = irgen_block_jump();
@@ -1395,7 +1404,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* false_block = irgen_block_new();
     irgen_block_link_jump_to_block(&lhs_branch_from_block->branch.eqz, false_block);
     irgen_block_link_jump_to_block(&rhs_branch_from_block->branch.eqz, false_block);
-    Ir* false_value = irgen_push_int(0);
     irgen_push_binary(Ir_Kind_store, and_var_ir, false_value);
     Block* jump_from_false_block = irgen_block_jump();
 
@@ -1404,8 +1412,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_block_link_jump_to_block(&jump_from_false_block->jump, merge_block);
 
     result = irgen_push_unary(Ir_Kind_load, and_var_ir);
-    and_var->declared_ir = result;
-    irgen_push_declare(and_var);
   } break;
   case Ast_Kind_if: {
     Ast_Node* cond = node->binary.lhs;
