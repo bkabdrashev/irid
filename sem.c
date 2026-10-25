@@ -205,7 +205,6 @@ struct Type_Pair { Type* one; Type* two; };
 
 Field type_record_get_by_name(Record* record, Str* name);
 Field type_record_get_by_position(Record* record, I32 pos);
-Type* type_of_field_at(Record* record, I32 position);
 Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
 Type* type_join(Type* one, Type* two);
@@ -977,12 +976,6 @@ void sem_element_of_join_put(Ir* ir, Type* element) {
   sem.elements[irid] = element;
 }
 
-Type* type_of_field_at(Record* record, I32 position) {
-  Type* type = sem.type_none;
-  type = record->types[position];
-  return type;
-}
-
 B8 type_is_const(Type* type) {
   B8 result = false;
   switch (type->kind) {
@@ -998,7 +991,7 @@ B8 type_is_const(Type* type) {
   case Type_Kind_record: {
     result = true;
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_declared = type_of_field_at(type->record, i);
+      Type* field_declared = type->record->types[i];
       if (!type_is_const(field_declared)) {
         result = false;
         break;
@@ -1769,6 +1762,7 @@ void sem_var_kind(Var* var) {
   }
 }
 
+Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type);
 void sem_record_declare_fields(Var* var, Type* type);
 Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   sem_var_declare(var);
@@ -1833,18 +1827,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
       type_joined = type_define_size(bits_size, type_joined);
     }
 
-    var_common = &new(irgen.vars);
-    var_common->index    = offset_join;
-    var_common->name     = name;
-    var_common->parent   = var;
-    var_common->declared = type_joined;
-    var_common->state    = Var_State_resolved;
-    var_common->kind     = Var_Kind_declared;
-    var_common->global   = var->global;
-    var_common->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-    sem_var_kind(var_common);
-    sem_record_declare_fields(var_common, type_joined);
-
+    var_common = sem_var_init(offset_join, name, var, type_joined);
     hash_map_put(&var->join_vars, name, var_common);
     return var_common;
   }
@@ -3148,25 +3131,34 @@ Type* type_of_fun(Fun* fun) {
 void sem_block(Block* block);
 void sem_init_block_preds(Block* block);
 
+Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
+  Var* var = &new(irgen.vars);
+       var->global   = parent->global;
+       var->index    = index;
+       var->name     = name;
+       var->parent   = parent;
+       var->declared = type;
+       var->state    = Var_State_resolved;
+       var->kind     = Var_Kind_declared;
+  sem_var_kind(var);
+  I32 blocks_length = 0;
+  if (var->global) {
+    blocks_length = irgen.block_length_max;
+  }
+  else {
+    blocks_length = sem.current_fun->blocks->length;
+  }
+  var->block_types = arena_push_zero(sem.perm_arena, blocks_length * sizeof(Type*));
+  sem_record_declare_fields(var, type);
+
+  return var;
+}
+
 void sem_record_declare_fields(Var* var, Type* type) {
   if (type->kind == Type_Kind_record) {
     var->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* type_field = type_of_field_at(type->record, i);
-      type->record->types[i] = type_field;
-      Var* var_field = &new(irgen.vars);
-           var_field->index    = i;
-           var_field->name     = type->record->names[i];
-           var_field->parent   = var;
-           var_field->declared = type_field;
-           var_field->state    = Var_State_resolved;
-           var_field->kind     = Var_Kind_declared;
-      sem_var_kind(var_field);
-      var->vars[i] = var_field;
-      sem_record_declare_fields(var_field, type_field);
-    }
-    for (I32 i = 0; i < type->record->length; i++) {
-      var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+      var->vars[i] = sem_var_init(i, type->record->names[i], var, type->record->types[i]);
     }
   }
   else if (type->kind == Type_Kind_join_records) {
@@ -3179,72 +3171,28 @@ void sem_record_declare_fields(Var* var, Type* type) {
     var->vars = arena_push(sem.perm_arena, join->records.len*sizeof(Var*));
     var->join_vars = hash_map_init(sem.perm_arena, max(total_length, 1));
     for (I32 i = 0; i < join->records.len; i++) {
-      Type* element = join->records.list[i];
-
-      Var* var_element = &new(irgen.vars);
-          var_element->index    = i;
-          var_element->name     = irgen.str_nil;
-          var_element->parent   = var;
-          var_element->declared = element;
-          var_element->state    = Var_State_resolved;
-          var_element->kind     = Var_Kind_declared;
-          var_element->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-
-      var->vars[i] = var_element;
-      sem_record_declare_fields(var_element, element);
+      var->vars[i] = sem_var_init(i, irgen.str_nil, var, join->records.list[i]);
     }
   }
-  // TODO: refactor this crap
   else if (type->kind == Type_Kind_array) {
     Array* array = type->array;
     I32 length = array->length;
     var->vars = arena_push(sem.perm_arena, (length+1) * sizeof(Var*));
     var->vars += 1; // NOTE: at -1 we have legnth
-    Var* var_len = &new(irgen.vars);
-         var_len->index    = -1;
-         var_len->declared = sem.type_len;
-         var_len->parent   = var;
-         var_len->state    = Var_State_resolved;
-         var_len->kind     = Var_Kind_constant;
-    var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-    var->vars[-1] = var_len;
-    for (I32 i = 0; i < length; i++) {
-      Type* type_item = array->types[i];
-      if (type_item->kind == Type_Kind_type) {
-        type_item = type_item->type;
-      }
-      Var* var_item = &new(irgen.vars);
-      var_item->index    = i;
-      var_item->declared = type_item;
-      var_item->parent   = var;
-      var_item->state    = Var_State_resolved;
-      sem_var_kind(var_item);
-      var->vars[i] = var_item;
-      sem_record_declare_fields(var->vars[i], type_item);
+    var->vars[-1] = sem_var_init(-1, irgen.str_len, var, type_int(length));
+    Type* type_item = array->of_type;
+    if (type_item->kind == Type_Kind_type) {
+      type_item = type_item->type;
     }
-    for (I32 i = -1; i < length; i++) {
-      var->vars[i]->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
+    for (I32 i = 0; i < length; i++) {
+      var->vars[i] = sem_var_init(i, irgen.str_nil, var, type_item);
     }
   }
   else if (type->kind == Type_Kind_span) {
     Span* span = type->span;
     var->vars = arena_push(sem.perm_arena, 2 * sizeof(Var*));
-
-    Var* var_len = &new(irgen.vars);
-         var_len->index    = 0;
-         var_len->declared = span->length;
-         var_len->kind     = Var_Kind_declared;
-         var_len->state    = Var_State_resolved;
-    var_len->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-    var->vars[0] = var_len;
-
-    Var* var_ptr = &new(irgen.vars);
-         var_ptr->index    = 1;
-         var_ptr->declared = type_pointer_to(span->of_type);
-         var_ptr->kind     = Var_Kind_declared;
-         var_ptr->state    = Var_State_resolved;
-    var_ptr->block_types = arena_push_zero(sem.perm_arena, sem.current_fun->blocks->length * sizeof(Type*));
-    var->vars[1] = var_ptr;
+    var->vars[0] = sem_var_init(0, irgen.str_len, var, sem.type_len);
+    var->vars[1] = sem_var_init(1, irgen.str_nil, var, type_pointer_to(span->of_type));
   }
   return;
 }
@@ -3984,8 +3932,8 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else if (fun_type == sem.fun_float) {
       if (arg_type->kind == Type_Kind_record && arg_type->record->length == 2) {
-        Type* exp_type  = type_of_field_at(arg_type->record, 0);
-        Type* mant_type = type_of_field_at(arg_type->record, 1);
+        Type* exp_type  = arg_type->record->types[0];
+        Type* mant_type = arg_type->record->types[1];
         if (exp_type->kind == Type_Kind_scalar && mant_type->kind == Type_Kind_scalar
          && scalar_is_single(exp_type->scalar) && scalar_is_single(mant_type->scalar)) {
           I64 exp  = scalar_min(exp_type->scalar);
@@ -4644,6 +4592,7 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  test("2 && 3", "");
   // test_diag("a", Diag_Code_undefined_name);
   // test_diag("a : 1\n{ a : 2 }", Diag_Code_shadowed_declaration);
   // test_diag("a : 1\na = 2", Diag_Code_assign_to_constant);

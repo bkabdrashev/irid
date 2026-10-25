@@ -207,6 +207,10 @@ round : (a: F32) -> if a < 0.0 do F32(I32(a-0.5)) else F32(I32(a+0.5))
 equal : (a: F32; b: F32) -> B8 {
   epsilon:F32 = 0.1
   result:B8 = a+epsilon >= b && a-epsilon <= b
+  print_str("equal?")
+  print_i64(a+epsilon >= b)
+  print_i64(a-epsilon <= b)
+  print_i64(result)
   return result
 }
 
@@ -312,9 +316,12 @@ update : () -> {
     {
       i: I32 = 1
     while i < game.snake_n do
-      if equal(game.snake_p[0].x; game.snake_p[i].x)
-      && equal(game.snake_p[0].y; game.snake_p[i].y) do {
+      if equal(game.snake_p[0].x; game.snake_p[i].x) && equal(game.snake_p[0].y; game.snake_p[i].y) do {
         print_str("lost")
+        print_i64 equal(game.snake_p[0].x; game.snake_p[i].x)
+        print_i64 equal(game.snake_p[0].y; game.snake_p[i].y)
+        print_i64 equal(game.snake_p[0].x; game.snake_p[i].x)&&equal(game.snake_p[0].y; game.snake_p[i].y)
+        game.running = 0
       }
       i = i + 1
     }

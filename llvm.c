@@ -84,7 +84,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
       I32 length = type->record->length;
       LLVMTypeRef* field_types = arena_push(llvm_gen.perm_arena, (length + 1) * sizeof(LLVMTypeRef));
       for (I32 i = 0; i < length; i++) {
-        Type* field_type = type_of_field_at(type->record, i);
+        Type* field_type = type->record->types[i];
         if (field_type->bits_size == 0) {
           field_types[i] = LLVMIntTypeInContext(llvm_gen.context, 0);
         }
@@ -281,7 +281,7 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     I32 length = type->record->length;
     LLVMValueRef* values = arena_push(llvm_gen.perm_arena, (length+1) * sizeof(LLVMValueRef));
     for (I32 i = 0; i < type->record->length; i++) {
-      Type* field_type = type_of_field_at(type->record, i);
+      Type* field_type = type->record->types[i];
       if (field_type->bits_size == 0) {
         LLVMTypeRef llvm_zero_type = LLVMIntTypeInContext(llvm_gen.context, 0);
         values[i] = LLVMConstInt(llvm_zero_type, 0, false);
@@ -698,8 +698,8 @@ void llvm_ir(Ir* ir) {
         position = hash_map_get_i32(&type_from->record->position_from_name, field_name);
       }
       LLVMValueRef field_val       = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, position, "");
-      Type*        field_from_type = type_of_field_at(type_from->record, position);
-      Type*        field_type      = type_of_field_at(type_to->record, i);
+      Type*        field_from_type = type_from->record->types[position];
+      Type*        field_type      = type_to->record->types[i];
       if (field_from_type != field_type) {
         field_val = llvm_conversion(field_val, field_from_type, field_type);
       }

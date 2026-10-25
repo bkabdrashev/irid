@@ -300,10 +300,8 @@ struct Irgen {
   Funs        funs;
   Var_Pool    vars;
   Block_Pool  blocks;
-  Rec_Pool records;
+  Rec_Pool    records;
   Ir_Pool     irs;
-
-  Ir*         irid_none;
 
   Str*        str_nil;
   Str*        str_anon;
@@ -313,6 +311,7 @@ struct Irgen {
   Str*        str_foreign;
   Str*        str_float;
 
+  Ir*         irid_none;
   Hash_Map    builtins;
   Ir*         irid_len;
   Ir*         irid_bits;
@@ -323,6 +322,7 @@ struct Irgen {
   Fun_Stack   fun_stack;
   Blocks*     unresolved_breaks;
   Scope_Stack scope_stack;
+  I32         block_length_max;
 
   Diags*      diags;
   jmp_buf     fatal;
@@ -990,8 +990,17 @@ Fun* irgen_fun_leave(void) {
   fa_init(irgen.perm_arena, fun->ret_block->sem_irs, fun->ret_block->irs->length*2);
   fun->blocks = irgen_blocks_perm(fun->blocks);
   fun->vars = irgen_vars_perm(fun->vars);
+  irgen.block_length_max = max(irgen.block_length_max, fun->blocks->length);
   for (I32 i = 0; i < fun->vars->length; i++) {
-    fun->vars->base[i]->block_types = arena_push_zero(irgen.perm_arena, fun->blocks->length * sizeof(Type*));
+    Var* var = fun->vars->base[i];
+    I32 length = 0;
+    if (var->global) {
+      length = irgen.block_length_max;
+    }
+    else {
+      length = fun->blocks->length;
+    }
+    var->block_types = arena_push_zero(irgen.perm_arena, length * sizeof(Type*));
   }
   del(irgen.fun_stack);
   return fun;
@@ -1713,7 +1722,6 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("a:1; a@.b", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
