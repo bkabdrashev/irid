@@ -429,7 +429,7 @@ while game.running do {
         print_str("Escape")
         game.running = 0
       }
-      /* FIX: && breaks the join records narrowing. It thinks .scancode doesn't appear all records
+      /* FIX: && breaks the join records narrowing. It thinks .scancode doesn't appear at all records
       else if event.scancode == SCANCODE_H && equal(game.snake_v[0].x; 0.0) do
       else if event.scancode == SCANCODE_L do && equal(game.snake_v[0].x; 0.0) do
       */

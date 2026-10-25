@@ -287,8 +287,6 @@ Umi align_up(Umi val, Umi alignment) {
   #define ASAN_UNPOISON(addr, size) ((void)0)
 #endif
 
-#define ARENA_REDZONE_SIZE (256)
-
 typedef struct {
   C8* base;
   C8* top;
@@ -298,7 +296,7 @@ typedef struct {
 } Arena;
 
 Arena arena_init(Umi capacity) {
-  Umi total      = capacity * ARENA_REDZONE_SIZE;
+  Umi total      = capacity * 2;
   Arena arena    = {};
   arena.base     = xmalloc(total);
   arena.top      = arena.base;
@@ -312,7 +310,8 @@ Arena arena_init(Umi capacity) {
 
 void* arena_push(Arena* arena, Umi size) {
   Umi aligned_size = align_up(size, arena->alignment);
-  Umi total        = aligned_size + ARENA_REDZONE_SIZE;
+  Umi redzone_size = aligned_size;
+  Umi total        = aligned_size + redzone_size;
 
   assert(arena->top + total <= arena->base + arena->total);
 
@@ -320,7 +319,7 @@ void* arena_push(Arena* arena, Umi size) {
   void* redzone  = arena->top + aligned_size;
 
   ASAN_UNPOISON(result,  aligned_size);
-  ASAN_POISON  (redzone, ARENA_REDZONE_SIZE);
+  ASAN_POISON  (redzone, redzone_size);
 
   arena->top = (C8*)arena->top + total;
   return result;
@@ -333,7 +332,7 @@ void* arena_push_zero(Arena* arena, Umi size) {
 }
 
 void arena_release_all(Arena* arena) {
-  ASAN_POISON(arena->base, arena->capacity);
+  ASAN_POISON(arena->base, arena->total);
   arena->top = arena->base;
 }
 
@@ -347,13 +346,14 @@ void arena_extend(Arena* arena, void* ptr, Umi size) {
   C8* base_ptr = ptr;
   // assert(arena->top - ARENA_REDZONE_SIZE < base_ptr + size);
   Umi aligned_size = align_up(size, arena->alignment);
-  Umi total        = aligned_size + ARENA_REDZONE_SIZE;
+  Umi redzone_size = aligned_size;
+  Umi total        = aligned_size + redzone_size;
   assert(base_ptr + total <= arena->base + arena->total);
 
   void* redzone  = base_ptr + aligned_size;
 
   ASAN_UNPOISON(ptr,  aligned_size);
-  ASAN_POISON  (redzone, ARENA_REDZONE_SIZE);
+  ASAN_POISON  (redzone, redzone_size);
 
   arena->top = (C8*)base_ptr + total;
 }
@@ -363,7 +363,7 @@ C8* arena_mark(Arena* arena) {
 }
 
 void arena_free(Arena* arena) {
-  ASAN_UNPOISON(arena->base, arena->capacity);
+  ASAN_UNPOISON(arena->base, arena->total);
   free(arena->base);
   arena->top = NULL;
   arena->base = NULL;

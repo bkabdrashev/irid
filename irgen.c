@@ -1366,6 +1366,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_logic_and: {
     /*
+    FIX: this appoarch is wrong, instead generate ir_kind_logic_and. This would allow narrowing on && conditions
     if A then .rhs else .false
     .rhs:
     if B then .true else .false
