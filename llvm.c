@@ -923,9 +923,11 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     }
   }
 
+  profile_stage_begin("llvm dump", 0);
   printf("Generated LLVM IR:\n");
   LLVMDumpModule(llvm_gen.module);
 
+  profile_stage_begin("llvm verify", 0);
   char *verify_error = NULL;
   if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &verify_error)) {
     fprintf(stderr, "Error verifying module: %s\n", verify_error);
@@ -936,6 +938,7 @@ I32 llvm_funs(Arena* arena, Funs funs) {
     LLVMDisposeMessage(verify_error);
   }
 
+  profile_stage_begin("jit setup", 0);
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   LLVMInitializeNativeAsmParser();
@@ -992,8 +995,10 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   }
 
   void (*jit_main)() = (void (*)())addr;
+  profile_stage_begin("execute (jit)", 0);
   jit_main();
 
+  profile_stage_begin("jit cleanup", 0);
   // LLVMOrcDisposeDefinitionGenerator(sdl_generator);
   LLVMDisposeMessage(triple);
   LLVMOrcDisposeLLJIT(jit);

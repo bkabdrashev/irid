@@ -14,6 +14,7 @@
 #include <string.h>
 #include <ctype.h>
 
+#include "profile.c"
 #include "common.c"
 #include "str.c"
 #include "source.c"

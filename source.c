@@ -87,6 +87,16 @@ Source_File* source_get(Source_Map* map, File_Id file) {
   return &map->base[file-1];
 }
 
+I32 source_line_count(Source_File* file) {
+  if (!file || file->length == 0) return 0;
+  I32 count = file->line_count;
+  C8 last = file->data[file->length - 1];
+  if (last == '\n' || last == '\r') {
+    count -= 1;
+  }
+  return count > 0 ? count : 0;
+}
+
 I32 source_line_index(Source_File* file, U32 offset) {
   if (offset > file->length) offset = (U32)file->length;
   I32 low  = 0;

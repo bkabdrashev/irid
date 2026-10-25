@@ -322,6 +322,7 @@ void* arena_push(Arena* arena, Umi size) {
   ASAN_POISON  (redzone, redzone_size);
 
   arena->top = (C8*)arena->top + total;
+  profile_arena_push(size, total);
   return result;
 }
 
@@ -333,6 +334,7 @@ void* arena_push_zero(Arena* arena, Umi size) {
 
 void arena_release_all(Arena* arena) {
   ASAN_POISON(arena->base, arena->total);
+  profile_arena_release((U64)(arena->top - arena->base));
   arena->top = arena->base;
 }
 
@@ -340,6 +342,7 @@ void arena_release_mark(Arena* arena, void* mark) {
   Umi released_size = (C8*)arena->top - (C8*)mark;
   ASAN_POISON(mark, released_size);
   arena->top = mark;
+  profile_arena_release(released_size);
 }
 
 void arena_extend(Arena* arena, void* ptr, Umi size) {
@@ -355,7 +358,14 @@ void arena_extend(Arena* arena, void* ptr, Umi size) {
   ASAN_UNPOISON(ptr,  aligned_size);
   ASAN_POISON  (redzone, redzone_size);
 
-  arena->top = (C8*)base_ptr + total;
+  C8* old_top = arena->top;
+  C8* new_top = base_ptr + total;
+  Umi old_span = old_top > base_ptr ? (Umi)(old_top - base_ptr) : 0;
+  Umi old_aligned_payload = old_span / 2;
+  Umi requested = size > old_aligned_payload ? size - old_aligned_payload : 0;
+
+  arena->top = new_top;
+  profile_arena_extend((Smi)(new_top - old_top), requested);
 }
 
 C8* arena_mark(Arena* arena) {
@@ -364,6 +374,9 @@ C8* arena_mark(Arena* arena) {
 
 void arena_free(Arena* arena) {
   ASAN_UNPOISON(arena->base, arena->total);
+  if (arena->base) {
+    profile_arena_release((U64)(arena->top - arena->base));
+  }
   free(arena->base);
   arena->top = NULL;
   arena->base = NULL;
