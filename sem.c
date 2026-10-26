@@ -131,19 +131,20 @@ struct Type_Pool {
   I32   length;
 };
 
-typedef struct Sem_Tasks Sem_Tasks;
 typedef struct Sem_Narrowed Sem_Narrowed;
 struct Sem_Narrowed {
   Var*          var;
   Type*         type;
   Sem_Narrowed* next;
 };
+typedef struct Sem_Tasks Sem_Tasks;
 struct Sem_Tasks {
   Block*        block;
   Type*         type;
   Var*          var;
   I32           length;
   Sem_Narrowed* narrowed;
+  Hash_Set      excluded_blocks;
 };
 
 typedef struct Sem Sem;
@@ -2414,6 +2415,36 @@ Type* sem_join_field_type(Join* join, Str* name) {
   return result;
 }
 
+void sem_condition_exclude_false_blocks(Sem_Tasks* tasks, Block* block, Var* var) {
+  Type* type = type_of_var(block, var);
+  if (type_is_false(type)) {
+    hash_set_put(&tasks->excluded_blocks, block);
+  }
+  else {
+    for (I32 i = 0; i < block->preds.length; i++) {
+      Block* pred = block->preds.base[i];
+      if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
+        sem_condition_exclude_false_blocks(tasks, pred, var);
+      }
+    }
+  }
+}
+
+void sem_condition_exclude_true_blocks(Sem_Tasks* tasks, Block* block, Var* var) {
+  Type* type = type_of_var(block, var);
+  if (type_is_true(type)) {
+    hash_set_put(&tasks->excluded_blocks, block);
+  }
+  else {
+    for (I32 i = 0; i < block->preds.length; i++) {
+      Block* pred = block->preds.base[i];
+      if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
+        sem_condition_exclude_true_blocks(tasks, pred, var);
+      }
+    }
+  }
+}
+
 Type* sem_type_narrow_meet(Type* narrowed, Type* field) {
   Type* result;
   if (narrowed->kind == Type_Kind_join_records) {
@@ -2756,7 +2787,11 @@ void sem_narrow_nez(Sem_Tasks* tasks, Block* block) {
       Pointer* ptr = ptr_type->pointer;
       if (hash_set_exists(&ptr->stack_vars, tasks->var)) {
         Type* new_type = type_narrow_nez(tasks->type);
-        tasks->var->block_types[tasks->block->id] = new_type;
+        sem_narrow_var(tasks, tasks->var, new_type);
+      }
+      else if (ptr->stack_vars.len == 1) {
+        Var* cond_var = ptr->stack_vars.list[0];
+        sem_condition_exclude_false_blocks(tasks, tasks->block, cond_var);
       }
     }
   } break;
@@ -2799,13 +2834,13 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Block* block) {
     Type* ptr_type = type_of_ir(cond_ir->unary);
     if (ptr_type->kind == Type_Kind_ptr) {
       Pointer* ptr = ptr_type->pointer;
-      for (I32 i = 0; i < ptr->stack_vars.len; i++) {
-        Var* var = ptr->stack_vars.list[i];
-        Type* old_type = var->block_types[tasks->block->id];
-        if (old_type) {
-          Type* new_type = type_narrow_eqz(old_type);
-          sem_narrow_var(tasks, var, new_type);
-        }
+      if (hash_set_exists(&ptr->stack_vars, tasks->var)) {
+        Type* new_type = type_narrow_eqz(tasks->type);
+        sem_narrow_var(tasks, tasks->var, new_type);
+      }
+      else if (ptr->stack_vars.len == 1) {
+        Var* cond_var = ptr->stack_vars.list[0];
+        sem_condition_exclude_true_blocks(tasks, tasks->block, cond_var);
       }
     }
   } break;
@@ -2825,7 +2860,6 @@ void sem_unnarrow(Sem_Tasks* tasks) {
 }
 
 Type* type_of_var_rec(Block* block, Var* var) {
-  // FIX: globals can be refered by blocks from other functions, so their block_types map should accomodate them.
   if (var->kind == Var_Kind_constant) {
     return var->declared;
   }
@@ -2851,12 +2885,23 @@ Type* type_of_var_rec(Block* block, Var* var) {
         tasks.length = 0;
         tasks.var = var;
         tasks.type = var->block_types[pred->id];
+        void* temp_arena_mark = arena_mark(sem.temp_arena);
+        tasks.excluded_blocks = hash_set_init(sem.temp_arena, sem.current_fun->blocks->length);
         { // condition is not equal to zero branch
           Jump jump = pred->branch.nez;
           if (jump.to_block == block) {
             sem_narrow_nez(&tasks, pred);
-            Type* pred_type = type_of_var_rec(pred, var);
-            type = type_join(type, pred_type);
+            for (I32 i = 0; i < tasks.excluded_blocks.len; i++) {
+              Block* excl_block = tasks.excluded_blocks.list[i];
+              I32 predid = pred - irgen.blocks.base;
+              I32 blockid = block - irgen.blocks.base;
+              I32 excl_blockid = excl_block - irgen.blocks.base;
+              printf("%s, b%i; b%i -x> b%i\n", var->name->base, predid, blockid, excl_blockid);
+            }
+            if (!hash_set_exists(&tasks.excluded_blocks, pred)) {
+              Type* pred_type = type_of_var_rec(pred, var);
+              type = type_join(type, pred_type);
+            }
             sem_unnarrow(&tasks);
             tasks.length = 0;
           }
@@ -2865,16 +2910,28 @@ Type* type_of_var_rec(Block* block, Var* var) {
           Jump jump = pred->branch.eqz;
           if (jump.to_block == block) {
             sem_narrow_eqz(&tasks, pred);
-            Type* pred_type = type_of_var_rec(pred, var);
-            type = type_join(type, pred_type);
+            for (I32 i = 0; i < tasks.excluded_blocks.len; i++) {
+              Block* excl_block = tasks.excluded_blocks.list[i];
+              I32 predid = pred - irgen.blocks.base;
+              I32 blockid = block - irgen.blocks.base;
+              I32 excl_blockid = excl_block - irgen.blocks.base;
+              printf("%s, b%i; b%i -x> b%i\n", var->name->base, predid, blockid, excl_blockid);
+            }
+            if (!hash_set_exists(&tasks.excluded_blocks, pred)) {
+              Type* pred_type = type_of_var_rec(pred, var);
+              type = type_join(type, pred_type);
+            }
             sem_unnarrow(&tasks);
             tasks.length = 0;
           }
         }
+        arena_release_mark(sem.temp_arena, temp_arena_mark);
       }
       else if (pred->kind == Block_Kind_jump) {
-        Type* pred_type = type_of_var_rec(pred, var);
-        type = type_join(type, pred_type);
+        if (!hash_set_exists(&tasks.excluded_blocks, pred)) {
+          Type* pred_type = type_of_var_rec(pred, var);
+          type = type_join(type, pred_type);
+        }
       }
     }
   }
@@ -4592,7 +4649,7 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("(0..2) && (0..3)", "");
+  test("a:(0..2); if a && 1 do a else a", "");
   // test_diag("a", Diag_Code_undefined_name);
   // test_diag("a : 1\n{ a : 2 }", Diag_Code_shadowed_declaration);
   // test_diag("a : 1\na = 2", Diag_Code_assign_to_constant);
