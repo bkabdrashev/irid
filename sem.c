@@ -4678,7 +4678,7 @@ void sem_test(void) {
   // test("a:(0..2) = 0; b:(0..2); if (0..1) do a = 1; c:B8 = a && b; c = 1; if c do a+b else a+b", "");
   // test("c:0..1 = 0; x:0..2; while 1 do { if c do x; c = 0..1 }", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");
-  test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", "");
+  test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", ""); // FIX: this is incorrect a should be 3..4 not 3
   // test_diag("a", Diag_Code_undefined_name);
   // test_diag("a : 1\n{ a : 2 }", Diag_Code_shadowed_declaration);
   // test_diag("a : 1\na = 2", Diag_Code_assign_to_constant);
