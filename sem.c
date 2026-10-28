@@ -2455,7 +2455,7 @@ void sem_condition_ignore_false_blocks(Ignored_Blocks* ignored_blocks, Block* bl
   if (type_is_false(type)) {
     sem_ignored_blocks_add(ignored_blocks, block);
   }
-  else if (!block->is_loop_head) {
+  else if (!block->is_loop_head && !var->block_is_write[block->id]) {
     for (I32 i = 0; i < block->preds.length; i++) {
       Block* pred = block->preds.base[i];
       if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
@@ -2470,7 +2470,7 @@ void sem_condition_ignore_true_blocks(Ignored_Blocks* ignored_blocks, Block* blo
   if (type_is_true(type)) {
     sem_ignored_blocks_add(ignored_blocks, block);
   }
-  else if (!block->is_loop_head) {
+  else if (!block->is_loop_head && !var->block_is_write[block->id]) {
     for (I32 i = 0; i < block->preds.length; i++) {
       Block* pred = block->preds.base[i];
       if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
@@ -2529,89 +2529,87 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     if (ptr->stack_vars.len == 1) {
       Var* var = ptr->stack_vars.list[0];
       Type* old_type = var->block_types[tasks->block->id];
-      if (old_type) {
-        Type* new_type_but_size_as_old = &new(sem.types);
-             *new_type_but_size_as_old = *new_type;
-              new_type_but_size_as_old->flag       = old_type->flag;
-              new_type_but_size_as_old->bits_size  = old_type->bits_size;
-              new_type_but_size_as_old->bits_align = old_type->bits_align;
-        new_type = type_in_set(new_type_but_size_as_old);
-        sem_narrow_var(tasks, var, new_type);
-        // TODO: analyse this slop and simplify
+      Type* new_type_but_size_as_old = &new(sem.types);
+           *new_type_but_size_as_old = *new_type;
+            new_type_but_size_as_old->flag       = old_type->flag;
+            new_type_but_size_as_old->bits_size  = old_type->bits_size;
+            new_type_but_size_as_old->bits_align = old_type->bits_align;
+      new_type = type_in_set(new_type_but_size_as_old);
+      sem_narrow_var(tasks, var, new_type);
+      // TODO: analyse this slop and simplify
 
-        // NOTE: only narrow the ancestors of the variable whose type is being
-        // computed, otherwise an unrelated computation would leave them narrowed.
-        B8 var_is_ancestor_of_tasks_var = false;
-        for (Var* v = var; v; v = v->parent) {
-          if (v == tasks->var) {
-            var_is_ancestor_of_tasks_var = true;
-            break;
+      // NOTE: only narrow the ancestors of the variable whose type is being
+      // computed, otherwise an unrelated computation would leave them narrowed.
+      B8 var_is_ancestor_of_tasks_var = false;
+      for (Var* v = var; v; v = v->parent) {
+        if (v == tasks->var) {
+          var_is_ancestor_of_tasks_var = true;
+          break;
+        }
+      }
+
+      // NOTE: a field may be nested in several joined records (e.g. a.x in
+      // (a:(x:1)) \ (a:(x:2))), so the narrowing is propagated up the whole
+      // parent chain, not just to the direct parent.
+      Var* child = var;
+      for (; var_is_ancestor_of_tasks_var && child != tasks->var && child->parent; child = child->parent) {
+        Var*  parent = child->parent;
+        Type* type_parent_old = parent->block_types[tasks->block->id];
+        if (!type_parent_old || type_parent_old->kind == Type_Kind_none) {
+          type_parent_old = parent->declared;
+        }
+        if (!type_parent_old || type_parent_old->kind != Type_Kind_join_records) {
+          break;
+        }
+
+        Join* join_old = type_parent_old->join;
+        Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
+              join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
+        for (I32 e = 0; e < join_old->records.len; e++) {
+          Type* element = join_old->records.list[e];
+          Record* record = element->record;
+          I32     pos    = -1;
+          if (record->length != 0) {
+            pos = child->name
+              ? hash_map_get_i32(&record->position_from_name, child->name)
+              : hash_map_i32_get_i32(&record->position_from_offset, child->index);
+          }
+          Type* meet = pos < 0 ? sem.type_none : sem_type_narrow_meet(new_type, record->types[pos]);
+          if (meet != sem.type_none) {
+            hash_set_put(&join_new->records, element);
+          }
+          else {
+            hash_set_put(&join_new->records, sem.type_empty_record);
+          }
+        }
+        Type* type_parent_new = type_join_records(join_new);
+        sem_narrow_var(tasks, parent, type_parent_new);
+
+        // Keep already cached common fields in sync with the narrowed parent.
+        for (I32 c = 0; c < parent->join_vars.len; c++) {
+          Str* common_name = parent->join_vars.list[c];
+          Var* common = hash_map_get(&parent->join_vars, common_name);
+          Type* type_common = sem_join_field_type(type_parent_new->join, common_name);
+          if (type_common->kind == Type_Kind_record && common->declared->kind == Type_Kind_join_records) {
+            // NOTE: a join narrowed down to a single record is still a join
+            // for the purposes of the common field variable.
+            Join* join_common = arena_push(sem.perm_arena, sizeof(Join));
+                  join_common->records = hash_set_init(sem.perm_arena, 1);
+            hash_set_put(&join_common->records, type_common);
+            type_common = type_join_records(join_common);
+          }
+          if (type_common != sem.type_none) {
+            Type* old_common = common->block_types[tasks->block->id];
+            if (old_common) {
+              type_common = sem_type_narrow_meet(type_common, old_common);
+            }
+            if (type_common != sem.type_none && type_common->kind == common->declared->kind) {
+              sem_narrow_var(tasks, common, type_common);
+            }
           }
         }
 
-        // NOTE: a field may be nested in several joined records (e.g. a.x in
-        // (a:(x:1)) \ (a:(x:2))), so the narrowing is propagated up the whole
-        // parent chain, not just to the direct parent.
-        Var* child = var;
-        for (; var_is_ancestor_of_tasks_var && child != tasks->var && child->parent; child = child->parent) {
-          Var*  parent = child->parent;
-          Type* type_parent_old = parent->block_types[tasks->block->id];
-          if (!type_parent_old || type_parent_old->kind == Type_Kind_none) {
-            type_parent_old = parent->declared;
-          }
-          if (!type_parent_old || type_parent_old->kind != Type_Kind_join_records) {
-            break;
-          }
-
-          Join* join_old = type_parent_old->join;
-          Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
-                join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
-          for (I32 e = 0; e < join_old->records.len; e++) {
-            Type* element = join_old->records.list[e];
-            Record* record = element->record;
-            I32     pos    = -1;
-            if (record->length != 0) {
-              pos = child->name
-                ? hash_map_get_i32(&record->position_from_name, child->name)
-                : hash_map_i32_get_i32(&record->position_from_offset, child->index);
-            }
-            Type* meet = pos < 0 ? sem.type_none : sem_type_narrow_meet(new_type, record->types[pos]);
-            if (meet != sem.type_none) {
-              hash_set_put(&join_new->records, element);
-            }
-            else {
-              hash_set_put(&join_new->records, sem.type_empty_record);
-            }
-          }
-          Type* type_parent_new = type_join_records(join_new);
-          sem_narrow_var(tasks, parent, type_parent_new);
-
-          // Keep already cached common fields in sync with the narrowed parent.
-          for (I32 c = 0; c < parent->join_vars.len; c++) {
-            Str* common_name = parent->join_vars.list[c];
-            Var* common = hash_map_get(&parent->join_vars, common_name);
-            Type* type_common = sem_join_field_type(type_parent_new->join, common_name);
-            if (type_common->kind == Type_Kind_record && common->declared->kind == Type_Kind_join_records) {
-              // NOTE: a join narrowed down to a single record is still a join
-              // for the purposes of the common field variable.
-              Join* join_common = arena_push(sem.perm_arena, sizeof(Join));
-                    join_common->records = hash_set_init(sem.perm_arena, 1);
-              hash_set_put(&join_common->records, type_common);
-              type_common = type_join_records(join_common);
-            }
-            if (type_common != sem.type_none) {
-              Type* old_common = common->block_types[tasks->block->id];
-              if (old_common) {
-                type_common = sem_type_narrow_meet(type_common, old_common);
-              }
-              if (type_common != sem.type_none && type_common->kind == common->declared->kind) {
-                sem_narrow_var(tasks, common, type_common);
-              }
-            }
-          }
-
-          new_type = type_parent_new;
-        }
+        new_type = type_parent_new;
       }
     }
   }
@@ -2898,10 +2896,12 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
   if (var->kind == Var_Kind_constant) {
     return var->declared;
   }
-  Type* type = var->block_types[block->id];
-  if (type) return type;
+  {
+    Type* type = var->block_types[block->id];
+    if (type) return type;
+  }
 
-  type = sem.type_none;
+  Type* type = sem.type_none;
 
   if (block->is_loop_head) {
     type = var->declared;
@@ -3165,6 +3165,7 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
   if (var->kind == Var_Kind_none || var->kind == Var_Kind_pointee) {
     var->declared = type_join(var->declared, type);
     var->block_types[block->id] = type;
+    var->block_is_write[block->id] = true;
   }
   else {
     if (type_is_subtype(block, type, var->declared)) {
@@ -3197,6 +3198,7 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
         }
       }
       var->block_types[block->id] = type;
+      var->block_is_write[block->id] = true;
     }
     else {
       sem_error_type_mismatch(sem_loc(0), var->declared, type);
@@ -3228,7 +3230,8 @@ Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
   else {
     blocks_length = sem.current_fun->blocks->length;
   }
-  var->block_types = arena_push_zero(sem.perm_arena, blocks_length * sizeof(Type*));
+  var->block_is_write = arena_push_zero(sem.perm_arena, blocks_length * sizeof(B8));
+  var->block_types    = arena_push_zero(sem.perm_arena, blocks_length * sizeof(Type*));
   sem_record_declare_fields(var, type);
 
   return var;
@@ -4678,8 +4681,8 @@ void sem_test(void) {
   // test("a:(0..2) = 0; b:(0..2); if (0..1) do a = 1; c:B8 = a && b; c = 1; if c do a+b else a+b", "");
   // test("c:0..1 = 0; x:0..2; while 1 do { if c do x; c = 0..1 }", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");
-  // test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", ""); // FIX: this is incorrect a should be 3..4 not 3
-  // test("a:(0..2); c:(0..2); if 0..1 do { c = 0; a = 0 } else { c = 1; a = 1 }; if a && c do 2 else 3; if a == 0 do 4 else 5", ""); // TODO: investigate why B28 gets
+  test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", "");
+  // test("a:(0..2); c:(0..2); if (0..1) do { c = 0; a = 1 } else { c = 1; a = 2 }; if 3 do 4; if c do 5 else 6; a", ""); // TODO: investigate why B28 gets
       /* a = { b25: 1, b26: 2, b28: 1..2, b30: 2, b31: 2,    b32: 1..2 } -- Expected
          a = { b25: 1, b26: 2, b28: 2,    b30: 2, b31: 1..2, b32: 1..2 } -- BUG
       */

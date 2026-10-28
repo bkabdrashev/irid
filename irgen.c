@@ -129,7 +129,8 @@ struct Var {
   Type*   declared;
   Var**   vars;
   Hash_Map join_vars; // common fields of joined records, keyed by name
-  Type**  block_types;
+  B8*      block_is_write;
+  Type**   block_types;
 };
 
 struct Ir {
@@ -917,8 +918,8 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   var->kind = Var_Kind_declared;
   for (I32 i = 0; i < temp_fun.vars->length; i++) {
     Var* temp_var = temp_fun.vars->base[i];
-    Type** types = arena_push_zero(irgen.perm_arena, var->blocks->length * sizeof(Type*));
-    temp_var->block_types = types;
+    temp_var->block_is_write = arena_push_zero(irgen.perm_arena, var->blocks->length * sizeof(B8));
+    temp_var->block_types    = arena_push_zero(irgen.perm_arena, var->blocks->length * sizeof(Type*));
   }
   del(irgen.fun_stack);
 }
@@ -1005,7 +1006,8 @@ Fun* irgen_fun_leave(void) {
     else {
       length = fun->blocks->length;
     }
-    var->block_types = arena_push_zero(irgen.perm_arena, length * sizeof(Type*));
+    var->block_is_write = arena_push_zero(irgen.perm_arena, length * sizeof(B8));
+    var->block_types    = arena_push_zero(irgen.perm_arena, length * sizeof(Type*));
   }
   del(irgen.fun_stack);
   return fun;
