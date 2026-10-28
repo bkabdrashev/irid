@@ -147,7 +147,7 @@ struct Sem_Tasks {
 
 typedef struct Ignored_Blocks Ignored_Blocks;
 struct Ignored_Blocks {
-  B8*     bits;       // indexed by block->id, capacity = block_count
+  B8*     list;       // indexed by block->id, capacity = block_count
   Block** trail;      // blocks added since the root
   I32     trail_len;
   I32     capacity;
@@ -2424,18 +2424,18 @@ Type* sem_join_field_type(Join* join, Str* name) {
 Ignored_Blocks sem_ignored_blocks_init(Arena* arena, I32 block_count) {
   Ignored_Blocks ignored_blocks = {};
   ignored_blocks.capacity = block_count;
-  ignored_blocks.bits = arena_push_zero(arena, sizeof(B8) * block_count);
+  ignored_blocks.list = arena_push_zero(arena, sizeof(B8) * block_count);
   ignored_blocks.trail = arena_push(arena, sizeof(Block*) * block_count);
   return ignored_blocks;
 }
 
 B8 sem_ignored_blocks_has(Ignored_Blocks* ignored_blocks, Block* block) {
-  return ignored_blocks->bits[block->id];
+  return ignored_blocks->list[block->id];
 }
 
 void sem_ignored_blocks_add(Ignored_Blocks* ignored_blocks, Block* block) {
-  if (ignored_blocks->bits[block->id]) return; // already in an outer context
-  ignored_blocks->bits[block->id] = true;
+  if (ignored_blocks->list[block->id]) return; // already in an outer context
+  ignored_blocks->list[block->id] = true;
   ignored_blocks->trail[ignored_blocks->trail_len++] = block;
 }
 
@@ -2446,7 +2446,7 @@ I32 sem_ignored_blocks_checkpoint(Ignored_Blocks* ignored_blocks) {
 void sem_ignored_blocks_rollback(Ignored_Blocks* ignored_blocks, I32 checkpoint) {
   while (ignored_blocks->trail_len > checkpoint) {
     Block* block = ignored_blocks->trail[--ignored_blocks->trail_len];
-    ignored_blocks->bits[block->id] = false;
+    ignored_blocks->list[block->id] = false;
   }
 }
 
@@ -2925,6 +2925,12 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
           Jump jump = pred->branch.nez;
           if (jump.to_block == block) {
             sem_narrow_nez(&tasks, ignored_blocks, pred);
+            for (I32 i = 0; i < ignored_blocks->capacity; i++) {
+              if (ignored_blocks->list[i]) {
+                printf("%s: b%li->b%li nez b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
+              }
+            }
+            printf("\n");
             if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
               Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
               type = type_join(type, pred_type);
@@ -2937,6 +2943,12 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
           Jump jump = pred->branch.eqz;
           if (jump.to_block == block) {
             sem_narrow_eqz(&tasks, ignored_blocks, pred);
+            for (I32 i = 0; i < ignored_blocks->capacity; i++) {
+              if (ignored_blocks->list[i]) {
+                printf("%s: b%li->b%li eqz b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
+              }
+            }
+            printf("\n");
             if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
               Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
               type = type_join(type, pred_type);
@@ -2947,7 +2959,26 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
         }
         arena_release_mark(sem.temp_arena, temp_arena_mark);
       }
+      // a ignored b25 and got a=2 from b26
+      // a: b30->b31 nez b25
+      // a: b28->b30 jmp b25
+      // a: b27->b28 nez b25
+      // a: b25->b27 jmp b25
+      // a: b26->b27 jmp b25
+
+      // it doens't move past b28 since at b28 it already cached results from nez path;
+      // but results are only correct for nez path. This would be fine if b25 was not ignored.
+      // Best approach would be somehow to track the fact that cached types are incomplete,
+      // then join-widen the types on the second path.
+      // a: b30->b32 eqz b26
+      // a: b28->b30 jmp b26
       else if (pred->kind == Block_Kind_jump) {
+        for (I32 i = 0; i < ignored_blocks->capacity; i++) {
+          if (ignored_blocks->list[i]) {
+            printf("%s: b%li->b%li jmp b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
+          }
+        }
+        printf("\n");
         if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
           Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
           type = type_join(type, pred_type);
@@ -4681,8 +4712,9 @@ void sem_test(void) {
   // test("a:(0..2) = 0; b:(0..2); if (0..1) do a = 1; c:B8 = a && b; c = 1; if c do a+b else a+b", "");
   // test("c:0..1 = 0; x:0..2; while 1 do { if c do x; c = 0..1 }", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");
-  test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", "");
-  // test("a:(0..2); c:(0..2); if (0..1) do { c = 0; a = 1 } else { c = 1; a = 2 }; if 3 do 4; if c do 5 else 6; a", ""); // TODO: investigate why B28 gets
+  // test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", "");
+  // test("putchar: #foreign.c \"putchar\" (char:I32)->I32; foo : (x:I32) -> {; a:(0..2); c:(0..2); if x do { c = 0; a = 0; } else {; c = 1; a = 2; }; if 3 do 4 else 4; if c do 5 else 6; return a; }; putchar(foo(1)+48); putchar(10)", "");
+  test("a:(0..2); c:(0..2); if (0..1) do { c = 0; a = 1 } else { c = 1; a = 2 }; if 3 do 4 else 5; if c do 6 else 7; a", ""); // TODO: investigate why B28 gets
       /* a = { b25: 1, b26: 2, b28: 1..2, b30: 2, b31: 2,    b32: 1..2 } -- Expected
          a = { b25: 1, b26: 2, b28: 2,    b30: 2, b31: 1..2, b32: 1..2 } -- BUG
       */
