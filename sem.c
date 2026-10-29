@@ -153,6 +153,14 @@ struct Ignored_Blocks {
   I32     capacity;
 };
 
+typedef struct Type_Of_Var_Context Type_Of_Var_Context;
+struct Type_Of_Var_Context {
+  Type**               cache;        // per-block results for this context
+  Type_Of_Var_Context* parent;       // outer context, if any
+  Block*               narrow_block; // block with an active narrowing
+  B8                   root;         // may commit to var->block_types
+};
+
 typedef struct Sem Sem;
 struct Sem {
   Arena* temp_arena;
@@ -2887,29 +2895,74 @@ void sem_unnarrow(Sem_Tasks* tasks) {
     narrowed->var->block_types[tasks->block->id] = narrowed->type;
     tasks->narrowed = narrowed->next;
   }
-  Var*  var = tasks->var;
-  Type* old = tasks->type;
-  var->block_types[tasks->block->id] = old;
 }
 
-Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
+Type_Of_Var_Context type_of_var_context_init(Type_Of_Var_Context* parent, Block* narrow_block, B8 root) {
+  Type_Of_Var_Context context = {};
+  context.cache = arena_push_zero(sem.temp_arena, sizeof(Type*) * sem.current_fun->blocks->length);
+  context.parent = parent;
+  context.narrow_block = narrow_block;
+  context.root = root;
+  return context;
+}
+
+B8 type_of_var_context_is_narrowed(Type_Of_Var_Context* context, Block* block) {
+  for (Type_Of_Var_Context* it = context; it; it = it->parent) {
+    if (it->narrow_block == block) return true;
+  }
+  return false;
+}
+
+B8 sem_narrowed_has_var(Sem_Narrowed* narrowed, Var* var) {
+  for (; narrowed; narrowed = narrowed->next) {
+    if (narrowed->var == var) return true;
+  }
+  return false;
+}
+
+Type* type_of_var_rec(Type_Of_Var_Context* context, Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
   if (var->kind == Var_Kind_constant) {
     return var->declared;
   }
   {
-    Type* type = var->block_types[block->id];
+    Type* type = context->cache[block->id];
     if (type) return type;
+  }
+  // A block with no predecessors has no incoming path for ignored_blocks to
+  // filter, so its committed type/declared type is context-free. Child
+  // contexts must not recompute it as none: that loses the base type passed
+  // to sem_narrow_*() and breaks narrowing at the entry edge.
+  if (block->preds.length == 0) {
+    Type* type = var->block_types[block->id];
+    if (!type || type->kind == Type_Kind_none) {
+      type = var->declared ? var->declared : sem.type_none;
+    }
+    if (context->root) {
+      var->block_types[block->id] = type;
+    }
+    return type;
+  }
+  {
+    Type* type = var->block_types[block->id];
+    if (type) {
+      if (context->root || var->block_is_write[block->id] || type_of_var_context_is_narrowed(context, block)) {
+        return type;
+      }
+    }
   }
 
   Type* type = sem.type_none;
 
   if (block->is_loop_head) {
     type = var->declared;
-    var->block_types[block->id] = type;
+    context->cache[block->id] = type;
+    if (context->root) {
+      var->block_types[block->id] = type;
+    }
     return type;
   }
 
-  var->block_types[block->id] = type;
+  context->cache[block->id] = type;
 
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];
@@ -2919,20 +2972,21 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
         Sem_Tasks tasks = {};
         tasks.block = pred;
         tasks.var = var;
-        tasks.type = var->block_types[pred->id];
         void* temp_arena_mark = arena_mark(sem.temp_arena);
         { // condition is not equal to zero branch
           Jump jump = pred->branch.nez;
           if (jump.to_block == block) {
+            tasks.type = type_of_var_rec(context, ignored_blocks, pred, var);
             sem_narrow_nez(&tasks, ignored_blocks, pred);
-            for (I32 i = 0; i < ignored_blocks->capacity; i++) {
-              if (ignored_blocks->list[i]) {
-                printf("%s: b%li->b%li nez b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
-              }
+            B8 var_narrowed = sem_narrowed_has_var(tasks.narrowed, var);
+            Type_Of_Var_Context* subcontext = context;
+            Type_Of_Var_Context  child_context = {};
+            if (ignored_blocks->trail_len != ignored_blocks_checkpoint || tasks.narrowed) {
+              child_context = type_of_var_context_init(context, var_narrowed ? pred : 0, false);
+              subcontext = &child_context;
             }
-            printf("\n");
             if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
-              Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
+              Type* pred_type = type_of_var_rec(subcontext, ignored_blocks, pred, var);
               type = type_join(type, pred_type);
             }
             sem_unnarrow(&tasks);
@@ -2942,15 +2996,17 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
         { // condition is equal to zero branch
           Jump jump = pred->branch.eqz;
           if (jump.to_block == block) {
+            tasks.type = type_of_var_rec(context, ignored_blocks, pred, var);
             sem_narrow_eqz(&tasks, ignored_blocks, pred);
-            for (I32 i = 0; i < ignored_blocks->capacity; i++) {
-              if (ignored_blocks->list[i]) {
-                printf("%s: b%li->b%li eqz b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
-              }
+            B8 var_narrowed = sem_narrowed_has_var(tasks.narrowed, var);
+            Type_Of_Var_Context* subcontext = context;
+            Type_Of_Var_Context  child_context = {};
+            if (ignored_blocks->trail_len != ignored_blocks_checkpoint || tasks.narrowed) {
+              child_context = type_of_var_context_init(context, var_narrowed ? pred : 0, false);
+              subcontext = &child_context;
             }
-            printf("\n");
             if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
-              Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
+              Type* pred_type = type_of_var_rec(subcontext, ignored_blocks, pred, var);
               type = type_join(type, pred_type);
             }
             sem_unnarrow(&tasks);
@@ -2959,42 +3015,27 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
         }
         arena_release_mark(sem.temp_arena, temp_arena_mark);
       }
-      // a ignored b25 and got a=2 from b26
-      // a: b30->b31 nez b25
-      // a: b28->b30 jmp b25
-      // a: b27->b28 nez b25
-      // a: b25->b27 jmp b25
-      // a: b26->b27 jmp b25
-
-      // it doens't move past b28 since at b28 it already cached results from nez path;
-      // but results are only correct for nez path. This would be fine if b25 was not ignored.
-      // Best approach would be somehow to track the fact that cached types are incomplete,
-      // then join-widen the types on the second path.
-      // a: b30->b32 eqz b26
-      // a: b28->b30 jmp b26
       else if (pred->kind == Block_Kind_jump) {
-        for (I32 i = 0; i < ignored_blocks->capacity; i++) {
-          if (ignored_blocks->list[i]) {
-            printf("%s: b%li->b%li jmp b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
-          }
-        }
-        printf("\n");
         if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
-          Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
+          Type* pred_type = type_of_var_rec(context, ignored_blocks, pred, var);
           type = type_join(type, pred_type);
         }
       }
     }
   }
 
-  var->block_types[block->id] = type;
+  context->cache[block->id] = type;
+  if (context->root) {
+    var->block_types[block->id] = type;
+  }
   return type;
 }
 
 Type* type_of_var(Block* block, Var* var) {
   void* temp_arena_mark = arena_mark(sem.temp_arena);
   Ignored_Blocks ignored_blocks = sem_ignored_blocks_init(sem.temp_arena, sem.current_fun->blocks->length);
-  Type* type = type_of_var_rec(&ignored_blocks, block, var);
+  Type_Of_Var_Context context = type_of_var_context_init(0, 0, true);
+  Type* type = type_of_var_rec(&context, &ignored_blocks, block, var);
   if (type->kind == Type_Kind_none) {
     type = var->declared ? var->declared : sem.type_none;
     var->block_types[block->id] = type;
@@ -4714,10 +4755,9 @@ void sem_test(void) {
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b else a+b", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");
   // test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", "");
-  // test("a:(0..2); c:(0..2); if (0..1) do { c = 0; a = 1 } else { c = 1; a = 2 }; if 3 do 4 else 5; if c do 6 else 7; a", "");
-      /* a = { b25: 1, b26: 2, b28: 1..2, b30: 2, b31: 2,    b32: 1..2 } -- Expected
-         a = { b25: 1, b26: 2, b28: 2,    b30: 2, b31: 1..2, b32: 1..2 } -- BUG
-      */
+  // test("a:(0..2); c:(0..2); if (0..1) do { c = 0; a = 1 } else { c = 1; a = 2 }; if 3 do 4; if c do 5 else 6; a", "");
+      /* a = { b25: 1, b26: 2, b27: 1..2, b28: 1..2, b29: 1..2, b30: 2, b31: 1, b32: 1..2 } */
+  // test_diag("f:(x:2)->1; a:(0..2); c:(0..2); if (0..1) do { c=0; a=0 } else { c=1; a=2 }; if 3 do 4 else 4; if c do 5 else 6; f(a)", Diag_Code_call_argument_mismatch);
   // TODO: v is used before condition on c so it cached v:(2..3),
   //       but we need to forget that v was used
   // test("v:(2..4); c:(0..1); if 0..1 do { c = 0; v = 2 } else { c = 1; v = 3 }; v; if c do v else v", "");
