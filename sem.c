@@ -145,14 +145,6 @@ struct Sem_Tasks {
   Sem_Narrowed* narrowed;
 };
 
-typedef struct Ignored_Blocks Ignored_Blocks;
-struct Ignored_Blocks {
-  B8*     list;       // indexed by block->id, capacity = block_count
-  Block** trail;      // blocks added since the root
-  I32     trail_len;
-  I32     capacity;
-};
-
 typedef struct Sem Sem;
 struct Sem {
   Arena* temp_arena;
@@ -175,6 +167,8 @@ struct Sem {
   Type* type_none;
   Type* type_empty_record;
   Type* type_zero;
+  Type* type_one;
+  Type* type_zero_one;
   Type* type_len;
   Type* fun_len;
   Type* fun_bits;
@@ -188,7 +182,6 @@ struct Sem {
 
   Str*  str_ptr;
   Str*  str_c;
-  Fun*  str_from_i8_array;
   struct {
     Type* len;
   } builtin;
@@ -2421,65 +2414,6 @@ Type* sem_join_field_type(Join* join, Str* name) {
   return result;
 }
 
-Ignored_Blocks sem_ignored_blocks_init(Arena* arena, I32 block_count) {
-  Ignored_Blocks ignored_blocks = {};
-  ignored_blocks.capacity = block_count;
-  ignored_blocks.list = arena_push_zero(arena, sizeof(B8) * block_count);
-  ignored_blocks.trail = arena_push(arena, sizeof(Block*) * block_count);
-  return ignored_blocks;
-}
-
-B8 sem_ignored_blocks_has(Ignored_Blocks* ignored_blocks, Block* block) {
-  return ignored_blocks->list[block->id];
-}
-
-void sem_ignored_blocks_add(Ignored_Blocks* ignored_blocks, Block* block) {
-  if (ignored_blocks->list[block->id]) return; // already in an outer context
-  ignored_blocks->list[block->id] = true;
-  ignored_blocks->trail[ignored_blocks->trail_len++] = block;
-}
-
-I32 sem_ignored_blocks_checkpoint(Ignored_Blocks* ignored_blocks) {
-  return ignored_blocks->trail_len;
-}
-
-void sem_ignored_blocks_rollback(Ignored_Blocks* ignored_blocks, I32 checkpoint) {
-  while (ignored_blocks->trail_len > checkpoint) {
-    Block* block = ignored_blocks->trail[--ignored_blocks->trail_len];
-    ignored_blocks->list[block->id] = false;
-  }
-}
-
-void sem_condition_ignore_false_blocks(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
-  Type* type = type_of_var(block, var);
-  if (type_is_false(type)) {
-    sem_ignored_blocks_add(ignored_blocks, block);
-  }
-  else if (!block->is_loop_head && !var->block_is_write[block->id]) {
-    for (I32 i = 0; i < block->preds.length; i++) {
-      Block* pred = block->preds.base[i];
-      if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
-        sem_condition_ignore_false_blocks(ignored_blocks, pred, var);
-      }
-    }
-  }
-}
-
-void sem_condition_ignore_true_blocks(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
-  Type* type = type_of_var(block, var);
-  if (type_is_true(type)) {
-    sem_ignored_blocks_add(ignored_blocks, block);
-  }
-  else if (!block->is_loop_head && !var->block_is_write[block->id]) {
-    for (I32 i = 0; i < block->preds.length; i++) {
-      Block* pred = block->preds.base[i];
-      if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
-        sem_condition_ignore_true_blocks(ignored_blocks, pred, var);
-      }
-    }
-  }
-}
-
 Type* sem_type_narrow_meet(Type* narrowed, Type* field) {
   Type* result;
   if (narrowed->kind == Type_Kind_join_records) {
@@ -2782,10 +2716,13 @@ Type* type_narrow_nez(Type* type) {
   return type;
 }
 
-void sem_narrow_nez(Sem_Tasks* tasks, Ignored_Blocks* ignored_blocks, Block* block) {
+void sem_narrow_nez_ir(Sem_Tasks* tasks, Ir* cond_ir) {
   // cond_ir != 0
-  Ir* cond_ir = block->branch.cond;
   switch (cond_ir->kind) {
+  case Ir_Kind_logic_and: {
+    sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.one);
+    sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.two);
+  } break;
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_eq(tasks, cond_ir);
@@ -2820,11 +2757,7 @@ void sem_narrow_nez(Sem_Tasks* tasks, Ignored_Blocks* ignored_blocks, Block* blo
       Pointer* ptr = ptr_type->pointer;
       if (hash_set_exists(&ptr->stack_vars, tasks->var)) {
         Type* new_type = type_narrow_nez(tasks->type);
-        sem_narrow_var(tasks, tasks->var, new_type);
-      }
-      else if (ptr->stack_vars.len == 1) {
-        Var* cond_var = ptr->stack_vars.list[0];
-        sem_condition_ignore_false_blocks(ignored_blocks, tasks->block, cond_var);
+        if (new_type) sem_narrow_var(tasks, tasks->var, new_type);
       }
     }
   } break;
@@ -2832,9 +2765,15 @@ void sem_narrow_nez(Sem_Tasks* tasks, Ignored_Blocks* ignored_blocks, Block* blo
   }
 }
 
-void sem_narrow_eqz(Sem_Tasks* tasks, Ignored_Blocks* ignored_blocks, Block* block) {
-  Ir* cond_ir = block->branch.cond;
+void sem_narrow_eqz_ir(Sem_Tasks* tasks, Ir* cond_ir) {
+  // cond_ir == 0
   switch (cond_ir->kind) {
+  case Ir_Kind_logic_and: {
+    Type* one = type_of_ir(cond_ir->binary.one->binary.one);
+    Type* two = type_of_ir(cond_ir->binary.one->binary.two);
+    if (type_is_true(one)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.one);
+    if (type_is_true(two)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.two);
+  } break;
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_ne(tasks, cond_ir);
@@ -2869,11 +2808,7 @@ void sem_narrow_eqz(Sem_Tasks* tasks, Ignored_Blocks* ignored_blocks, Block* blo
       Pointer* ptr = ptr_type->pointer;
       if (hash_set_exists(&ptr->stack_vars, tasks->var)) {
         Type* new_type = type_narrow_eqz(tasks->type);
-        sem_narrow_var(tasks, tasks->var, new_type);
-      }
-      else if (ptr->stack_vars.len == 1) {
-        Var* cond_var = ptr->stack_vars.list[0];
-        sem_condition_ignore_true_blocks(ignored_blocks, tasks->block, cond_var);
+        if (new_type) sem_narrow_var(tasks, tasks->var, new_type);
       }
     }
   } break;
@@ -2892,7 +2827,7 @@ void sem_unnarrow(Sem_Tasks* tasks) {
   var->block_types[tasks->block->id] = old;
 }
 
-Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
+Type* type_of_var_rec(Block* block, Var* var) {
   if (var->kind == Var_Kind_constant) {
     return var->declared;
   }
@@ -2915,74 +2850,28 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
     Block* pred = block->preds.base[i];
     if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
       if (pred->kind == Block_Kind_branch) {
-        I32 ignored_blocks_checkpoint = sem_ignored_blocks_checkpoint(ignored_blocks);
+        void* temp_arena_mark = arena_mark(sem.temp_arena);
         Sem_Tasks tasks = {};
         tasks.block = pred;
         tasks.var = var;
-        tasks.type = var->block_types[pred->id];
-        void* temp_arena_mark = arena_mark(sem.temp_arena);
-        { // condition is not equal to zero branch
-          Jump jump = pred->branch.nez;
-          if (jump.to_block == block) {
-            sem_narrow_nez(&tasks, ignored_blocks, pred);
-            for (I32 i = 0; i < ignored_blocks->capacity; i++) {
-              if (ignored_blocks->list[i]) {
-                printf("%s: b%li->b%li nez b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
-              }
-            }
-            printf("\n");
-            if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
-              Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
-              type = type_join(type, pred_type);
-            }
-            sem_unnarrow(&tasks);
-            sem_ignored_blocks_rollback(ignored_blocks, ignored_blocks_checkpoint);
-          }
+        tasks.type = type_of_var_rec(pred, var);
+        if (pred->branch.nez.to_block == block) {
+          sem_narrow_nez_ir(&tasks, pred->branch.cond);
+          Type* pred_type = type_of_var_rec(pred, var);
+          type = type_join(type, pred_type);
+          sem_unnarrow(&tasks);
         }
-        { // condition is equal to zero branch
-          Jump jump = pred->branch.eqz;
-          if (jump.to_block == block) {
-            sem_narrow_eqz(&tasks, ignored_blocks, pred);
-            for (I32 i = 0; i < ignored_blocks->capacity; i++) {
-              if (ignored_blocks->list[i]) {
-                printf("%s: b%li->b%li eqz b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
-              }
-            }
-            printf("\n");
-            if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
-              Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
-              type = type_join(type, pred_type);
-            }
-            sem_unnarrow(&tasks);
-            sem_ignored_blocks_rollback(ignored_blocks, ignored_blocks_checkpoint);
-          }
+        if (pred->branch.eqz.to_block == block) {
+          sem_narrow_eqz_ir(&tasks, pred->branch.cond);
+          Type* pred_type = type_of_var_rec(pred, var);
+          type = type_join(type, pred_type);
+          sem_unnarrow(&tasks);
         }
         arena_release_mark(sem.temp_arena, temp_arena_mark);
       }
-      // a ignored b25 and got a=2 from b26
-      // a: b30->b31 nez b25
-      // a: b28->b30 jmp b25
-      // a: b27->b28 nez b25
-      // a: b25->b27 jmp b25
-      // a: b26->b27 jmp b25
-
-      // it doens't move past b28 since at b28 it already cached results from nez path;
-      // but results are only correct for nez path. This would be fine if b25 was not ignored.
-      // Best approach would be somehow to track the fact that cached types are incomplete,
-      // then join-widen the types on the second path.
-      // a: b30->b32 eqz b26
-      // a: b28->b30 jmp b26
       else if (pred->kind == Block_Kind_jump) {
-        for (I32 i = 0; i < ignored_blocks->capacity; i++) {
-          if (ignored_blocks->list[i]) {
-            printf("%s: b%li->b%li jmp b%i ", var->name->base, pred - irgen.blocks.base, block - irgen.blocks.base, i);
-          }
-        }
-        printf("\n");
-        if (!sem_ignored_blocks_has(ignored_blocks, pred)) {
-          Type* pred_type = type_of_var_rec(ignored_blocks, pred, var);
-          type = type_join(type, pred_type);
-        }
+        Type* pred_type = type_of_var_rec(pred, var);
+        type = type_join(type, pred_type);
       }
     }
   }
@@ -2993,8 +2882,7 @@ Type* type_of_var_rec(Ignored_Blocks* ignored_blocks, Block* block, Var* var) {
 
 Type* type_of_var(Block* block, Var* var) {
   void* temp_arena_mark = arena_mark(sem.temp_arena);
-  Ignored_Blocks ignored_blocks = sem_ignored_blocks_init(sem.temp_arena, sem.current_fun->blocks->length);
-  Type* type = type_of_var_rec(&ignored_blocks, block, var);
+  Type* type = type_of_var_rec(block, var);
   if (type->kind == Type_Kind_none) {
     type = var->declared ? var->declared : sem.type_none;
     var->block_types[block->id] = type;
@@ -3615,6 +3503,19 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_and: {
     sem_error_text(Diag_Code_unsupported_semantics, ir->loc,
                    "the bitwise and operator");
+  } break;
+  case Ir_Kind_logic_and: {
+    Type* one = type_of_ir(ir->binary.one->binary.one);
+    Type* two = type_of_ir(ir->binary.one->binary.two);
+    if ((type_is_false(one)) || (two && type_is_false(two))) {
+      result = sem.type_zero;
+    }
+    else if (type_is_true(one) && type_is_true(two)) {
+      result = sem.type_one;
+    }
+    else {
+      result = sem.type_zero_one;
+    }
   } break;
   case Ir_Kind_eq: case Ir_Kind_ne:
   case Ir_Kind_lt: case Ir_Kind_le:
@@ -4448,12 +4349,12 @@ Type* sem_fun(Fun* fun) {
 
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
-    // if (block->is_loop_head) {
-    //   printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
-    // }
-    // else {
-    //   printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
-    // }
+    if (block->is_loop_head) {
+      printf(" *b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    }
+    else {
+      printf("  b%ld, scc: %d\n", block-irgen.blocks.base, block->sccid);
+    }
     sem_block(block);
   }
   // Blocks*  rpo = sem_cfg_rpo(fun);
@@ -4572,21 +4473,11 @@ void sem_funs(Arena* arena, Funs funs, Diags* diags) {
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
   sem.type_len = type_define_size(64, type_range(0, I64_MAX));
-  sem.type_zero = type_int(0);
+  sem.type_zero     = type_int(0);
+  sem.type_one      = type_int(1);
+  sem.type_zero_one = type_range(0, 1);
 
   sem.str_ptr = str_from_cstr("ptr");
-
-  sem.str_from_i8_array = arena_push(arena, sizeof(Fun));
-  {
-    Fun* fun = &new(irgen.funs);
-    sem.str_from_i8_array = fun;
-  }
-
-  // for (I32 i = 0; i < irgen.builtins->len; i++) {
-  //   Str* str = irgen.builtins->list[i];
-  //   Symbol* sym = hash_map_get(irgen.builtins, str);
-  //   sem_ensure_declared(sym->var_ir->var);
-  // }
 
   if (setjmp(sem.fatal) != 0) {
     sem.fatal_ready = false;
@@ -4707,20 +4598,15 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 
 void sem_test(void) {
   test("a:(0..2); if a && 1 do a else a", "");
-  // test("a:(0..2); c:(0..1) = a && 1; if c do a else a", "");
+  // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b else a+b", "");
+  // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");
+  // test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 0..1; if c do a else a", "");
+  // test("v:(0..2); c:(0..2); if (0..1) do { c = 0; v = 1 } else { c = 1; v = 2 }; if 3 do 4 else 5; if c do 6 else 7; v", "");
+  // test("v:(2..4); c:(0..1); if 0..1 do { c = 0; v = 2 } else { c = 1; v = 3 }; v; if c do v else v", "");
+  //
   // test("a:(0..2) = 0; b:(0..2); if (0..1) do a = 1; c:B8 = a && b; c = 0..1; if c do a+b else a+b", "");
   // test("a:(0..2) = 0; b:(0..2); if (0..1) do a = 1; c:B8 = a && b; c = 1; if c do a+b else a+b", "");
   // test("c:0..1 = 0; x:0..2; while 1 do { if c do x; c = 0..1 }", "");
-  // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b else a+b", "");
-  // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");
-  // test("c:0..1 = 0; a:2..5; if (0..1) do { c = 1; a = 3 } else { c = 0; a = 4 }; c = 1; if c do a else a", "");
-  // test("a:(0..2); c:(0..2); if (0..1) do { c = 0; a = 1 } else { c = 1; a = 2 }; if 3 do 4 else 5; if c do 6 else 7; a", "");
-      /* a = { b25: 1, b26: 2, b28: 1..2, b30: 2, b31: 2,    b32: 1..2 } -- Expected
-         a = { b25: 1, b26: 2, b28: 2,    b30: 2, b31: 1..2, b32: 1..2 } -- BUG
-      */
-  // TODO: v is used before condition on c so it cached v:(2..3),
-  //       but we need to forget that v was used
-  // test("v:(2..4); c:(0..1); if 0..1 do { c = 0; v = 2 } else { c = 1; v = 3 }; v; if c do v else v", "");
   // test_diag("a", Diag_Code_undefined_name);
   // test_diag("a : 1\n{ a : 2 }", Diag_Code_shadowed_declaration);
   // test_diag("a : 1\na = 2", Diag_Code_assign_to_constant);

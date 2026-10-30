@@ -20,6 +20,8 @@ typedef enum Ir_Kind {
   Ir_Kind_xor = Ast_Kind_xor | Ir_Flag_binary,
   Ir_Kind_and = Ast_Kind_and | Ir_Flag_binary,
 
+  Ir_Kind_logic_and = Ast_Kind_logic_and | Ir_Flag_binary,
+
   Ir_Kind_eq  = Ast_Kind_eq | Ir_Flag_binary,
   Ir_Kind_ne  = Ast_Kind_ne | Ir_Flag_binary,
   Ir_Kind_lt  = Ast_Kind_lt | Ir_Flag_binary,
@@ -67,6 +69,7 @@ typedef enum Ir_Kind {
   Ir_Kind_len     = 152,
   Ir_Kind_type    = 153,
   Ir_Kind_ieee    = 154,
+
 
 } Ir_Kind;
 
@@ -143,6 +146,7 @@ struct Ir {
     Fun*    fun;
     Rec*    rec;
     Ir_Pair binary;
+    Ir_Pair logic_and;
     Ir*     unary;
     Position_Offset position;
     Name_Offset     name_offset;
@@ -590,6 +594,8 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_or:   string_builder_push_cstr(sb, "or "); break;
   case Ir_Kind_xor:  string_builder_push_cstr(sb, "xor "); break;
   case Ir_Kind_and:  string_builder_push_cstr(sb, "and "); break;
+
+  case Ir_Kind_logic_and: string_builder_push_cstr(sb, "logic and "); break;
 
   case Ir_Kind_join: string_builder_push_cstr(sb, "join "); break;
   case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
@@ -1368,7 +1374,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_logic_and: {
     /*
-    FIX: this appoarch is wrong, instead generate ir_kind_logic_and. This would allow narrowing on && conditions
     if A then .rhs else .false
     .rhs:
     if B then .true else .false
@@ -1379,6 +1384,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       store 0
     jump merge
     .merge:
+      result = logic_and A B value
     */
     Var* and_var = irgen_var_new();
     and_var->name = str_from_cstr("__and_result");
@@ -1414,7 +1420,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_block_link_jump_to_block(&jump_from_true_block->jump,  merge_block);
     irgen_block_link_jump_to_block(&jump_from_false_block->jump, merge_block);
 
-    result = irgen_push_unary(Ir_Kind_load, and_var_ir);
+    // NOTE: logic_and takes 3 operands.
+    // To avoid allocation for the third operand 3 Ir are created.
+    // logic ir is not attached to any block
+    Ir* value = irgen_push_unary(Ir_Kind_load, and_var_ir);
+    Ir* logic = &new(irgen.irs);
+    logic->binary.one = lhs_ir;
+    logic->binary.two = rhs_ir;
+    result = irgen_push_binary(Ir_Kind_logic_and, logic, value);
   } break;
   case Ast_Kind_if: {
     Ast_Node* cond = node->binary.lhs;
