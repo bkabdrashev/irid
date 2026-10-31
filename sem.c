@@ -2723,6 +2723,12 @@ void sem_narrow_nez_ir(Sem_Tasks* tasks, Ir* cond_ir) {
     sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.one);
     sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.two);
   } break;
+  case Ir_Kind_logic_or: {
+    Type* one = type_of_ir(cond_ir->binary.one->binary.one);
+    Type* two = type_of_ir(cond_ir->binary.one->binary.two);
+    if (type_is_false(one)) sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.one);
+    if (type_is_false(two)) sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.two);
+  } break;
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
       sem_type_narrow_int_eq(tasks, cond_ir);
@@ -2773,6 +2779,10 @@ void sem_narrow_eqz_ir(Sem_Tasks* tasks, Ir* cond_ir) {
     Type* two = type_of_ir(cond_ir->binary.one->binary.two);
     if (type_is_true(one)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.one);
     if (type_is_true(two)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.two);
+  } break;
+  case Ir_Kind_logic_or: {
+    sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.one);
+    sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.two);
   } break;
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {

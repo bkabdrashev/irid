@@ -21,6 +21,7 @@ typedef enum Ir_Kind {
   Ir_Kind_and = Ast_Kind_and | Ir_Flag_binary,
 
   Ir_Kind_logic_and = Ast_Kind_logic_and | Ir_Flag_binary,
+  Ir_Kind_logic_or  = Ast_Kind_logic_or  | Ir_Flag_binary,
 
   Ir_Kind_eq  = Ast_Kind_eq | Ir_Flag_binary,
   Ir_Kind_ne  = Ast_Kind_ne | Ir_Flag_binary,
@@ -146,7 +147,6 @@ struct Ir {
     Fun*    fun;
     Rec*    rec;
     Ir_Pair binary;
-    Ir_Pair logic_and;
     Ir*     unary;
     Position_Offset position;
     Name_Offset     name_offset;
@@ -596,6 +596,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_and:  string_builder_push_cstr(sb, "and "); break;
 
   case Ir_Kind_logic_and: string_builder_push_cstr(sb, "logic and "); break;
+  case Ir_Kind_logic_or:  string_builder_push_cstr(sb, "logic or "); break;
 
   case Ir_Kind_join: string_builder_push_cstr(sb, "join "); break;
   case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
@@ -1340,6 +1341,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* false_value = irgen_push_int(0);
     Ir* true_value = irgen_push_int(1);
     or_var->declared_ir = irgen_push_binary(Ir_Kind_range, false_value, true_value);
+    irgen_push_declare(or_var);
 
     Ast_Node* lhs = node->binary.lhs;
     Ir* lhs_ir = irgen_ast_node(lhs);
@@ -1368,9 +1370,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
     irgen_block_link_jump_to_block(&jump_from_true_block->jump,  merge_block);
     irgen_block_link_jump_to_block(&jump_from_false_block->jump, merge_block);
 
-    result = irgen_push_unary(Ir_Kind_load, or_var_ir);
-    or_var->declared_ir = result;
-    irgen_push_declare(or_var);
+    // NOTE: logic_or takes 3 operands.
+    // To avoid allocation for the third operand 3 Ir are created.
+    // logic ir is not attached to any block
+    Ir* value = irgen_push_unary(Ir_Kind_load, or_var_ir);
+    Ir* logic = &new(irgen.irs);
+    logic->binary.one = lhs_ir;
+    logic->binary.two = rhs_ir;
+    result = irgen_push_binary(Ir_Kind_logic_or, logic, value);
   } break;
   case Ast_Kind_logic_and: {
     /*

@@ -5,7 +5,7 @@
 
 - [ ] When element sizes in a record are equal then this record is an array:
 ```irid
-a = ((U32; U32); U64) // implicit [2]([2]\U32\U64)
+a = ((U32; U32); U64) // implicit [2]([2] U32\U64)
 ```
 
 - [ ] Values that could be assign only to certain type. Example: type bool, values: false/true. Need to think syntax/semantics of it.
@@ -19,10 +19,10 @@ for i in arr.len do
 
 - [ ] Custom header
 ```irid
-arr: [cap: 4; len:I32 = 2]I32 = (1; 2; 3)
+arr: [cap: 5; len:I32 = 2]I32 = (1; 2; 3; 0, 0)
 for i in arr.len do
   arr[i] = i
-arr[arr.len++] = 0
+arr[arr.len++] = 4
 ```
 
 - [ ] Flexible function paramter list
@@ -51,7 +51,7 @@ char : (str : string) -> {
   str.len is 1
   return str.0
 }
-#char "a"
+# char"a"
 ```
 
 - [ ] function return value type checking

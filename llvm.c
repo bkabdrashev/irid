@@ -451,6 +451,7 @@ void llvm_ir(Ir* ir) {
     LLVMTypeRef  llvm_to  = llvm_of_type(type);
     result = LLVMBuildFPToSI(llvm_gen.builder, llvm_val, llvm_to, "");
   } break;
+  case Ir_Kind_logic_or:
   case Ir_Kind_logic_and: {
     result = llvm_of_ir(ir->binary.two);
   } break;
