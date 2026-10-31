@@ -1017,7 +1017,7 @@ void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32  source_length  = strlen(source);
   I32  length         = source_length + basic_length + 32;
 
-  Arena arena          = arena_init(KB(4) * length);
+  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
                          str_init(&arena, 2*length);
 
   Source_Map sources = {0};

@@ -971,8 +971,6 @@ void irgen_scope_leave(void) {
 
 Fun* irgen_fun_enter(void) {
   Fun* fun = &new(irgen.funs);
-  fun->name = 0;
-  fun->type = 0;
   fun->ret_block = &new(irgen.blocks);
   memset(fun->ret_block, 0, sizeof(Block));
   fa_temp(irgen.temp_ir_arena, fun->ret_block->irs);
@@ -1518,6 +1516,9 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* while_exit           = irgen_block_new(); // equal zero
     irgen_block_link_jump_to_block(&branch_from_header->branch.eqz, while_exit);
   } break;
+  case Ast_Kind_fun_block: {
+    irgen_ast_node(node->binary.lhs);
+  } break;
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
     Var* arg_var = irgen_var_new();
@@ -1719,7 +1720,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32  source_length  = strlen(source);
   I32  length         = source_length + builtin_length + 32;
 
-  Arena arena         = arena_init(KB(4) * length);
+  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
                         str_init(&arena, 2*length);
 
   Source_Map sources = {0};
@@ -1751,6 +1752,7 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("foo:() -> {} do 1+2", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");

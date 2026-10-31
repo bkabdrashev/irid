@@ -245,7 +245,7 @@ a = while 1 do {
 
 - [ ] {} pattern syntax for extracting members from a record
 ```irid
-{ y, x } = vec
+{ y; x } = vec
 ```
 
 - [ ] methods syntax using closures
