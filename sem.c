@@ -2955,12 +2955,7 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
           }
           field_var = type_record_get_by_position(to->record, i);
         }
-        if (type_is_same(field.type, field_var.type)) {
-          new_record->types[i] = field.type;
-        }
-        else {
-          new_record->types[i] = type_auto_cast(block, 0, field.type, field_var.type);
-        }
+        new_record->types[i] = type_auto_cast(block, 0, field.type, field_var.type);
       }
       result = type_record(new_record);
 
@@ -4398,10 +4393,11 @@ Type* sem_fun(Fun* fun) {
     function->ret = function->ret->type;
   }
 
-  fun->ret_ir->var->declared = function->ret;
-  Type* ret_type = type_of_ir(fun->ret_ir);
-  assert(ret_type->kind == Type_Kind_ptr);
-  ret_type->pointer->declared = function->ret;
+  if (fun->ret_ir->var->kind != Var_Kind_declared) {
+    fun->ret_ir->var->declared = function->ret;
+    Type* ret_type = type_of_ir(fun->ret_ir);
+    assert(ret_type->kind == Type_Kind_ptr);
+  }
   fun->type = type_function(function);
 
   {
@@ -4620,6 +4616,8 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // test("a:(I32; I32) = 0", "");
+  // test("foo:(a:0..1) -> I32\n return a+2;\nfoo(1)", "");
   // test("a:(0..2); if a && 1 do a else a", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b else a+b", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b+c else a+b+c", "");

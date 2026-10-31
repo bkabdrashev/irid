@@ -310,6 +310,17 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->unary);
     string_builder_push_cstr(sb, op_cstr);
   } break;
+  case Ast_Kind_fun: {
+    string_builder_push_cstr(sb, "(");
+    string_builder_push_ast_node(sb, node->binary.lhs->binary.lhs);
+    string_builder_push_cstr(sb, " -> ");
+    string_builder_push_ast_node(sb, node->binary.lhs->binary.rhs);
+    if (node->binary.rhs) {
+      string_builder_push_cstr(sb, " do ");
+      string_builder_push_ast_node(sb, node->binary.rhs);
+    }
+    string_builder_push_cstr(sb, ")");
+  } break;
   case Ast_Kind_or: case Ast_Kind_xor: case Ast_Kind_and:
   case Ast_Kind_add: case Ast_Kind_sub:
   case Ast_Kind_eq: case Ast_Kind_ne:
@@ -318,10 +329,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_div: case Ast_Kind_rem:
   case Ast_Kind_mul:
   case Ast_Kind_dot:
-  case Ast_Kind_fun:
   case Ast_Kind_logic_and: case Ast_Kind_logic_or:
   case Ast_Kind_meet: case Ast_Kind_join: case Ast_Kind_range:
-    {
+  {
     string_builder_push_cstr(sb, "(");
     string_builder_push_ast_node(sb, node->binary.lhs);
     Cstr op_cstr = cstr_from_ast_kind(node->kind);
@@ -840,6 +850,58 @@ Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs, I32 toke
   return node;
 }
 
+Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
+  if (parse_at_end(parser)) {
+    Token token = *parse_peek(parser);
+    parse_diag(parser, Diag_Code_expected_block, token.loc);
+    parser->panic = true;
+    return parse_error_node(parser, token.loc);
+  }
+
+  Token next_token = *parse_peek(parser);
+  if ((next_token.flag & Token_Flag_wasnewline) == 0) {
+    return parse_statement(parser);
+  }
+
+  Ast_List* fa_temp(parser->list_arena, temp);
+  while (!parse_at_end(parser)) {
+    parser->panic = false;
+    next_token = *parse_peek(parser);
+    if (has_flag(next_token.flag, Token_Flag_wasnewline)
+        && next_token.indent <= indent) {
+      break;
+    }
+    if (next_token.kind == Token_Kind_curly_close) {
+      break;
+    }
+    if (next_token.kind == Token_Kind_semicolon) {
+      parse_advance(parser);
+      continue;
+    }
+    I32 before = parser->tok;
+    Ast_Node* node = parse_statement(parser);
+    if (node) {
+      parse_list_push(parser, temp, node);
+    }
+    if (parser->tok == before) {
+      parse_sync(parser, next_token.indent);
+      if (parser->tok == before) {
+        parse_advance(parser);
+      }
+    }
+    while (parse_match_token(parser, Token_Kind_semicolon)) {}
+  }
+  if (temp->length == 0) {
+    Token token = *parse_peek(parser);
+    parse_diag(parser, Diag_Code_expected_block, token.loc);
+    parser->panic = true;
+    return parse_error_node(parser, token.loc);
+  }
+  Ast_Node* node = ast_new_node(parser->perm_arena, Ast_Kind_iblock);
+  node->list = parse_list_perm(parser, temp);
+  return node;
+}
+
 Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to_match) {
   Ast_Node* node = lhs;
   if (node && node->kind == Ast_Kind_error) return node;
@@ -849,7 +911,6 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     Token token = *parse_peek(parser);
     parse_advance(parser);
     switch (token.kind) {
-    case Token_Kind_arrow:
     case Token_Kind_dot:
     case Token_Kind_comma: case Token_Kind_backslash: case Token_Kind_dot_dot:
     case Token_Kind_bang_equal: case Token_Kind_equal_equal:
@@ -864,6 +925,33 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       if (precedence >= precedence_to_match) {
         lhs = node;
         node = parse_new_infix(parser, kind, lhs, token.flag);
+      }
+      else {
+        parse_retreat(parser);
+        return node;
+      }
+    } break;
+    case Token_Kind_arrow: {
+      Ast_Kind kind = (Ast_Kind)token.kind;
+      I32 precedence = parse_left_precedence(kind, token.flag);
+      if (precedence >= precedence_to_match) {
+        lhs = node;
+        Ast_Node* fun_arrow = parse_new_infix(parser, kind, lhs, token.flag);
+        Ast_Node* fun_block = 0;
+        if (parse_match_token(parser, Token_Kind_do)) {
+          fun_block = parse_indented_block(parser, token.indent);
+        }
+        else {
+          Token body_maybe = *parse_peek(parser);
+          if (body_maybe.indent > token.indent) {
+            fun_block = parse_indented_block(parser, token.indent);
+          }
+        }
+        Ast_Node* fun = ast_new_node(parser->perm_arena, Ast_Kind_fun);
+        fun->binary.lhs = fun_arrow;
+        fun->binary.rhs = fun_block;
+        fun->loc = fun_arrow->loc;
+        node = fun;
       }
       else {
         parse_retreat(parser);
@@ -940,58 +1028,6 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
     } break;
     }
   }
-}
-
-Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
-  if (parse_at_end(parser)) {
-    Token token = *parse_peek(parser);
-    parse_diag(parser, Diag_Code_expected_block, token.loc);
-    parser->panic = true;
-    return parse_error_node(parser, token.loc);
-  }
-
-  Token next_token = *parse_peek(parser);
-  if ((next_token.flag & Token_Flag_wasnewline) == 0) {
-    return parse_statement(parser);
-  }
-
-  Ast_List* fa_temp(parser->list_arena, temp);
-  while (!parse_at_end(parser)) {
-    parser->panic = false;
-    next_token = *parse_peek(parser);
-    if (has_flag(next_token.flag, Token_Flag_wasnewline)
-        && next_token.indent <= indent) {
-      break;
-    }
-    if (next_token.kind == Token_Kind_curly_close) {
-      break;
-    }
-    if (next_token.kind == Token_Kind_semicolon) {
-      parse_advance(parser);
-      continue;
-    }
-    I32 before = parser->tok;
-    Ast_Node* node = parse_statement(parser);
-    if (node) {
-      parse_list_push(parser, temp, node);
-    }
-    if (parser->tok == before) {
-      parse_sync(parser, next_token.indent);
-      if (parser->tok == before) {
-        parse_advance(parser);
-      }
-    }
-    while (parse_match_token(parser, Token_Kind_semicolon)) {}
-  }
-  if (temp->length == 0) {
-    Token token = *parse_peek(parser);
-    parse_diag(parser, Diag_Code_expected_block, token.loc);
-    parser->panic = true;
-    return parse_error_node(parser, token.loc);
-  }
-  Ast_Node* node = ast_new_node(parser->perm_arena, Ast_Kind_iblock);
-  node->list = parse_list_perm(parser, temp);
-  return node;
 }
 
 Ast_Node* parse_prefix_or_atom(Parser* parser) {
@@ -1082,9 +1118,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
           exp->loc = loc_join(lhs->loc, rhs ? rhs->loc : LOC_NONE);
         }
         else {
-          Diag* diag = parse_diag(parser, Diag_Code_bad_declaration_target,
+          parse_diag(parser, Diag_Code_bad_declaration_target,
                                   lhs ? lhs->loc : token.loc);
-          (void)diag;
           exp = parse_error_node(parser, lhs ? lhs->loc : token.loc);
         }
       }
@@ -1416,7 +1451,7 @@ Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens, Diags* diags) {
 
 void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
-  Arena arena = arena_init(KB(1) * source_length);
+  Arena arena = arena_init(KB(1) * source_length + 256 * sizeof(Diag));
   str_init(&arena, 2*source_length);
   Source_Map sources = {0};
   File_Id   file   = source_add(&sources, &arena, file_name, source, strlen(source));
@@ -1433,7 +1468,7 @@ void _test_ast(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 void _test_diag(Cstr source, I32 expected_errors, Diag_Code expected_code,
                 B8 expect_note, Cstr file_name, I32 line) {
   I32 source_length = strlen(source) + 2;
-  Arena arena = arena_init(KB(1) * source_length);
+  Arena arena = arena_init(KB(1) * source_length + 256 * sizeof(Diag));
   str_init(&arena, 2*source_length);
   Source_Map sources = {0};
   File_Id file = source_add(&sources, &arena, file_name, source, strlen(source));
@@ -1481,7 +1516,7 @@ void _test_diag(Cstr source, I32 expected_errors, Diag_Code expected_code,
 void _test_diag_render(void) {
   Cstr source = "a : 1\na : 2";
   I32 source_length = strlen(source) + 2;
-  Arena arena = arena_init(KB(1) * source_length);
+  Arena arena = arena_init(KB(1) * source_length + 256 * sizeof(Diag));
   str_init(&arena, 2*source_length);
   Source_Map sources = {0};
   File_Id file = source_add(&sources, &arena, "test.i", source, strlen(source));
@@ -1550,7 +1585,8 @@ void diag_test(void) {
 }
 
 void parse_test(void) {
-  test("if a < 1\n || b < 2 do 3",        "");
+  test("f:()->a\n return 1",        "");
+  test("f:()->a do 1",        "");
   return;
   test("arr[a@]",        "");
   test("a b->c",        "(a (b -> c))");

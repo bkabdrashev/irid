@@ -859,7 +859,7 @@ void irgen_block_link_jump_to_block(Jump* jump, Block* block) {
 Block* irgen_block_leave(void) {
   Block* block = irgen_block_top();
   block->irs = irgen_irs_perm(block->irs);
-  // NOTE: per each ir only one cast is allowed possible
+  // NOTE: per each ir only one cast is allowed
   fa_init(irgen.perm_arena, block->sem_irs, block->irs->length*2);
   return block;
 }
@@ -997,6 +997,9 @@ Fun* irgen_fun_leave(void) {
   irgen_block_link_jump_to_block(&block->jump, fun->ret_block);
   irgen_block_leave();
   fa_extend(irgen.temp_block_arena, fun->blocks, fun->ret_block);
+   // NOTE: it is not needed to generate load for return variable
+  // fa_temp(irgen.temp_ir_arena, fun->ret_block->irs);
+  // fun->ret_load = irgen_push_unary(Ir_Kind_load, fun->ret_ir);
   fun->ret_block->irs = irgen_irs_perm(fun->ret_block->irs);
   fa_init(irgen.perm_arena, fun->ret_block->sem_irs, fun->ret_block->irs->length*2);
   fun->blocks = irgen_blocks_perm(fun->blocks);
@@ -1109,13 +1112,13 @@ void irgen_use_var(Ir* ir) {
       Symbol* sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
       sym->kind = Symbol_Kind_variable;
       sym->loc = ir->loc;
-      sym->ir = irgen_push_position_offset(ir, i);;
+      sym->ir = irgen_push_position_offset(ir, i);
       irgen_sym_put(name, sym);
     }
   }
   else {
     irgen_error_text(Diag_Code_invalid_function_parameter, ir->loc,
-                     "a function parameter must be a name or record");
+                     "a function parameter must be a record");
   }
 }
 
@@ -1516,16 +1519,13 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Block* while_exit           = irgen_block_new(); // equal zero
     irgen_block_link_jump_to_block(&branch_from_header->branch.eqz, while_exit);
   } break;
-  case Ast_Kind_fun_block: {
-    irgen_ast_node(node->binary.lhs);
-  } break;
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
     Var* arg_var = irgen_var_new();
     fun->name = irgen.str_anon;
     Hash_Map scope;
     {
-      Ast_Node* lhs = node->binary.lhs;
+      Ast_Node* lhs = node->binary.lhs->binary.lhs;
       if (lhs->kind == Ast_Kind_record) {
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
         add(irgen.scope_stack, &scope);
@@ -1563,11 +1563,24 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
       else {
         irgen_error_text(Diag_Code_invalid_function_parameter, lhs->loc,
-                         "a function parameter must be a name or record");
+                         "a function parameter must be a record");
       }
     }
-    Ir* rhs = irgen_ast_node(node->binary.rhs);
-    irgen_push_binary(Ir_Kind_store, fun->ret_ir, rhs);
+    if (node->binary.rhs) {
+      irgen_var_declare(fun->ret_ir->var, node->binary.lhs->binary.rhs);
+      irgen_push_declare(fun->ret_ir->var);
+      Ir* ir_rhs = irgen_ast_node(node->binary.rhs);
+      if (ir_rhs) {
+        irgen_push_binary(Ir_Kind_store, fun->ret_ir, ir_rhs);
+      }
+    }
+    else {
+      Ir* ir_rhs = irgen_ast_node(node->binary.lhs->binary.rhs);
+      if (ir_rhs) {
+        irgen_push_binary(Ir_Kind_store, fun->ret_ir, ir_rhs);
+      }
+    }
+
     irgen_fun_leave();
     irgen_scope_leave();
     result = irgen_push_fun(fun);
@@ -1752,7 +1765,8 @@ void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("foo:() -> {} do 1+2", "");
+  // test("foo:(a:I32) -> a do 1+2", "");
+  // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");
