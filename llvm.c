@@ -792,6 +792,8 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_ieee:    result = llvm_gen.none; break;
   case Ir_Kind_len:     result = llvm_gen.none; break;
   case Ir_Kind_run:     result = llvm_gen.none; break;
+  case Ir_Kind_use:     result = llvm_gen.none; break;
+  case Ir_Kind_maybe_using: assert(0); break;
   case Ir_Kind_foreign: result = llvm_gen.none; break;
   case Ir_Kind_macro_par: assert(0); break;
   }

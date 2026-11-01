@@ -736,6 +736,9 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     case Token_Kind_sharp:
       string_builder_push_cstr(&sb, "#");
     break;
+    case Token_Kind_use:
+      string_builder_push_cstr(&sb, "use");
+    break;
     }
     string_builder_push_cstr(&sb, " ");
   }

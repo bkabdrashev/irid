@@ -12,12 +12,12 @@ I32 irid_run_path(Cstr path) {
     profile_print(stderr);
     return 1;
   }
-  I32  length         = (I32)(source_length + builtin_length + 32);
-  I32  result         = 0;
+  I32  length = (I32)(source_length + builtin_length + 32);
+  I32  result = 0;
 
   profile_stage_begin("init arena", 0);
-  Arena arena         = arena_init(KB(4) * length);
-                        str_init(&arena, 2*length);
+  Arena arena = arena_init(KB(4) * length);
+                str_init(&arena, 2*length);
 
   Source_Map sources = {0};
   Diags diags = diags_init(&arena, 256);

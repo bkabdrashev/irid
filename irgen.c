@@ -52,6 +52,7 @@ typedef enum Ir_Kind {
   Ir_Kind_record          = 131,
   Ir_Kind_position_offset = 132,
   Ir_Kind_name_offset     = 134,
+  Ir_Kind_maybe_using     = 135,
 
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
@@ -70,8 +71,7 @@ typedef enum Ir_Kind {
   Ir_Kind_len     = 152,
   Ir_Kind_type    = 153,
   Ir_Kind_ieee    = 154,
-
-
+  Ir_Kind_use     = 155,
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -81,6 +81,20 @@ typedef struct Type  Type;
 
 typedef struct Ir_Pair Ir_Pair;
 struct Ir_Pair { Ir* one; Ir* two; };
+
+typedef struct Use Use;
+struct Use {
+  Use* next;
+  Ir*  base;
+  I32  depth;
+  Loc  loc;
+};
+
+typedef struct Maybe_Using Maybe_Using;
+struct Maybe_Using {
+  Str* name;
+  Use* uses;
+};
 
 typedef struct Name_Offset Name_Offset;
 struct Name_Offset { Ir* of; Str* at; };
@@ -150,6 +164,7 @@ struct Ir {
     Ir*     unary;
     Position_Offset position;
     Name_Offset     name_offset;
+    Maybe_Using     maybe_using;
     Declare         declare;
     Int_Extend      int_cast;
     Ir*             cast_value;
@@ -327,6 +342,7 @@ struct Irgen {
   Fun_Stack   fun_stack;
   Blocks*     unresolved_breaks;
   Scope_Stack scope_stack;
+  Use*        uses;
   I32         block_length_max;
 
   Diags*      diags;
@@ -468,6 +484,9 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_len:
     string_builder_push_cstr(sb, "len");
   break;
+  case Ir_Kind_use:
+    string_builder_push_cstr(sb, "use");
+  break;
   case Ir_Kind_foreign:
     string_builder_push_cstr(sb, "foreign");
   break;
@@ -488,6 +507,10 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_str:
     string_builder_push_cstr(sb, "str ");
     string_builder_push_str(sb, ir->str);
+  break;
+  case Ir_Kind_maybe_using:
+    string_builder_push_cstr(sb, "maybe using ");
+    string_builder_push_str(sb, ir->maybe_using.name);
   break;
   case Ir_Kind_declare: {
     Var* var = ir->declare.var;
@@ -794,6 +817,23 @@ Ir* irgen_push_fun(Fun* fun) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_maybe_using(Str* str, Use* uses) {
+  Ir ir = { .kind = Ir_Kind_maybe_using, .maybe_using = { .name = str, .uses = uses } };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_use(Ir* base) {
+  Use* use = arena_push_zero(irgen.perm_arena, sizeof(Use));
+       use->base  = base;
+       use->depth = irgen.scope_stack.length;
+       use->loc   = base->loc;
+       use->next  = irgen.uses;
+  irgen.uses = use;
+
+  Ir ir = { .kind = Ir_Kind_use, .unary = base };
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_declare(Var* var) {
   Ir ir = { .kind = Ir_Kind_declare, .declare = { .var = var }};
   return irgen_push(ir);
@@ -967,6 +1007,9 @@ void irgen_scope_enter(Hash_Map* scope) {
 
 void irgen_scope_leave(void) {
   del(irgen.scope_stack);
+  while (irgen.uses && irgen.uses->depth > irgen.scope_stack.length) {
+    irgen.uses = irgen.uses->next;
+  }
 }
 
 Fun* irgen_fun_enter(void) {
@@ -1046,6 +1089,10 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
         irgen_error_name(Diag_Code_not_assignable, lhs->loc, lhs->str);
       }
     }
+    else if (irgen.uses) {
+      Ir* var = irgen_push_maybe_using(lhs->str, irgen.uses);
+      irgen_push_binary(Ir_Kind_store, var, rhs);
+    }
     else {
       irgen_error_name(Diag_Code_undefined_name, lhs->loc, lhs->str);
     }
@@ -1105,21 +1152,6 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
 }
 
 void irgen_use_var(Ir* ir) {
-  if (ir->var->declared_ir->kind == Ir_Kind_record) {
-    Rec* rec = ir->var->declared_ir->rec;
-    for (I32 i = 0; i < rec->length; i++) {
-      Str* name = rec->names[i];
-      Symbol* sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-      sym->kind = Symbol_Kind_variable;
-      sym->loc = ir->loc;
-      sym->ir = irgen_push_position_offset(ir, i);
-      irgen_sym_put(name, sym);
-    }
-  }
-  else {
-    irgen_error_text(Diag_Code_invalid_function_parameter, ir->loc,
-                     "a function parameter must be a record");
-  }
 }
 
 Ir* irgen_ast_node(Ast_Node* node) {
@@ -1160,8 +1192,13 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
     }
     else {
-      irgen_error_name(Diag_Code_undefined_name, node->loc, node->str);
+      Ir* maybe = irgen_push_maybe_using(node->str, irgen.uses);
+      result = irgen_push_unary(Ir_Kind_load, maybe);
     }
+  } break;
+  case Ast_Kind_use: {
+    Ir* base = irgen_ast_node(node->unary);
+    result = irgen_push_use(base);
   } break;
   case Ast_Kind_dot: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
@@ -1533,7 +1570,16 @@ Ir* irgen_ast_node(Ast_Node* node) {
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
         irgen_push_declare(arg_var);
-        irgen_use_var(fun->arg_var);
+        Rec* rec = fun->arg_var->var->declared_ir->rec;
+        for (I32 i = 0; i < rec->length; i++) {
+          Str* name = rec->names[i];
+          Symbol* sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
+          sym->kind = Symbol_Kind_variable;
+          sym->loc = fun->arg_var->loc;
+          sym->ir = irgen_push_position_offset(fun->arg_var, i);
+          irgen_sym_put(name, sym);
+        }
+
       }
       else if (lhs->kind == Ast_Kind_declare) {
         scope = hash_map_init(irgen.perm_arena, 1);
@@ -1632,6 +1678,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
   irgen.fun_stack.length      = 0;
   irgen.scope_stack.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Hash_Map*));
   irgen.scope_stack.length    = 0;
+  irgen.uses                  = 0;
 
   irgen.str_nil  = str_from_cstr("");
   irgen.str_anon = str_from_cstr("__anon");

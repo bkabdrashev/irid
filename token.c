@@ -56,6 +56,7 @@ typedef enum Token_Kind {
   Token_Kind_return             = String_Kind_return,
   Token_Kind_break              = String_Kind_break,
   Token_Kind_while              = String_Kind_while,
+  Token_Kind_use                = String_Kind_use,
 } Token_Kind;
 
 Cstr cstr_from_token_kind(Token_Kind kind) {
@@ -111,6 +112,7 @@ Cstr cstr_from_token_kind(Token_Kind kind) {
   case Token_Kind_return:            return "return";
   case Token_Kind_break:             return "break";
   case Token_Kind_while:             return "while";
+  case Token_Kind_use:               return "use";
   }
   return "token";
 }

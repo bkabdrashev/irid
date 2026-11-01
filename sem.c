@@ -3207,6 +3207,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
 Type* sem_var_declare(Var* var) {
   if (var->state == Var_State_resolved) return var->declared;
   if (var->state == Var_State_resolving) {
+    assert(0);
     sem_error_name(Diag_Code_cyclic_declaration, sem_loc_for_var(var), var->name);
   }
   var->state = Var_State_resolving;
@@ -3233,6 +3234,88 @@ Type* sem_var_declare(Var* var) {
 }
 
 Type* sem_fun(Fun* fun);
+
+B8 type_has_field(Type* type, Str* name) {
+  B8 result = false;
+  if (type->kind == Type_Kind_record) {
+    I32 pos = hash_map_get_i32(&type->record->position_from_name, name);
+    if (pos >= 0) {
+      result = true;
+    }
+  }
+  else if (type->kind == Type_Kind_join_records) {
+    Join* join = type->join;
+    result = true;
+    for (I32 i = 0; i < join->records.len; i++) {
+      Type* element = join->records.list[i];
+      Record* record = element->record;
+      if (record->length > 0) {
+        I32 pos = hash_map_get_i32(&record->position_from_name, name);
+        if (pos < 0) {
+          result = false;
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+Type* sem_name_offset(Block* block, Ir* ir) {
+  Type* result = sem.type_none;
+  Type* of_type = type_of_ir(ir->name_offset.of);
+  if (of_type->kind == Type_Kind_ptr) {
+    if (of_type->pointer->stack_vars.len > 0) {
+      Var* first_var = of_type->pointer->stack_vars.list[0];
+      I32  first_offset = sem_get_offset_by_name(block, ir, first_var, ir->name_offset.at);
+      Var* first_var_field = sem_get_var_by_name(block, first_var, ir->name_offset.at);
+      for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
+        Var* var = of_type->pointer->stack_vars.list[i];
+        I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
+        if (offset != first_offset) {
+          sem_error_name(Diag_Code_join_field_mismatch, ir->loc, ir->name_offset.at);
+        }
+      }
+
+      Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
+      pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
+      pointer->declared = first_var_field->declared;
+      hash_set_put(&pointer->stack_vars, first_var_field);
+
+      for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
+        Var* var = of_type->pointer->stack_vars.list[i];
+        Var* field_var = sem_get_var_by_name(block, var, ir->name_offset.at);
+        pointer->declared = type_meet(pointer->declared, field_var->declared);
+        hash_set_put(&pointer->stack_vars, field_var);
+      }
+      result = type_pointer(pointer);
+    }
+    else {
+      Type* declared = type_pointer_declared(of_type->pointer);
+      if (declared->kind == Type_Kind_record) {
+        Field field = type_record_get_by_name(declared->record, ir->name_offset.at);
+        if (field.pos < 0) {
+          sem_error_name(Diag_Code_unknown_field, ir->loc, ir->name_offset.at);
+        }
+        result = type_pointer_to(field.type);
+      }
+      else {
+        sem_error_type(Diag_Code_invalid_field_base, ir->loc, declared);
+      }
+    }
+  }
+  else if (of_type->kind == Type_Kind_record) {
+    Field field = type_record_get_by_name(of_type->record, ir->name_offset.at);
+    if (field.pos < 0) {
+      sem_error_name(Diag_Code_unknown_field, ir->loc, ir->name_offset.at);
+    }
+    result = field.type;
+  }
+  else {
+    sem_error_operand(ir->loc, ".", of_type);
+  }
+  return result;
+}
 
 void sem_ir(Block* block, Ir* ir) {
   // printf("  r%ld\n", ir-irgen.irs.base);
@@ -3771,58 +3854,7 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_name_offset: {
-    Type* of_type = type_of_ir(ir->name_offset.of);
-    if (of_type->kind == Type_Kind_ptr) {
-      if (of_type->pointer->stack_vars.len > 0) {
-        Var* first_var = of_type->pointer->stack_vars.list[0];
-        I32  first_offset = sem_get_offset_by_name(block, ir, first_var, ir->name_offset.at);
-        Var* first_var_field = sem_get_var_by_name(block, first_var, ir->name_offset.at);
-        for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
-          Var* var = of_type->pointer->stack_vars.list[i];
-          I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
-          if (offset != first_offset) {
-            sem_error_name(Diag_Code_join_field_mismatch, ir->loc, ir->name_offset.at);
-          }
-        }
-
-        Pointer* pointer = arena_push(sem.perm_arena, sizeof(Pointer));
-        pointer->stack_vars = hash_set_init(sem.perm_arena, of_type->pointer->stack_vars.len);
-        pointer->declared = first_var_field->declared;
-        hash_set_put(&pointer->stack_vars, first_var_field);
-
-        for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
-          Var* var = of_type->pointer->stack_vars.list[i];
-          Var* field_var = sem_get_var_by_name(block, var, ir->name_offset.at);
-          pointer->declared = type_meet(pointer->declared, field_var->declared);
-          hash_set_put(&pointer->stack_vars, field_var);
-        }
-        result = type_pointer(pointer);
-      }
-      else {
-        Type* declared = type_pointer_declared(of_type->pointer);
-        if (declared->kind == Type_Kind_record) {
-          Field field = type_record_get_by_name(declared->record, ir->name_offset.at);
-          if (field.pos < 0) {
-            sem_error_name(Diag_Code_unknown_field, ir->loc, ir->name_offset.at);
-          }
-          result = type_pointer_to(field.type);
-        }
-        else {
-          sem_error_type(Diag_Code_invalid_field_base, ir->loc, declared);
-        }
-      }
-
-    }
-    else if (of_type->kind == Type_Kind_record) {
-      Field field = type_record_get_by_name(of_type->record, ir->name_offset.at);
-      if (field.pos < 0) {
-        sem_error_name(Diag_Code_unknown_field, ir->loc, ir->name_offset.at);
-      }
-      result = field.type;
-    }
-    else {
-      sem_error_operand(ir->loc, ".", of_type);
-    }
+    result = sem_name_offset(block, ir);
   } break;
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(ir->unary);
@@ -3894,12 +3926,8 @@ void sem_ir(Block* block, Ir* ir) {
     }
     else if (ir->unary->kind == Ir_Kind_load) {
       Type* ptr_type = type_of_ir(ir->unary->unary);
-      if (ptr_type->kind == Type_Kind_ptr) {
-        result = ptr_type;
-      }
-      else {
-        sem_error_operand(ir->loc, "&", ptr_type);
-      }
+      assert(ptr_type->kind == Type_Kind_ptr);
+      result = ptr_type;
     }
     else {
       Var* var = &new(irgen.vars);
@@ -4100,14 +4128,46 @@ void sem_ir(Block* block, Ir* ir) {
       sem_error_operand(ir->loc, "()", fun_type);
     }
   } break;
+  case Ir_Kind_use: {
+    Type* base_type = type_of_ir(ir->unary);
+    if (base_type->kind != Type_Kind_record && base_type->kind != Type_Kind_join_records) {
+      assert(0);
+      sem_error_type(Diag_Code_invalid_field_base, ir->loc, base_type);
+    }
+    result = sem.type_none;
+  } break;
+  case Ir_Kind_maybe_using: {
+    Str* name = ir->maybe_using.name;
+    Ir* of = 0;
+    for (Use* use = ir->maybe_using.uses; use; use = use->next) {
+      Ir* ir_use = use->base;
+      if (ir_use->kind == Ir_Kind_load) {
+        Type* type_ptr = type_of_ir(ir_use->unary);
+        Pointer* pointer = type_ptr->pointer;
+        Type* declared = type_pointer_declared(pointer);
+        if (type_has_field(declared, name)) {
+          of = ir_use->unary;
+        }
+      }
+      else {
+        of = ir_use;
+      }
+    }
+    if (!of) {
+      sem_error_name(Diag_Code_undefined_name, ir->loc, name);
+    }
+    ir->kind = Ir_Kind_name_offset;
+    ir->name_offset.of = of;
+    ir->name_offset.at = name;
+    result = sem_name_offset(block, ir);
+  } break;
   case Ir_Kind_run: {
     Type* type = type_of_ir(ir->unary);
     if (type_is_const(type)) {
       result = type;
     }
     else {
-      sem_error_text(Diag_Code_unsupported_semantics, ir->loc,
-                     "#run on a non-constant expression");
+      sem_error_text(Diag_Code_unsupported_semantics, ir->loc, "TODO: #run on a non-constant expression");
     }
   } break;
   case Ir_Kind_range: {
@@ -4269,82 +4329,6 @@ void sem_init_block_preds(Block* block) {
   }
 }
 
-void sem_dfs_postorder(Block* block, Blocks* postorder) {
-  if (block->is_dfs_visited) return;
-  block->is_dfs_visited = true;
-  if (block->kind == Block_Kind_jump) {
-    sem_dfs_postorder(block->jump.to_block, postorder);
-  }
-  else if (block->kind == Block_Kind_branch) {
-    sem_dfs_postorder(block->branch.nez.to_block, postorder);
-    sem_dfs_postorder(block->branch.eqz.to_block, postorder);
-  }
-  fa_add(postorder, block);
-}
-
-Blocks* sem_cfg_rpo(Fun* fun) {
-  I32 n = fun->blocks->length;
-  Blocks* postorder = arena_push(sem.temp_arena, sizeof(Blocks) + n*sizeof(Block*));
-  postorder->length = 0;
-  sem_dfs_postorder(fun->blocks->base[0], postorder);
-
-  Blocks* rpo = arena_push(sem.temp_arena, sizeof(Blocks) + postorder->length*sizeof(Block*));
-  rpo->length = 0;
-  for (I32 i = postorder->length-1; i >= 0; i--) {
-    Block* block = postorder->base[i];
-    block->rpo = rpo->length;
-    fa_add(rpo, block);
-  }
-  return rpo;
-}
-
-Block* sem_dom_intersect(Block* one, Block* two) {
-  while (one != two) {
-    while (one->rpo > two->rpo) one = one->idom;
-    while (two->rpo > one->rpo) two = two->idom;
-  }
-  return one;
-}
-
-void sem_cfg_doms(Fun* fun, Blocks* rpo) {
-  for (I32 i = 0; i < fun->blocks->length; i++) {
-    fun->blocks->base[i]->idom = 0;
-  }
-  Block* entry = rpo->base[0];
-  entry->idom = entry;
-  B8 changed = true;
-  while (changed) {
-    changed = false;
-    for (I32 i = 1; i < rpo->length; i++) {
-      Block* block = rpo->base[i];
-      Block* new_idom = 0;
-      for (I32 p = 0; p < block->preds.length; p++) {
-        Block* pred = block->preds.base[p];
-        if (pred->idom) {
-          if (new_idom) {
-            new_idom = sem_dom_intersect(new_idom, pred);
-          }
-          else {
-            new_idom = pred;
-          }
-        }
-      }
-      if (new_idom && block->idom != new_idom) {
-        block->idom = new_idom;
-        changed = true;
-      }
-    }
-  }
-}
-
-B8 sem_dominates(Block* one, Block* two) {
-  for (;;) {
-    if (two == one) return true;
-    if (!two->idom || two->idom == two) return false;
-    two = two->idom;
-  }
-}
-
 Type* sem_fun(Fun* fun) {
   sem.current_fun = fun;
   Type* fun_type = type_of_fun(fun);
@@ -4491,7 +4475,7 @@ void sem_funs(Arena* arena, Funs funs, Diags* diags) {
 
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
-  sem.type_len = type_define_size(64, type_range(0, I64_MAX));
+  sem.type_len      = type_define_size(64, type_range(0, I64_MAX));
   sem.type_zero     = type_int(0);
   sem.type_one      = type_int(1);
   sem.type_zero_one = type_range(0, 1);
@@ -4616,7 +4600,10 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("a:(I32; I32) = 0", "");
+  // test_diag("bar:(x:I32)\n#use bar\ny", Diag_Code_undefined_name);
+  // test_diag("{ Vec:(x:I32); bar:Vec; #use bar; x = 1 }\nx", Diag_Code_undefined_name);
+  // test_diag("bar:I32\n#use bar\nx", Diag_Code_invalid_field_base);
+  test("a:(x:I32; y:I32); use a; x = 1; y = 2; x+y", "");
   // test("foo:(a:0..1) -> I32\n return a+2;\nfoo(1)", "");
   // test("a:(0..2); if a && 1 do a else a", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b else a+b", "");

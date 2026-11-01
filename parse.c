@@ -59,6 +59,7 @@ typedef enum Ast_Kind {
   Ast_Kind_break       = Token_Kind_break,
   Ast_Kind_break_value = Token_Kind_break | Ast_Flag_value,
   Ast_Kind_while       = Token_Kind_while,
+  Ast_Kind_use         = Token_Kind_use,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
@@ -379,6 +380,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_cstr(sb, "# ");
     string_builder_push_ast_node(sb, node->unary);
     string_builder_push_cstr(sb, ")");
+  } break;
+  case Ast_Kind_use: {
+    string_builder_push_cstr(sb, "use ");
+    string_builder_push_ast_node(sb, node->unary);
   } break;
   case Ast_Kind_error: {
     string_builder_push_cstr(sb, "<error>");
@@ -1210,6 +1215,14 @@ Ast_Node* parse_statement(Parser* parser) {
   Token token = *parse_peek(parser);
   parse_advance(parser);
   switch (token.kind) {
+  case Token_Kind_use: {
+    Ast_Node* exp = parse_new_expression(parser, 0);
+    if (parse_match_token(parser, Token_Kind_colon)) {
+      // TODO: use name: exp
+      assert(0);
+    }
+    node = parse_new_unary(parser, Ast_Kind_use, exp);
+  } break;
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);

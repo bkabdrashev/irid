@@ -102,13 +102,6 @@ zap : () -> (x:I32; y:I32) { // error since the second returned value have to sw
 }
 ```
 
-- [ ] Function type return declaration:
-```irid
-foo : () -> I32 do {
-  return 10
-}
-```
-
 - [ ] Foreigh functions should be metaprogram instead of #c syntax:
 ```irid
 Init : (foreign.c : "SDL_Init") (flags: InitFlags) -> B8
@@ -148,8 +141,9 @@ b:T = 2
 
 - [ ] Implicit casting:
 ```irid
+sqrt : F32 -> F32
 a = 12 implicit F32
-sqrt.F32(a) // auto casts a to F32
+sqrt(a) // auto casts a to F32
 ```
 
 - [ ] implicit function call:
@@ -261,10 +255,11 @@ c = b'a'dot // 1*3 + 2*4
 
 - [ ] Packages
 ```irid
-package : Vec, Str
+Vec : #package
+Str : #package
 
-str_from_vec:(v: Vec) -> Str do
-  return str_from_i32(v.x) " " str_from_i32(v.y)
+Str : (v: Vec) -> Str do
+  return cat(Str(v.x), " ", Str(v.y))
 ```
 
 ```irid
@@ -347,6 +342,12 @@ foo:F32->F32
 }
 ```
 
+- [x] Function type return declaration:
+```irid
+foo : () -> I32 do 10
+foo : () -> I32 return 10
+```
+
 - [x] Pointer types can incorporate pointer location:
 ```irid
 a:I32
@@ -384,6 +385,17 @@ el
   a = 3
 a // 1\3
 ```
+
+- [x] `#use` imports record fields into the current lexical scope as writable aliases.
+```irid
+Vec : (x:I32; y:I32)
+bar : Vec
+#use bar
+x = 1 // bar.x = 1
+y = 2 // bar.y = 2
+x + y // 3
+```
+Fields are visible from the `#use` statement to the end of the enclosing `{}` block. Existing names keep precedence, and the newest `#use` wins when several imported records have the same field.
 
 - [x] Declarations can be used out-of-order.
 ```irid

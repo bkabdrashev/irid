@@ -465,7 +465,7 @@ while game.running do {
   update()
   draw()
   Delay(10)
-  // game.running = 0;
+  game.running = 0;
 }
 
 DestroyRenderer(renderer)
