@@ -375,8 +375,6 @@ Vec2.x + Vec.y // 7
 
 - [x] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
 
-- [x] Prefix backslash  `a = [2]\0\2`
-
 - [x] Python-like identation based if/while blocks, that are not lexical scopes
 ```irid
 if () do
@@ -386,16 +384,16 @@ el
 a // 1\3
 ```
 
-- [x] `#use` imports record fields into the current lexical scope as writable aliases.
+- [x] `use` imports record fields into the current lexical scope as writable aliases.
 ```irid
 Vec : (x:I32; y:I32)
 bar : Vec
-#use bar
+use bar
 x = 1 // bar.x = 1
 y = 2 // bar.y = 2
 x + y // 3
 ```
-Fields are visible from the `#use` statement to the end of the enclosing `{}` block. Existing names keep precedence, and the newest `#use` wins when several imported records have the same field.
+Fields are visible from the `use` statement to the end of the enclosing `{}` block. Existing names keep precedence, and the newest `use` wins when several imported records have the same field.
 
 - [x] Declarations can be used out-of-order.
 ```irid

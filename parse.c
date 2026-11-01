@@ -1072,9 +1072,6 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node->bits = token.bits;
     node->loc  = token.loc;
   } break;
-  case Token_Kind_backslash: {
-    node = parse_new_expression(parser, 0);
-  } break;
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);

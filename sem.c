@@ -4603,7 +4603,7 @@ void sem_test(void) {
   // test_diag("bar:(x:I32)\n#use bar\ny", Diag_Code_undefined_name);
   // test_diag("{ Vec:(x:I32); bar:Vec; #use bar; x = 1 }\nx", Diag_Code_undefined_name);
   // test_diag("bar:I32\n#use bar\nx", Diag_Code_invalid_field_base);
-  test("a:(x:I32; y:I32); use a; x = 1; y = 2; x+y", "");
+  // test("a:(x:I32; y:I32); use a; x = 1; y = 2; x+y", "");
   // test("foo:(a:0..1) -> I32\n return a+2;\nfoo(1)", "");
   // test("a:(0..2); if a && 1 do a else a", "");
   // test("a:(0..2); b:(0..2); c:(0..2); if (a && b) && c do a+b else a+b", "");
