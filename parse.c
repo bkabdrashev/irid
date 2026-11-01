@@ -200,6 +200,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_while:        result = "while"; break;
   case Ast_Kind_record:       result = "record"; break;
   case Ast_Kind_call:         result = "call"; break;
+  case Ast_Kind_use:          result = "use"; break;
   case Ast_Kind_error:        result = "error"; break;
   }
   return result;

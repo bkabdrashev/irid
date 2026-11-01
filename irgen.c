@@ -71,7 +71,7 @@ typedef enum Ir_Kind {
   Ir_Kind_len     = 152,
   Ir_Kind_type    = 153,
   Ir_Kind_ieee    = 154,
-  Ir_Kind_use     = 155,
+  Ir_Kind_use     = 155 | Ir_Flag_unary,
 } Ir_Kind;
 
 typedef struct Ir    Ir;
@@ -413,10 +413,8 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "@");
     string_builder_push_var(sb, ir->var);
   }
-  else if (ir->kind == Ir_Kind_load) {
-    if (ir->unary->kind == Ir_Kind_var) {
-      string_builder_push_var(sb, ir->unary->var);
-    }
+  else if (ir->kind == Ir_Kind_load && ir->unary->kind == Ir_Kind_var) {
+    string_builder_push_var(sb, ir->unary->var);
   }
   else if (ir == irgen.irid_len) {
     string_builder_push_cstr(sb, "len");
@@ -1149,9 +1147,6 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
     }
   } break;
   }
-}
-
-void irgen_use_var(Ir* ir) {
 }
 
 Ir* irgen_ast_node(Ast_Node* node) {

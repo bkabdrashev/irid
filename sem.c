@@ -2462,7 +2462,7 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     Pointer* ptr = ptr_type->pointer;
     if (ptr->stack_vars.len == 1) {
       Var* var = ptr->stack_vars.list[0];
-      Type* old_type = var->block_types[tasks->block->id];
+      Type* old_type = type_of_var(tasks->block, var);
       Type* new_type_but_size_as_old = &new(sem.types);
            *new_type_but_size_as_old = *new_type;
             new_type_but_size_as_old->flag       = old_type->flag;
@@ -2726,8 +2726,8 @@ void sem_narrow_nez_ir(Sem_Tasks* tasks, Ir* cond_ir) {
   case Ir_Kind_logic_or: {
     Type* one = type_of_ir(cond_ir->binary.one->binary.one);
     Type* two = type_of_ir(cond_ir->binary.one->binary.two);
-    if (type_is_false(one)) sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.one);
-    if (type_is_false(two)) sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.two);
+    if (type_is_false(one)) sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.two);
+    if (type_is_false(two)) sem_narrow_nez_ir(tasks, cond_ir->binary.one->binary.one);
   } break;
   case Ir_Kind_eq: {
     if (type_kind_of_ir_binary_operands_equal(cond_ir, Type_Kind_scalar)) {
@@ -2777,8 +2777,8 @@ void sem_narrow_eqz_ir(Sem_Tasks* tasks, Ir* cond_ir) {
   case Ir_Kind_logic_and: {
     Type* one = type_of_ir(cond_ir->binary.one->binary.one);
     Type* two = type_of_ir(cond_ir->binary.one->binary.two);
-    if (type_is_true(one)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.one);
-    if (type_is_true(two)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.two);
+    if (type_is_true(one)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.two);
+    if (type_is_true(two)) sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.one);
   } break;
   case Ir_Kind_logic_or: {
     sem_narrow_eqz_ir(tasks, cond_ir->binary.one->binary.one);
@@ -4147,10 +4147,14 @@ void sem_ir(Block* block, Ir* ir) {
         Type* declared = type_pointer_declared(pointer);
         if (type_has_field(declared, name)) {
           of = ir_use->unary;
+          break;
         }
       }
       else {
-        of = ir_use;
+        Type* type = type_of_ir(ir_use);
+        if (type_has_field(type, name)) {
+          of = ir_use;
+        }
       }
     }
     if (!of) {
@@ -4600,6 +4604,12 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  // FIX: while loop somehow affects the type narrowing
+  test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2; z: I32 0..3); if a.x == 1 do { if a.y == 0 && 0..1 do 5 else if a.y == 1 && 0..1 do 7 }}", "");
+  // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
+  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
+  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
+  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; ab.a", "");
   // test_diag("bar:(x:I32)\n#use bar\ny", Diag_Code_undefined_name);
   // test_diag("{ Vec:(x:I32); bar:Vec; #use bar; x = 1 }\nx", Diag_Code_undefined_name);
   // test_diag("bar:I32\n#use bar\nx", Diag_Code_invalid_field_base);
@@ -4628,11 +4638,6 @@ void sem_test(void) {
   // test_diag("1 = 2", Diag_Code_invalid_assignment_target);
   // test_diag("a : (if 1 do 2)", Diag_Code_unsupported_construct);
   // test_diag("break", Diag_Code_unsupported_construct);
-  // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.y else { if 4 do a.z }", "");
-  // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
-  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
-  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
-  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; ab.a", "");
   // test("A:(a:(x:I32 1); b:I32 5); B:(a:(x:I32 2); c:I32 4); ab: A\\B; if ab.a.x == 1 do ab.b else ab.c", "");
   // test("A:(a:(b:(x:I32 1); p:I32 5); q:I32 7); B:(a:(b:(x:I32 2); r:I32 4); s:I32 6); ab: A\\B; if ab.a.b.x == 1 do ab.q else ab.s", "");
   // test("A:(a:(x:I32 1); r:(y:I32 5)); B:(a:(x:I32 2); r:(y:I32 6)); ab: A\\B; ab.r; if ab.a.x == 1 do ab.r.y else ab.r.y", "");

@@ -433,29 +433,21 @@ while game.running do {
       else if event.scancode == SCANCODE_H && equal(game.snake_v[0].x; 0.0) do
       else if event.scancode == SCANCODE_L do && equal(game.snake_v[0].x; 0.0) do
       */
-      else if event.scancode == SCANCODE_H do {
-        if equal(game.snake_v[0].x; 0.0) do {
-          game.next_v.x = -BLOCKS_PER_MS
-          game.next_v.y = 0.0
-        }
+      else if event.scancode == SCANCODE_H && equal(game.snake_v[0].x; 0.0) do {
+        game.next_v.x = -BLOCKS_PER_MS
+        game.next_v.y = 0.0
       }
-      else if event.scancode == SCANCODE_L do {
-        if equal(game.snake_v[0].x; 0.0) do {
-          game.next_v.x = +BLOCKS_PER_MS
-          game.next_v.y = 0
-        }
+      else if event.scancode == SCANCODE_L && equal(game.snake_v[0].x; 0.0) do {
+        game.next_v.x = +BLOCKS_PER_MS
+        game.next_v.y = 0
       }
-      else if event.scancode == SCANCODE_K do {
-        if equal(game.snake_v[0].y; 0.0) do {
-          game.next_v.x = 0
-          game.next_v.y = -BLOCKS_PER_MS
-        }
+      else if event.scancode == SCANCODE_K && equal(game.snake_v[0].y; 0.0) do {
+        game.next_v.x = 0
+        game.next_v.y = -BLOCKS_PER_MS
       }
-      else if event.scancode == SCANCODE_J do {
-        if equal(game.snake_v[0].y; 0.0) do {
-          game.next_v.x = 0
-          game.next_v.y = +BLOCKS_PER_MS
-        }
+      else if event.scancode == SCANCODE_J && equal(game.snake_v[0].y; 0.0) do {
+        game.next_v.x = 0
+        game.next_v.y = +BLOCKS_PER_MS
       }
     }
     else if event.type == MOUSE_MOTION do {
