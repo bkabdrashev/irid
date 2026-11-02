@@ -2462,10 +2462,7 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     Pointer* ptr = ptr_type->pointer;
     if (ptr->stack_vars.len == 1) {
       Var* var = ptr->stack_vars.list[0];
-      Type* old_type = var->block_types[tasks->block->id];
-      if (!old_type) {
-        old_type = var->declared;
-      }
+      Type* old_type = type_of_var(tasks->block, var);
       Type* new_type_but_size_as_old = &new(sem.types);
            *new_type_but_size_as_old = *new_type;
             new_type_but_size_as_old->flag       = old_type->flag;
@@ -2867,7 +2864,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
         Sem_Tasks tasks = {};
         tasks.block = pred;
         tasks.var = var;
-        tasks.type = var->block_types[pred->id];
+        tasks.type = type_of_var(pred, var);
         if (!tasks.type) {
           tasks.type = var->declared;
         }
