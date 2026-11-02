@@ -2462,7 +2462,10 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
     Pointer* ptr = ptr_type->pointer;
     if (ptr->stack_vars.len == 1) {
       Var* var = ptr->stack_vars.list[0];
-      Type* old_type = type_of_var(tasks->block, var);
+      Type* old_type = var->block_types[tasks->block->id];
+      if (!old_type) {
+        old_type = var->declared;
+      }
       Type* new_type_but_size_as_old = &new(sem.types);
            *new_type_but_size_as_old = *new_type;
             new_type_but_size_as_old->flag       = old_type->flag;
@@ -2864,7 +2867,10 @@ Type* type_of_var_rec(Block* block, Var* var) {
         Sem_Tasks tasks = {};
         tasks.block = pred;
         tasks.var = var;
-        tasks.type = type_of_var_rec(pred, var);
+        tasks.type = var->block_types[pred->id];
+        if (!tasks.type) {
+          tasks.type = var->declared;
+        }
         if (pred->branch.nez.to_block == block) {
           sem_narrow_nez_ir(&tasks, pred->branch.cond);
           Type* pred_type = type_of_var_rec(pred, var);
@@ -3207,7 +3213,6 @@ void sem_record_declare_fields(Var* var, Type* type) {
 Type* sem_var_declare(Var* var) {
   if (var->state == Var_State_resolved) return var->declared;
   if (var->state == Var_State_resolving) {
-    assert(0);
     sem_error_name(Diag_Code_cyclic_declaration, sem_loc_for_var(var), var->name);
   }
   var->state = Var_State_resolving;
@@ -4131,7 +4136,6 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_use: {
     Type* base_type = type_of_ir(ir->unary);
     if (base_type->kind != Type_Kind_record && base_type->kind != Type_Kind_join_records) {
-      assert(0);
       sem_error_type(Diag_Code_invalid_field_base, ir->loc, base_type);
     }
     result = sem.type_none;
@@ -4269,7 +4273,6 @@ I32 sem_scc_block_jump(Block* parent, Block* kid) {
     parent->low_sccid = min(parent->low_sccid, kid->low_sccid);
   }
   else if (kid->is_on_scc_stack) {
-    kid->is_loop_head = true;
     parent->low_sccid = min(parent->low_sccid, kid->sccid);
   }
   return parent->low_sccid;
@@ -4333,6 +4336,82 @@ void sem_init_block_preds(Block* block) {
   }
 }
 
+void sem_dfs_postorder(Block* block, Blocks* postorder) {
+  if (block->is_dfs_visited) return;
+  block->is_dfs_visited = true;
+  if (block->kind == Block_Kind_jump) {
+    sem_dfs_postorder(block->jump.to_block, postorder);
+  }
+  else if (block->kind == Block_Kind_branch) {
+    sem_dfs_postorder(block->branch.nez.to_block, postorder);
+    sem_dfs_postorder(block->branch.eqz.to_block, postorder);
+  }
+  fa_add(postorder, block);
+}
+
+Blocks* sem_cfg_rpo(Fun* fun) {
+  I32 n = fun->blocks->length;
+  Blocks* postorder = arena_push(sem.temp_arena, sizeof(Blocks) + n*sizeof(Block*));
+  postorder->length = 0;
+  sem_dfs_postorder(fun->blocks->base[0], postorder);
+
+  Blocks* rpo = arena_push(sem.temp_arena, sizeof(Blocks) + postorder->length*sizeof(Block*));
+  rpo->length = 0;
+  for (I32 i = postorder->length-1; i >= 0; i--) {
+    Block* block = postorder->base[i];
+    block->rpo = rpo->length;
+    fa_add(rpo, block);
+  }
+  return rpo;
+}
+
+Block* sem_dom_intersect(Block* one, Block* two) {
+  while (one != two) {
+    while (one->rpo > two->rpo) one = one->idom;
+    while (two->rpo > one->rpo) two = two->idom;
+  }
+  return one;
+}
+
+void sem_cfg_doms(Fun* fun, Blocks* rpo) {
+  for (I32 i = 0; i < fun->blocks->length; i++) {
+    fun->blocks->base[i]->idom = 0;
+  }
+  Block* entry = rpo->base[0];
+  entry->idom = entry;
+  B8 changed = true;
+  while (changed) {
+    changed = false;
+    for (I32 i = 1; i < rpo->length; i++) {
+      Block* block = rpo->base[i];
+      Block* new_idom = 0;
+      for (I32 p = 0; p < block->preds.length; p++) {
+        Block* pred = block->preds.base[p];
+        if (pred->idom) {
+          if (new_idom) {
+            new_idom = sem_dom_intersect(new_idom, pred);
+          }
+          else {
+            new_idom = pred;
+          }
+        }
+      }
+      if (new_idom && block->idom != new_idom) {
+        block->idom = new_idom;
+        changed = true;
+      }
+    }
+  }
+}
+
+B8 sem_dominates(Block* one, Block* two) {
+  for (;;) {
+    if (two == one) return true;
+    if (!two->idom || two->idom == two) return false;
+    two = two->idom;
+  }
+}
+
 Type* sem_fun(Fun* fun) {
   sem.current_fun = fun;
   Type* fun_type = type_of_fun(fun);
@@ -4353,6 +4432,18 @@ Type* sem_fun(Fun* fun) {
   sem_scc_block(entry_block);
   entry_block->state = Block_State_reachable;
 
+  Blocks*  rpo = sem_cfg_rpo(fun);
+                 sem_cfg_doms(fun, rpo);
+  for (I32 b = 0; b < fun->blocks->length; b++) {
+    Block* block = fun->blocks->base[b];
+    for (I32 p = 0; p < block->preds.length; p++) {
+      Block* pred = block->preds.base[p];
+      if (sem_dominates(block, pred)) {
+        block->is_loop_head = true;
+      }
+    }
+  }
+
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
     if (block->is_loop_head) {
@@ -4363,13 +4454,6 @@ Type* sem_fun(Fun* fun) {
     }
     sem_block(block);
   }
-  // Blocks*  rpo = sem_cfg_rpo(fun);
-  //                sem_cfg_doms(fun, rpo);
-  // for (I32 i = 0; i < rpo->length; i++) {
-  //   Block* block = rpo->base[i];
-  //   sem_block(block);
-  // }
-
   Function* function = arena_push(sem.perm_arena, sizeof(Function));
   function->foreign_name = irgen.str_nil;
   function->foreign_id   = 0;
@@ -4605,7 +4689,13 @@ void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) 
 
 void sem_test(void) {
   // FIX: while loop somehow affects the type narrowing
-  test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2; z: I32 0..3); if a.x == 1 do { if a.y == 0 && 0..1 do 5 else if a.y == 1 && 0..1 do 7 }}", "");
+  // a = {
+  //       b23: join (record(x:1, y:0..2) \ record(x:2)),
+  //       b24: join (record(x:1, y:0..2) \ record(x:2)),
+  //       b32: join (record(x:1, y:0..2) \ record(x:2)),
+  //       b33: join (record(x:1, y:0..2) \ record(x:2)),
+  //     }
+  test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
