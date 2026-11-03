@@ -60,6 +60,7 @@ typedef enum Ast_Kind {
   Ast_Kind_break_value = Token_Kind_break | Ast_Flag_value,
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_use         = Token_Kind_use,
+  Ast_Kind_import      = Token_Kind_import,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
@@ -201,6 +202,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_record:       result = "record"; break;
   case Ast_Kind_call:         result = "call"; break;
   case Ast_Kind_use:          result = "use"; break;
+  case Ast_Kind_import:       result = "import"; break;
   case Ast_Kind_error:        result = "error"; break;
   }
   return result;
@@ -385,6 +387,10 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_use: {
     string_builder_push_cstr(sb, "use ");
     string_builder_push_ast_node(sb, node->unary);
+  } break;
+  case Ast_Kind_import: {
+    string_builder_push_cstr(sb, "import ");
+    string_builder_push_str(sb, node->str);
   } break;
   case Ast_Kind_error: {
     string_builder_push_cstr(sb, "<error>");
@@ -1220,6 +1226,14 @@ Ast_Node* parse_statement(Parser* parser) {
       assert(0);
     }
     node = parse_new_unary(parser, Ast_Kind_use, exp);
+  } break;
+  case Token_Kind_import: {
+    Ast_Node* exp = parse_new_expression(parser, 0);
+    if (parse_expect_token(parser, Token_Kind_str)) {
+      node = ast_new_node(parser->perm_arena, Ast_Kind_import);
+      node->str = token.str;
+      node->loc = token.loc;
+    }
   } break;
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);

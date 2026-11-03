@@ -1195,6 +1195,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
     Ir* base = irgen_ast_node(node->unary);
     result = irgen_push_use(base);
   } break;
+  case Ast_Kind_import: {
+    irgen_file(node->str);
+    result = irgen_push_unary(base);
+  } break;
   case Ast_Kind_dot: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     if (node->binary.rhs->kind == Ast_Kind_name) {
@@ -1646,6 +1650,15 @@ Ir* irgen_ast_node(Ast_Node* node) {
   }
   irgen.node_loc = saved_loc;
   return result;
+}
+
+Funs irgen_file(Arena* arena, Str* path) {
+  Cstr source        = file_read(path->base);
+  I32  source_length = (I32)file_size(path->base);
+
+  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
+                        str_init(&arena, 2*length);
+
 }
 
 Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {

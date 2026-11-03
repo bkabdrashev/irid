@@ -1,3 +1,5 @@
+use import "basic"
+
 INIT_VIDEO     : 0x00000020
 INIT_EVENTS    : 0x00004000
 InitFlags      : U32

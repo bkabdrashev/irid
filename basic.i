@@ -24,3 +24,77 @@ F32 : #type #float(8; 23)
 F64 : #type #float(11; 52)
 
 Str : #type ([]I8)
+
+putchar: #foreign.c "putchar" (char:I32)->I32
+print_i64:(n:I64) -> {
+  if n == 0 do {
+    putchar 48
+    putchar 10
+    return
+  }
+  if n < 0 do {
+    putchar 45 // -
+    n = -1 * n
+  }
+  buf: [20](0..9)
+  i:I8 = 0
+  while n > 0 do {
+    digit := n % 10
+    buf[i] = digit
+    n = n / 10
+    i = i + 1
+  }
+  while i > 0 do {
+    i = i - 1
+    putchar(buf[i] + 48)
+  }
+  putchar 10
+}
+
+print_f32:(n:F32) -> {
+  if n < 0.0 do {
+    putchar 45 // -
+    n = -n
+  }
+
+  whole: I64 = I64 n
+  frac: I32 = I32 ((n - F32 whole) * 1000.0 + 0.5) // three decimal places
+  if frac >= 1000 do {
+    frac = 0
+    whole = whole + 1
+  }
+
+  if whole == 0 do
+    putchar 48
+  else {
+    buf: [20](0..9)
+    i:I8 = 0
+    while whole > 0 do {
+      buf[i] = whole % 10
+      whole = whole / 10
+      i = i + 1
+    }
+    while i > 0 do {
+      i = i - 1
+      putchar(buf[i] + 48)
+    }
+  }
+
+  putchar 46 // .
+
+  div: I32 = 100
+  while div > 0 do {
+    putchar(frac / div % 10 + 48)
+    div = div / 10
+  }
+  putchar 10
+}
+
+print_str:(str: Str) -> {
+  i:I32 = 0
+  while i < str.len do {
+    putchar(str[i])
+    i = i + 1
+  }
+  putchar 10
+}
