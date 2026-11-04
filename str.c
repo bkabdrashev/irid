@@ -32,12 +32,6 @@ struct String_Builder {
   Umi    cap;
 };
 
-typedef struct Str_View Str_View;
-struct Str_View {
-  Cstr base;
-  Umi  length;
-};
-
 Str_View str_view(Cstr start, Cstr end) {
   Str_View result = { start, end - start };
   return result;

@@ -125,7 +125,49 @@ Sources sources_init(I32 max_sources_count, I32 max_diags) {
 }
 
 void sources_free(Sources* sources) {
+  for (I32 i = 0; i < sources->map.len; i++) {
+    Source* source = sources->map.list[i];
+    arena_free(source->arena);
+  }
   arena_free(sources->paths.arena);
+}
+
+Source* sources_add_str_view(Sources* sources, Str_View str_view) {
+  Umi length = str_view.length;
+  Cstr data  = str_view.base;
+  Arena* arena = arena_init(KB(1) * length);
+  I32 line_count = 1;
+  for (Umi i = 0; i < length; i++) {
+    if (data[i] == '\n') {
+      line_count += 1;
+    }
+    else if (data[i] == '\r') {
+      line_count += 1;
+      if (i + 1 < length && data[i+1] == '\n') i += 1;
+    }
+  }
+
+  U32* line_starts = arena_push(arena, sizeof(U32) * line_count);
+  line_starts[0] = 0;
+  I32 line = 1;
+  for (Umi i = 0; i < length; i++) {
+    if (data[i] == '\n') {
+      line_starts[line++] = (U32)(i + 1);
+    }
+    else if (data[i] == '\r') {
+      if (i + 1 < length && data[i+1] == '\n') i += 1;
+      line_starts[line++] = (U32)(i + 1);
+    }
+  }
+  assert(line == line_count);
+
+  Source* source = &new(sources->pool);
+          source->arena       = arena;
+          source->data        = data;
+          source->length      = length;
+          source->line_starts = line_starts;
+          source->line_count  = line_count;
+  return source;
 }
 
 Source* sources_add(Sources* sources, Str_View path) {
@@ -134,44 +176,12 @@ Source* sources_add(Sources* sources, Str_View path) {
   Str* internal_path = internal_from_str_view(sources->paths, path);
   if (internal_path->length >= INT32_MAX) assert(0);
 
-  Umi  length = file_size(internal_path->base);
-  Cstr data   = file_read(internal_path->base);
+  Str_View file_view = file_read(internal_path->base);
 
   Source* source = hash_map_get(sources->map, internal_path);
   if (!source) {
-    Arena* arena = arena_init(KB(1) * length);
-    I32 line_count = 1;
-    for (Umi i = 0; i < length; i++) {
-      if (data[i] == '\n') {
-        line_count += 1;
-      }
-      else if (data[i] == '\r') {
-        line_count += 1;
-        if (i + 1 < length && data[i+1] == '\n') i += 1;
-      }
-    }
-
-    U32* line_starts = arena_push(arena, sizeof(U32) * line_count);
-    line_starts[0] = 0;
-    I32 line = 1;
-    for (Umi i = 0; i < length; i++) {
-      if (data[i] == '\n') {
-        line_starts[line++] = (U32)(i + 1);
-      }
-      else if (data[i] == '\r') {
-        if (i + 1 < length && data[i+1] == '\n') i += 1;
-        line_starts[line++] = (U32)(i + 1);
-      }
-    }
-    assert(line == line_count);
-
-    source = &new(sources->pool);
-    source->arena       = arena;
-    source->path        = internal_path;
-    source->data        = data;
-    source->length      = length;
-    source->line_starts = line_starts;
-    source->line_count  = line_count;
+    source = sources_add_str_view(sources, file_view);
+    source->path = internal_path;
     hash_map_put(&sources->map, internal_path, source);
   }
   return source;

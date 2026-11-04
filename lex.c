@@ -510,7 +510,6 @@ Tokens lex_source(Source* source, Diags* diags) {
     case '"': {
       Cstr quote_start = lexer.stream;
       lex_advance();
-      Cstr start = lexer.stream;
       token.kind = Token_Kind_str;
       while (lexer.stream < lexer.end && *lexer.stream != '"') {
         lex_advance();

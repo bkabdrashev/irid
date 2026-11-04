@@ -1,8 +1,6 @@
 #define false 0
 #define true 1
 
-typedef  char       C8;
-typedef const char* Cstr;
 typedef int8_t    I8;
 typedef int16_t   I16;
 typedef int32_t   I32;
@@ -25,6 +23,14 @@ typedef size_t    Umi; // unsigned memory index
 typedef ssize_t   Smi; //   signed memory index
 typedef uintptr_t Ump; // unsigned memory pointer
 typedef intptr_t  Smp; //   signed memory pointer
+
+typedef  char       C8;
+typedef const char* Cstr;
+typedef struct Str_View Str_View;
+struct Str_View {
+  Cstr base;
+  Umi  length;
+};
 
 #define I64_MAX INT64_MAX
 #define I64_MIN INT64_MIN
@@ -719,14 +725,14 @@ Umi file_size(Cstr path) {
   return size;
 }
 
-Cstr file_read(Cstr path) {
+Str_View file_read(Cstr path) {
   I32 fd = open(path, O_RDONLY);
-  if (fd < 0) return NULL;
+  if (fd < 0) return (Str_View){0, 0};
 
   struct stat st;
   if (fstat(fd, &st) < 0) {
     close(fd);
-    return NULL;
+    return (Str_View){0, 0};;
   }
   Umi size = st.st_size;
 
@@ -738,11 +744,12 @@ Cstr file_read(Cstr path) {
             MAP_PRIVATE,
             fd, 0);
   close(fd);
-  if (data == MAP_FAILED) return NULL;
+  if (data == MAP_FAILED) return (Str_View){0, 0};
 
   // data[size] = '\0';
   if (mprotect(data, map_len, PROT_READ) != 0) {
     perror("mprotect");
   }
-  return data;
+  Str_View str_view = { data, size };
+  return str_view;
 }

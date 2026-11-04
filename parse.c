@@ -105,7 +105,7 @@ struct Symbol {
 
 typedef struct Ast_Named Ast_Named;
 struct Ast_Named {
-  Str* name;
+  Loc       name;
   Ast_Node* node;
 };
 
@@ -233,8 +233,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   case Ast_Kind_int:
   case Ast_Kind_float:
   case Ast_Kind_str: {
-    Str_View str_view = loc_str_view(node->loc);
-    string_builder_push_str_view(sb, str_view);
+    string_builder_push_loc_str(sb, node->loc);
   } break;
   case Ast_Kind_while: {
     string_builder_push_cstr(sb, "while ");
@@ -255,13 +254,12 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   } break;
   case Ast_Kind_block_value: case Ast_Kind_block: {
     string_builder_push_cstr(sb, "{");
-    Hash_Map scope = *node->block.scope;
-    for (I32 i = 0; i < scope.len; i++) {
-      Str* str = scope.list[i];
-      string_builder_push_str(sb, str);
+    Ast_Decls* scope = node->block.scope;
+    for (I32 i = 0; i < scope->length; i++) {
+      Ast_Decl decl = scope->base[i];
+      string_builder_push_loc_str(sb, decl.lhs);
       string_builder_push_cstr(sb, " : ");
-      Symbol* sym = hash_map_get(scope, str);
-      string_builder_push_ast_node(sb, sym->ast);
+      string_builder_push_ast_node(sb, decl.rhs);
       string_builder_push_cstr(sb, "; ");
     }
     Ast_List* list = node->block.list;
@@ -382,7 +380,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.rhs);
   } break;
   case Ast_Kind_declare: {
-    string_builder_push_str(sb, node->declare.name);
+    string_builder_push_loc_str(sb, node->declare.name);
     string_builder_push_cstr(sb, ":");
     string_builder_push_ast_node(sb, node->declare.node);
   } break;
@@ -408,13 +406,12 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
 
 Cstr cstr_from_ast(Arena* arena, Ast_Block ast) {
   String_Builder sb = string_builder_begin(arena);
-  Hash_Map scope = *ast.scope;
-  for (I32 i = 0; i < scope.len; i++) {
-    Str* str = scope.list[i];
-    string_builder_push_str(&sb, str);
+  Ast_Decls* scope = ast.scope;
+  for (I32 i = 0; i < scope->length; i++) {
+    Ast_Decl decl = scope->base[i];
+    string_builder_push_loc_str(&sb, decl.lhs);
     string_builder_push_cstr(&sb, " : ");
-    Symbol* sym = hash_map_get(scope, str);
-    string_builder_push_ast_node(&sb, sym->ast);
+    string_builder_push_ast_node(&sb, decl.rhs);
     string_builder_push_cstr(&sb, "; ");
   }
 
@@ -807,20 +804,12 @@ void parse_decls_push(Parser* parser, Loc lhs, Ast_Node* rhs) {
   fa_extend(parser->decls_arena, parser->decls, decl);
 }
 
-Hash_Map* parse_decls_perm(Parser* parser) {
-  Hash_Map* map = arena_push(parser->perm_arena, sizeof(Hash_Map));
-  *map = hash_map_init(parser->perm_arena, parser->decls->length+1);
-  for (I32 i = 0; i < parser->decls->length; i++) {
-    Ast_Decl decl = parser->decls->base[i];
-    Symbol* sym = hash_map_get(*map, decl.name);
-    if (sym) continue;
-    sym = arena_push_zero(parser->perm_arena, sizeof(Symbol));
-    sym->ast = decl.rhs;
-    sym->loc = decl.loc;
-    hash_map_put(map, decl.name, sym);
-  }
+Ast_Decls* parse_decls_perm(Parser* parser) {
+  I32 size = sizeof(Ast_Decls) + parser->decls->length * sizeof(Ast_Decl);
+  Ast_Decls* perm_decls = arena_push(parser->perm_arena, size);
+  memcpy(perm_decls, parser->decls, size);
   arena_release_mark(parser->decls_arena, parser->decls);
-  return map;
+  return perm_decls;
 }
 
 Ast_Node* parse_new_unary(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
@@ -1104,16 +1093,15 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
       if (parse_match_token(parser, Token_Kind_colon)) {
         Ast_Node* lhs = exp;
         Ast_Node* rhs = parse_new_expression(parser, 0);
-        if (lhs && lhs->kind == Ast_Kind_name) {
+        if (lhs->kind == Ast_Kind_name) {
           exp = parse_new_node(parser, Ast_Kind_declare);
-          exp->declare.name = lhs->str;
+          exp->declare.name = lhs->loc;
           exp->declare.node = rhs;
           exp->loc = loc_join(lhs->loc, rhs->loc);
         }
         else {
-          parse_diag(parser, Diag_Code_bad_declaration_target,
-                                  lhs ? lhs->loc : token.loc);
-          exp = parse_error_node(parser, lhs ? lhs->loc : token.loc);
+          parse_diag(parser, Diag_Code_bad_declaration_target, lhs->loc);
+          exp = parse_error_node(parser, lhs->loc);
         }
       }
       if (parse_match_token(parser, Token_Kind_semicolon)) {
@@ -1336,7 +1324,7 @@ Ast_Node* parse_statement(Parser* parser) {
             node = decl_rhs;
           }
           else {
-            parse_decls_push(parser, node->str, decl_rhs, node->loc);
+            parse_decls_push(parser, node->loc, decl_rhs);
             if (parse_is_token(parser, Token_Kind_equal)) {
               // name : exp = exp
               Token equal = *parse_peek(parser);
@@ -1472,7 +1460,7 @@ Ast_Block parse_file(Sources* sources, Str_View file_path) {
 
 void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
-  Source*   source  = sources_add(&sources, (Str_View){file_name, strlen(file_name)});
+  Source*   source  = sources_add_str_view(&sources, (Str_View){source_data, strlen(source_data)});
   Tokens    tokens  = lex_source(source, &sources.diags);
   Ast_Block ast     = parse_tokens(&sources, tokens);
   {
@@ -1481,6 +1469,8 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
     test_at_source(result, expected, file_name, line, source_data);
     arena_free(arena);
   }
+  arena_free(source->arena);
+  sources_free(&sources);
 }
 
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)

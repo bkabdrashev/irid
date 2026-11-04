@@ -1,8 +1,9 @@
+typedef struct Ast_Decls Ast_Decls;
 typedef struct Ast_List Ast_List;
 typedef struct Ast_Block Ast_Block;
 struct Ast_Block {
-  Hash_Map* scope;
-  Ast_List* list;
+  Ast_Decls* scope;
+  Ast_List*  list;
 };
 
 typedef struct Source Source;
@@ -47,6 +48,11 @@ Loc loc_at(Source* source, Cstr base, Cstr begin, Cstr end) {
 Str_View loc_str_view(Loc loc) {
   Str_View result = { loc.source->data + loc.start, loc.end - loc.start };
   return result;
+}
+
+void string_builder_push_loc_str(String_Builder* sb, Loc loc) {
+  Str_View str_view = loc_str_view(loc);
+  string_builder_push_str_view(sb, str_view);
 }
 
 I32 source_line_count(Source* source) {
