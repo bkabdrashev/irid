@@ -10,15 +10,10 @@ typedef struct {
   Token_Flag flag;
   I16 indent;
   Loc loc;
-  union {
-    U64  bits;
-    I64  i64;
-    F64  f64;
-    Str* str;
-  };
 } Token;
 
 typedef struct {
+  Source* source;
   Token* base;
   Umi    length;
 } Tokens;
@@ -32,6 +27,13 @@ typedef struct {
   B8      wasspace;
   I16     indent;
 } Lexer;
+
+Str_View token_str(Token token) {
+  Str_View str_view = loc_str_view(token.loc);
+  str_view.base   += 1;
+  str_view.length -= 1;
+  return str_view;
+}
 
 void tokens_push(Tokens* tokens, Token item) {
   tokens->base[tokens->length++] = item;
@@ -71,24 +73,24 @@ Loc lex_loc(Cstr begin, Cstr end) {
   return loc;
 }
 
-Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
-  Tokens slice_token = {0};
-  Umi  source_length = source->length;
-  slice_token.base = arena_push(arena, sizeof(Token) * (source_length + 2));
+Tokens lex_source(Source* source, Diags* diags) {
+  Tokens tokens = {0};
+  tokens.base = arena_push_type(source->arena, Token, source->length + 2);
+  tokens.source = source;
+
   lexer.source = source;
-  lexer.stream = source;
-  lexer.end    = source + source_length;
-  lexer.file   = file;
+  lexer.stream = source->data;
+  lexer.end    = source->data + source->length;
   lexer.diags  = diags;
   lexer.wasnewline = true;
   lexer.wasspace   = false;
   lexer.indent    = 0;
-  tokens_push(&slice_token, (Token){
+  tokens_push(&tokens, (Token){
     .kind = Token_Kind_source_enter,
-    .loc  = {file, 0, 0},
+    .loc  = {source, 0, 0},
   });
 
-  while (lexer.stream < lexer.end && !(diags && diags->limit_hit)) {
+  while (lexer.stream < lexer.end && !(diags->limit_hit)) {
     Cstr token_start = lexer.stream;
     Token token = {0};
     switch (*lexer.stream) {
@@ -190,9 +192,8 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
         if (base == 10 && digit > 9) break;
         if ((base == 2 || base == 8) && digit > 9) break;
         if (digit >= base) {
-          if (!invalid_reported && lexer.diags) {
-            Diag* diag = diag_error(lexer.diags, Diag_Code_invalid_digit,
-                                    lex_loc(lexer.stream, lexer.stream + 1));
+          if (!invalid_reported) {
+            Diag* diag = diag_error(lexer.diags, Diag_Code_invalid_digit, lex_loc(lexer.stream, lexer.stream + 1));
             if (diag) {
               diag->data.invalid_digit.digit = *lexer.stream;
               diag->data.invalid_digit.base  = base;
@@ -207,8 +208,7 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
 
         if (val > (UINT64_MAX - (U64)digit) / (U64)base) {
           if (!overflow_reported && lexer.diags) {
-            diag_error(lexer.diags, Diag_Code_number_overflow,
-                       lex_loc(number_start, lexer.stream + 1));
+            diag_error(lexer.diags, Diag_Code_number_overflow, lex_loc(number_start, lexer.stream + 1));
             overflow_reported = true;
           }
           val = UINT64_MAX;
@@ -219,8 +219,7 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
         lex_advance();
       }
       if (has_prefix && !saw_digit && lexer.diags) {
-        Diag* diag = diag_error(lexer.diags, Diag_Code_missing_digits,
-                                lex_loc(number_start, lexer.stream));
+        Diag* diag = diag_error(lexer.diags, Diag_Code_missing_digits, lex_loc(number_start, lexer.stream));
         if (diag) diag->data.text.text = prefix;
       }
       B8 is_float = false;
@@ -247,8 +246,7 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
           }                                                                   \
           else if (!float_too_long) {                                         \
             if (!overflow_reported && lexer.diags) {                          \
-              diag_error(lexer.diags, Diag_Code_number_overflow,              \
-                         lex_loc(number_start, lexer.stream + 1));            \
+              diag_error(lexer.diags, Diag_Code_number_overflow, lex_loc(number_start, lexer.stream + 1)); \
               overflow_reported = true;                                       \
             }                                                                 \
             float_too_long = true;                                            \
@@ -288,12 +286,7 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
           }
         }
 #undef lex_float_push
-        buffer[length] = '\0';
         token.kind = Token_Kind_float;
-        token.f64  = strtod(buffer, 0);
-      }
-      else {
-        token.i64 = (I64)val;
       }
     } break;
     case '_':
@@ -305,12 +298,21 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
     case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': {
       Cstr start = lexer.stream;
       token.kind = Token_Kind_name;
-      while (lexer.stream < lexer.end
-         && (isalnum((U8)*lexer.stream) || *lexer.stream == '_')) {
+      while (lexer.stream < lexer.end && (isalnum((U8)*lexer.stream) || *lexer.stream == '_')) {
         lex_advance();
       }
-      token.str = str_from_range(start, lexer.stream);
-      token.kind  = (Token_Kind)token.str->kind;
+      Umi length = lexer.stream - start;
+      if (strncmp("while", start, length) == 0)       token.kind = Token_Kind_while;
+      else if (strncmp("if", start, length) == 0)     token.kind = Token_Kind_if;
+      else if (strncmp("else", start, length) == 0)   token.kind = Token_Kind_else;
+      else if (strncmp("do", start, length) == 0)     token.kind = Token_Kind_do;
+      else if (strncmp("return", start, length) == 0) token.kind = Token_Kind_return;
+      else if (strncmp("break", start, length) == 0)  token.kind = Token_Kind_break;
+      else if (strncmp("use", start, length) == 0)    token.kind = Token_Kind_use;
+      else if (strncmp("import", start, length) == 0) token.kind = Token_Kind_import;
+      else {
+        token.kind  = Token_Kind_name;
+      }
     } break;
     case '|': {
       token.kind = Token_Kind_pipe;
@@ -402,8 +404,7 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
         if (level > 0 && lexer.diags) {
           Cstr end = comment_start + 2;
           if (end > lexer.end) end = lexer.end;
-          diag_error(lexer.diags, Diag_Code_unterminated_comment,
-                     lex_loc(comment_start, end));
+          diag_error(lexer.diags, Diag_Code_unterminated_comment, lex_loc(comment_start, end));
         }
         continue;
       }
@@ -511,16 +512,12 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
       lex_advance();
       Cstr start = lexer.stream;
       token.kind = Token_Kind_str;
-      while (lexer.stream < lexer.end
-          && *lexer.stream != '"'
-          && *lexer.stream != '\n' && *lexer.stream != '\r') {
+      while (lexer.stream < lexer.end && *lexer.stream != '"') {
         lex_advance();
       }
-      token.str = str_from_range(start, lexer.stream);
       if (lexer.stream >= lexer.end || *lexer.stream != '"') {
         if (lexer.diags) {
-          diag_error(lexer.diags, Diag_Code_unterminated_string,
-                     lex_loc(quote_start, lexer.stream));
+          diag_error(lexer.diags, Diag_Code_unterminated_string, lex_loc(quote_start, lexer.stream));
         }
       }
       else {
@@ -533,8 +530,7 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
     } break;
     default: {
       if (lexer.diags) {
-        Diag* diag = diag_error(lexer.diags, Diag_Code_unknown_character,
-                                lex_loc(lexer.stream, lexer.stream + 1));
+        Diag* diag = diag_error(lexer.diags, Diag_Code_unknown_character, lex_loc(lexer.stream, lexer.stream + 1));
         if (diag) diag->data.unknown_char.byte = (U8)*lexer.stream;
       }
       token.kind = Token_Kind_error;
@@ -544,13 +540,13 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
     if (lexer.wasnewline) {
       token.flag |= Token_Flag_wasnewline;
       token.flag |= Token_Flag_wasspace;
-      Token* top = tokens_top(&slice_token);
+      Token* top = tokens_top(&tokens);
       top->flag |= Token_Flag_willspace;
       top->flag |= Token_Flag_willnewline;
     }
     if (lexer.wasspace) {
       token.flag |= Token_Flag_wasspace;
-      Token* top = tokens_top(&slice_token);
+      Token* top = tokens_top(&tokens);
       top->flag |= Token_Flag_willspace;
     }
     token.indent = lexer.indent;
@@ -559,25 +555,25 @@ Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
     // NOTE: wasnewline checks whether rhs should be disabled
     lexer.wasnewline = false;
 
-    // NOTE: wasspace is used to determine function call precedence.
+    // NOTE: wasspace is used to determine operator precedence.
     //       foo (a).x == foo(a.x)
     //       foo(a).x == (foo(a)).x
     lexer.wasspace   = false;
-    tokens_push(&slice_token, token);
+    tokens_push(&tokens, token);
   }
-  Token* top = tokens_top(&slice_token);
+  Token* top = tokens_top(&tokens);
   top->flag |= Token_Flag_willnewline;
   Token token = {
     .kind = Token_Kind_source_leave,
-    .loc  = {file, (U32)source_length, (U32)source_length},
+    .loc  = {source, (U32)source->length, (U32)source->length},
   };
-  tokens_push(&slice_token, token);
-  return slice_token;
+  tokens_push(&tokens, token);
+  return tokens;
 }
 
-Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
+Cstr cstr_from_tokens(Arena* arena, Tokens tokens) {
   String_Builder sb = string_builder_begin(arena);
-  for (Token* token = slice.base; token < slice.base + slice.length; token++) {
+  for (Token* token = tokens.base; token < tokens.base + tokens.length; token++) {
     switch (token->kind) {
     case Token_Kind_source_leave:
       string_builder_push_cstr(&sb, "leave");
@@ -588,18 +584,22 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     case Token_Kind_error:
       string_builder_push_cstr(&sb, "error");
     break;
-    case Token_Kind_name: {
-      string_builder_push_str(&sb, token->str);
-    } break;
+    case Token_Kind_if:
+    case Token_Kind_do:
+    case Token_Kind_else:
+    case Token_Kind_return:
+    case Token_Kind_while:
+    case Token_Kind_break:
+    case Token_Kind_sharp:
+    case Token_Kind_use:
+    case Token_Kind_import:
+    case Token_Kind_name:
     case Token_Kind_int:
-      string_builder_push_i64(&sb, token->i64);
-    break;
-    case Token_Kind_float:
-      string_builder_push_f64(&sb, token->f64);
-    break;
     case Token_Kind_str:
-      string_builder_push_str(&sb, token->str);
-    break;
+    case Token_Kind_float: {
+      Str_View str_view = loc_str_view(token->loc);
+      string_builder_push_str_view(&sb, str_view);
+    } break;
     case Token_Kind_plus:
       string_builder_push_cstr(&sb, "+");
     break;
@@ -710,30 +710,6 @@ Cstr cstr_from_slice_token(Arena* arena, Tokens slice) {
     break;
     case Token_Kind_backslash:
       string_builder_push_cstr(&sb, "\\");
-    break;
-    case Token_Kind_if:
-      string_builder_push_cstr(&sb, "if");
-    break;
-    case Token_Kind_do:
-      string_builder_push_cstr(&sb, "do");
-    break;
-    case Token_Kind_else:
-      string_builder_push_cstr(&sb, "el");
-    break;
-    case Token_Kind_return:
-      string_builder_push_cstr(&sb, "return");
-    break;
-    case Token_Kind_while:
-      string_builder_push_cstr(&sb, "while");
-    break;
-    case Token_Kind_break:
-      string_builder_push_cstr(&sb, "break");
-    break;
-    case Token_Kind_sharp:
-      string_builder_push_cstr(&sb, "#");
-    break;
-    case Token_Kind_use:
-      string_builder_push_cstr(&sb, "use");
     break;
     }
     string_builder_push_cstr(&sb, " ");

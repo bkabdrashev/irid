@@ -32,6 +32,17 @@ struct String_Builder {
   Umi    cap;
 };
 
+typedef struct Str_View Str_View;
+struct Str_View {
+  Cstr base;
+  Umi  length;
+};
+
+Str_View str_view(Cstr start, Cstr end) {
+  Str_View result = { start, end - start };
+  return result;
+}
+
 Internal internal_strs  = {0};
 const Str* str_nil = {0};
 String_Kind token_kind_from_str(Str* str) {
@@ -40,6 +51,13 @@ String_Kind token_kind_from_str(Str* str) {
 
 Cstr cstr_from_str(Str* str) {
   return str->base;
+}
+
+Internal internal_init(Arena* arena, Umi capacity) {
+  Internal internal = {};
+  internal.arena = arena;
+  internal.set = hash_set_init(arena, capacity);
+  return internal;
 }
 
 Str* internal_from_range(Internal internal, Cstr begin, Cstr end) {
@@ -116,6 +134,10 @@ Str* internal_from_cstr(Internal internal, Cstr cstr) {
   return internal_from_range(internal, cstr, end);
 }
 
+Str* internal_from_str_view(Internal internal, Str_View str_view) {
+  return internal_from_range(internal, str_view.base, str_view.base + str_view.length);
+}
+
 Str* str_from_cstr(Cstr cstr) {
   I32 len = strlen(cstr);
   Cstr end = cstr + len;
@@ -172,6 +194,12 @@ void string_builder_push_cstr(String_Builder* sb, Cstr str) {
   string_builder_reserve(sb, length);
   memcpy(sb->base + sb->size, str, length);
   sb->size += length;
+}
+
+void string_builder_push_str_view(String_Builder* sb, Str_View str_view) {
+  string_builder_reserve(sb, str_view.length);
+  memcpy(sb->base + sb->size, str_view.base, str_view.length);
+  sb->size += str_view.length;
 }
 
 void string_builder_push_indent(String_Builder* sb, I32 indent) {

@@ -1,11 +1,19 @@
+typedef struct Ast_List Ast_List;
+typedef struct Ast_Block Ast_Block;
+struct Ast_Block {
+  Hash_Map* scope;
+  Ast_List* list;
+};
+
 typedef struct Source Source;
 struct Source {
   Arena* arena;
-  Cstr path;
+  Str* path;
   Cstr data;
   Umi  length;
   U32* line_starts;
   I32  line_count;
+  Ast_Block ast;
 };
 
 typedef struct Loc Loc;
@@ -15,19 +23,10 @@ struct Loc {
   U32 end;
 };
 
-#define SOURCE_MAX 128
-
 typedef struct Source_Pool Source_Pool;
 struct Source_Pool {
   I32     length;
   Source* base;
-};
-
-typedef struct Sources Sources;
-struct Sources {
-  Source_Pool pool;
-  Internal    paths;
-  Hash_Map    map;   // path -> source
 };
 
 Loc loc_join(Loc one, Loc two) {
@@ -45,48 +44,9 @@ Loc loc_at(Source* source, Cstr base, Cstr begin, Cstr end) {
   return loc;
 }
 
-Source* sources_add(Sources* sources, Cstr path, Cstr data, Umi length) {
-  if (sources->map.len >= SOURCE_MAX) assert(0);
-  if (length > (Umi)UINT32_MAX)      assert(0);
-
-  Str* internal_path = internal_from_cstr(sources->paths, path);
-  Source* source = hash_map_get(sources->map, internal_path);
-  if (!source) {
-    Arena* arena = arena_init(KB(1) * length);
-    I32 line_count = 1;
-    for (Umi i = 0; i < length; i++) {
-      if (data[i] == '\n') {
-        line_count += 1;
-      }
-      else if (data[i] == '\r') {
-        line_count += 1;
-        if (i + 1 < length && data[i+1] == '\n') i += 1;
-      }
-    }
-
-    U32* line_starts = arena_push(arena, sizeof(U32) * line_count);
-    line_starts[0] = 0;
-    I32 line = 1;
-    for (Umi i = 0; i < length; i++) {
-      if (data[i] == '\n') {
-        line_starts[line++] = (U32)(i + 1);
-      }
-      else if (data[i] == '\r') {
-        if (i + 1 < length && data[i+1] == '\n') i += 1;
-        line_starts[line++] = (U32)(i + 1);
-      }
-    }
-    assert(line == line_count);
-
-    Source* source = &new(sources->pool);
-            source->arena       = arena;
-            source->path        = path;
-            source->data        = data;
-            source->length      = length;
-            source->line_starts = line_starts;
-            source->line_count  = line_count;
-  }
-  return source;
+Str_View loc_str_view(Loc loc) {
+  Str_View result = { loc.source->data + loc.start, loc.end - loc.start };
+  return result;
 }
 
 I32 source_line_count(Source* source) {
@@ -113,22 +73,20 @@ I32 source_line_index(Source* source, U32 offset) {
   return low;
 }
 
-U32 source_line_start(Source* file, I32 line) {
-  return file->line_starts[line];
+U32 source_line_start(Source* source, I32 line) {
+  return source->line_starts[line];
 }
 
-U32 source_line_end(Source* file, I32 line) {
-  U32 start = source_line_start(file, line);
-  U32 end   = (line + 1 < file->line_count)
-            ? file->line_starts[line+1]
-            : (U32)file->length;
-  while (end > start && (file->data[end-1] == '\n' || file->data[end-1] == '\r')) {
+U32 source_line_end(Source* source, I32 line) {
+  U32 start = source_line_start(source, line);
+  U32 end   = source->line_starts[line+1];
+  while (end > start && (source->data[end-1] == '\n' || source->data[end-1] == '\r')) {
     end -= 1;
   }
   return end;
 }
 
-I32 source_line_column(Source* file, U32 offset) {
-  I32 line = source_line_index(file, offset);
-  return (I32)(offset - source_line_start(file, line)) + 1;
+I32 source_line_column(Source* source, U32 offset) {
+  I32 line = source_line_index(source, offset);
+  return (I32)(offset - source_line_start(source, line)) + 1;
 }

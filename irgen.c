@@ -78,6 +78,7 @@ typedef struct Ir    Ir;
 typedef struct Block Block;
 typedef struct Fun   Fun;
 typedef struct Type  Type;
+typedef struct Var   Var;
 
 typedef struct Ir_Pair Ir_Pair;
 struct Ir_Pair { Ir* one; Ir* two; };

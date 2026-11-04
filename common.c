@@ -3,8 +3,6 @@
 
 typedef  char       C8;
 typedef const char* Cstr;
-
-
 typedef int8_t    I8;
 typedef int16_t   I16;
 typedef int32_t   I32;
@@ -309,6 +307,9 @@ Arena* arena_init(Umi capacity) {
   return arena;
 }
 
+#define arena_push_type(arena, type, length) arena_push(arena, sizeof(type) * length)
+#define arena_push_zero_type(arena, type, length) arena_push_zero(arena, sizeof(type) * length)
+
 void* arena_push(Arena* arena, Umi size) {
   Umi aligned_size = align_up(size, arena->alignment);
   Umi redzone_size = aligned_size;
@@ -422,15 +423,15 @@ U64 hash_mix(U64 x, U64 y) {
 }
 
 // array
-#define empty(slice) ((slice).length == 0)
-#define push(slice, item) ((slice).base[(slice).length++] = (item), ((slice).length)-1)
-#define add(slice, item) do {(slice).base[(slice).length++] = (item);} while (0)
-#define new(slice) ((slice).base[(slice).length++])
-#define pop(slice) ((slice).base[--(slice).length])
-#define del(slice) (--(slice).length)
-#define top(slice) ((slice).base[(slice).length-1])
-#define get(slice, index) ((slice).base[(index)])
-#define put(slice, index, value) ((slice).base[(index)] = (value))
+#define empty(array) ((array).length == 0)
+#define push(array, item) ((array).base[(array).length++] = (item), ((array).length)-1)
+#define add(array, item) do {(array).base[(array).length++] = (item);} while (0)
+#define new(array) ((array).base[(array).length++])
+#define pop(array) ((array).base[--(array).length])
+#define del(array) (--(array).length)
+#define top(array) ((array).base[(array).length-1])
+#define get(array, index) ((array).base[(index)])
+#define put(array, index, value) ((array).base[(index)] = (value))
 
 #define min(x, y) ((x) <= (y) ? (x) : (y))
 #define max(x, y) ((x) >= (y) ? (x) : (y))
@@ -457,6 +458,12 @@ struct Hash_Set {
   void** list;
   void** keys;
 };
+
+Umi hash_set_alloc_size(Umi capacity) {
+  Umi cap = 2*power_of_2_up(capacity);
+  Umi result = sizeof(void*)*cap + sizeof(void*)*capacity;
+  return result;
+}
 
 Hash_Set hash_set_init(Arena* arena, Umi capacity) {
   Hash_Set set = {};
@@ -575,6 +582,11 @@ struct Hash_Map {
   void** vals;
 };
 
+Umi hash_map_alloc_size(Umi capacity) {
+  Umi cap = 2*power_of_2_up(capacity);
+  Umi result = sizeof(void*)*cap + sizeof(void*)*cap + sizeof(void*)*capacity;
+  return result;
+}
 Hash_Map hash_map_init(Arena* arena, Umi capacity) {
   Hash_Map map = {};
   map.cap  = 2*power_of_2_up(capacity);
@@ -703,6 +715,7 @@ Umi file_size(Cstr path) {
     return 0;
   }
   Umi size = st.st_size;
+  close(fd);
   return size;
 }
 
@@ -721,7 +734,7 @@ Cstr file_read(Cstr path) {
   Umi map_len = ((size + 1 + pagesz - 1) / pagesz) * pagesz;
 
   C8* data = mmap(NULL, size,
-            PROT_READ|PROT_WRITE,
+            PROT_READ,
             MAP_PRIVATE,
             fd, 0);
   close(fd);

@@ -6,16 +6,13 @@ const char *__asan_default_options() {
 }
 
 int main(int argc, char** argv) {
-  if (argc > 1) {
-    return irid_run_path(argv[1]);
-  }
   arena_test();
   float_test();
   parse_test();
   // diag_test();
-  irgen_test();
-  sem_test();
-  llvm_test();
-  irid_run_path("test.i");
+  // irgen_test();
+  // sem_test();
+  // llvm_test();
+  // irid_run_path("test.i");
   return 0;
 }

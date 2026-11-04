@@ -1,10 +1,10 @@
-typedef enum {
+typedef enum Diag_Severity {
   Diag_Note    = 0,
   Diag_Warning = 1,
   Diag_Error   = 2,
 } Diag_Severity;
 
-typedef enum {
+typedef enum  Diag_Code {
   Diag_Code_none = 0,
 
   Diag_Code_unknown_character,
@@ -54,7 +54,8 @@ typedef enum {
   Diag_Code_previous_declaration,
 } Diag_Code;
 
-typedef union {
+typedef union Diag_Data Diag_Data;
+union Diag_Data {
   struct { Token_Kind expected; Token_Kind found; B8 end_of_line; } expected;
   struct { Token_Kind open; Token_Kind close; }     delimiter;
   struct { I32 digit; I32 base; }                    invalid_digit;
@@ -63,9 +64,10 @@ typedef union {
   struct { Cstr text; }                              text;
   struct { Cstr expected; Cstr found; }              types;
   struct { Cstr op; Cstr type; }                     operand;
-} Diag_Data;
+};
 
-typedef struct {
+typedef struct Diag Diag;
+struct Diag {
   Diag_Severity severity;
   Diag_Code     code;
   Loc           loc;
@@ -73,7 +75,7 @@ typedef struct {
   I32           note_of;
   Cstr          compiler_file;
   I32           compiler_line;
-} Diag;
+};
 
 // Toggle this to include the compiler source location that emitted each
 // diagnostic. Useful when a diagnostic points at compiler code rather than
@@ -94,15 +96,88 @@ typedef struct {
   B8    printed;
 } Diags;
 
-Diags diags_init(I32 cap) {
-  Diags result = {0};
-  result.base  = xcalloc(sizeof(Diag), cap);
-  result.cap   = cap;
-  return result;
+typedef struct Sources Sources;
+struct Sources {
+  I32         max_length;
+  I32         ast_count;
+  Source_Pool pool;
+  Internal    paths;
+  Diags       diags;
+  Hash_Map    map;   // path -> source
+};
+
+Sources sources_init(I32 max_sources_count, I32 max_diags) {
+  Umi total_max_alloc = 0;
+  total_max_alloc += hash_map_alloc_size(max_sources_count);
+  total_max_alloc += sizeof(Source) * max_sources_count;
+  total_max_alloc += hash_set_alloc_size(max_sources_count);
+  total_max_alloc += max_sources_count * 256;
+  total_max_alloc += sizeof(Diag) * 256;
+  Arena* arena = arena_init(total_max_alloc);
+
+  Sources sources = {};
+          sources.max_length = max_sources_count;
+          sources.pool.base  = arena_push_type(arena, Source, max_sources_count);
+          sources.paths      = internal_init(arena, max_sources_count);
+          sources.map        = hash_map_init(arena, max_sources_count);
+          sources.diags.base = arena_push_type(arena, Diag, 256);
+  return sources;
 }
 
-Diag* diag_push_impl(Diags* diags, Diag_Severity severity, Diag_Code code, Loc loc,
-                     I32 note_of, Cstr compiler_file, I32 compiler_line) {
+void sources_free(Sources* sources) {
+  arena_free(sources->paths.arena);
+}
+
+Source* sources_add(Sources* sources, Str_View path) {
+  if (sources->map.len >= sources->max_length) assert(0);
+
+  Str* internal_path = internal_from_str_view(sources->paths, path);
+  if (internal_path->length >= INT32_MAX) assert(0);
+
+  Umi  length = file_size(internal_path->base);
+  Cstr data   = file_read(internal_path->base);
+
+  Source* source = hash_map_get(sources->map, internal_path);
+  if (!source) {
+    Arena* arena = arena_init(KB(1) * length);
+    I32 line_count = 1;
+    for (Umi i = 0; i < length; i++) {
+      if (data[i] == '\n') {
+        line_count += 1;
+      }
+      else if (data[i] == '\r') {
+        line_count += 1;
+        if (i + 1 < length && data[i+1] == '\n') i += 1;
+      }
+    }
+
+    U32* line_starts = arena_push(arena, sizeof(U32) * line_count);
+    line_starts[0] = 0;
+    I32 line = 1;
+    for (Umi i = 0; i < length; i++) {
+      if (data[i] == '\n') {
+        line_starts[line++] = (U32)(i + 1);
+      }
+      else if (data[i] == '\r') {
+        if (i + 1 < length && data[i+1] == '\n') i += 1;
+        line_starts[line++] = (U32)(i + 1);
+      }
+    }
+    assert(line == line_count);
+
+    source = &new(sources->pool);
+    source->arena       = arena;
+    source->path        = internal_path;
+    source->data        = data;
+    source->length      = length;
+    source->line_starts = line_starts;
+    source->line_count  = line_count;
+    hash_map_put(&sources->map, internal_path, source);
+  }
+  return source;
+}
+
+Diag* diag_push_impl(Diags* diags, Diag_Severity severity, Diag_Code code, Loc loc, I32 note_of, Cstr compiler_file, I32 compiler_line) {
   if (!diags || diags->limit_hit) return NULL;
   if (severity == Diag_Error && diags->error_count >= DIAG_ERROR_LIMIT) {
     diags->limit_hit = true;
@@ -520,7 +595,7 @@ static void diag_print_snippet(FILE* out, Sources* sources, Loc loc, Cstr label,
   Cstr caret = color ? caret_color : "";
 
   fprintf(out, "%*s%s-->%s %s:%d:%d\n",
-          width, "", dim, reset, source->path, line + 1, caret_start + 1);
+          width, "", dim, reset, source->path->base, line + 1, caret_start + 1);
   fprintf(out, "%*s%s|%s\n", width + 1, "", dim, reset);
   fprintf(out, "%*d %s|%s ", width, line + 1, dim, reset);
   diag_print_window(out, source, line_start, line_end,
