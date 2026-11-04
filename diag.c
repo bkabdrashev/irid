@@ -94,9 +94,9 @@ typedef struct {
   B8    printed;
 } Diags;
 
-Diags diags_init(Arena* arena, I32 cap) {
+Diags diags_init(I32 cap) {
   Diags result = {0};
-  result.base  = arena_push_zero(arena, sizeof(Diag) * cap);
+  result.base  = xcalloc(sizeof(Diag), cap);
   result.cap   = cap;
   return result;
 }
@@ -214,24 +214,23 @@ static Cstr diag_color_note(void)  { return "\033[1;36m"; }
 static Cstr diag_color_dim(void)   { return "\033[2m"; }
 static Cstr diag_color_reset(void) { return "\033[0m"; }
 
-static void diag_print_lexeme(FILE* out, Source_Map* sources, Loc loc) {
-  Source_File* file = source_get(sources, loc.file);
-  if (!file || loc.start >= file->length) return;
+static void diag_print_lexeme(FILE* out, Sources* sources, Loc loc) {
   U32 start = loc.start;
   U32 end   = loc.end;
-  if (end > file->length) end = (U32)file->length;
+  Source* source = loc.source;
+  if (end > source->length) end = (U32)source->length;
   if (end <= start) end = start + 1;
   U32 length = end - start;
   if (length > 32) {
-    fwrite(file->data + start, 1, 29, out);
+    fwrite(source->data + start, 1, 29, out);
     fputs("...", out);
   }
   else {
-    fwrite(file->data + start, 1, length, out);
+    fwrite(source->data + start, 1, length, out);
   }
 }
 
-static void diag_print_found(FILE* out, Source_Map* sources, Token_Kind kind, Loc loc) {
+static void diag_print_found(FILE* out, Sources* sources, Token_Kind kind, Loc loc) {
   if (kind == Token_Kind_source_leave) {
     fputs("end of file", out);
     return;
@@ -254,7 +253,7 @@ static void diag_print_found(FILE* out, Source_Map* sources, Token_Kind kind, Lo
   fprintf(out, "'%s'", cstr_from_token_kind(kind));
 }
 
-static void diag_print_message(FILE* out, Diag* diag, Source_Map* sources) {
+static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
   switch (diag->code) {
   case Diag_Code_unknown_character: {
     U8 byte = (U8)diag->data.unknown_char.byte;
@@ -428,11 +427,11 @@ static void diag_print_message(FILE* out, Diag* diag, Source_Map* sources) {
   }
 }
 
-static I32 diag_display_column(Source_File* file, U32 line_start, U32 offset) {
+static I32 diag_display_column(Source* source, U32 line_start, U32 offset) {
   I32 column = 0;
-  if (offset > file->length) offset = (U32)file->length;
+  if (offset > source->length) offset = (U32)source->length;
   for (U32 at = line_start; at < offset; at++) {
-    if (file->data[at] == '\t') {
+    if (source->data[at] == '\t') {
       column = (column / 4 + 1) * 4;
     }
     else {
@@ -442,13 +441,12 @@ static I32 diag_display_column(Source_File* file, U32 line_start, U32 offset) {
   return column;
 }
 
-static void diag_print_window(FILE* out, Source_File* file, U32 start, U32 end,
-                              I32 window_start, I32 window_end, I32 line_width) {
+static void diag_print_window(FILE* out, Source* source, U32 start, U32 end, I32 window_start, I32 window_end, I32 line_width) {
   I32 column = 0;
   if (window_start > 0) fputs("...", out);
   for (U32 at = start; at < end; at++) {
     if (column >= window_end) break;
-    C8 c = file->data[at];
+    C8 c = source->data[at];
     if (c == '\t') {
       I32 next = (column / 4 + 1) * 4;
       for (I32 at_column = column; at_column < next; at_column++) {
@@ -475,24 +473,21 @@ static I32 diag_digits(I32 value) {
   return result;
 }
 
-static void diag_print_snippet(FILE* out, Source_Map* sources, Loc loc, Cstr label,
-                               Cstr caret_color, B8 color) {
-  if (!loc_is_valid(loc)) return;
-  Source_File* file = source_get(sources, loc.file);
-  if (!file) return;
+static void diag_print_snippet(FILE* out, Sources* sources, Loc loc, Cstr label, Cstr caret_color, B8 color) {
+  Source* source = loc.source;
 
-  I32 line        = source_line_index(file, loc.start);
-  U32 line_start  = source_line_start(file, line);
-  U32 line_end    = source_line_end(file, line);
-  I32 caret_start = diag_display_column(file, line_start, loc.start);
+  I32 line        = source_line_index(source, loc.start);
+  U32 line_start  = source_line_start(source, line);
+  U32 line_end    = source_line_end(source, line);
+  I32 caret_start = diag_display_column(source, line_start, loc.start);
 
   U32 caret_end_offset = loc.end;
   if (caret_end_offset <= loc.start) caret_end_offset = loc.start + 1;
   if (caret_end_offset > line_end) caret_end_offset = line_end;
-  I32 caret_end = diag_display_column(file, line_start, caret_end_offset);
+  I32 caret_end = diag_display_column(source, line_start, caret_end_offset);
   if (caret_end <= caret_start) caret_end = caret_start + 1;
 
-  I32 line_width = diag_display_column(file, line_start, line_end);
+  I32 line_width = diag_display_column(source, line_start, line_end);
   I32 max_width  = 120;
   I32 window_start = 0;
   if (line_width > max_width && caret_start > max_width - 20) {
@@ -525,10 +520,10 @@ static void diag_print_snippet(FILE* out, Source_Map* sources, Loc loc, Cstr lab
   Cstr caret = color ? caret_color : "";
 
   fprintf(out, "%*s%s-->%s %s:%d:%d\n",
-          width, "", dim, reset, file->path, line + 1, caret_start + 1);
+          width, "", dim, reset, source->path, line + 1, caret_start + 1);
   fprintf(out, "%*s%s|%s\n", width + 1, "", dim, reset);
   fprintf(out, "%*d %s|%s ", width, line + 1, dim, reset);
-  diag_print_window(out, file, line_start, line_end,
+  diag_print_window(out, source, line_start, line_end,
                     window_start, window_end, line_width);
   fputc('\n', out);
 
@@ -543,7 +538,7 @@ static void diag_print_snippet(FILE* out, Source_Map* sources, Loc loc, Cstr lab
   fputc('\n', out);
 }
 
-static void diag_print_one(FILE* out, Diags* diags, I32 index, Source_Map* sources, B8 color) {
+static void diag_print_one(FILE* out, Diags* diags, I32 index, Sources* sources, B8 color) {
   Diag* diag = &diags->base[index];
   Cstr sev;
   Cstr sev_color;
@@ -583,7 +578,7 @@ static void diag_print_one(FILE* out, Diags* diags, I32 index, Source_Map* sourc
   diag_print_snippet(out, sources, diag->loc, NULL, caret_color, color);
 }
 
-void diag_print_all(Diags* diags, Source_Map* sources, FILE* out, B8 color) {
+void diag_print_all(Diags* diags, Sources* sources, FILE* out, B8 color) {
   if (!diags || diags->printed) return;
   diags->printed = true;
 

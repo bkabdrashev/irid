@@ -24,10 +24,9 @@ typedef struct {
 } Tokens;
 
 typedef struct {
-  Cstr    source;
   Cstr    stream;
   Cstr    end;
-  File_Id file;
+  Source* source;
   Diags*  diags;
   B8      wasnewline;
   B8      wasspace;
@@ -66,18 +65,15 @@ C8 lex_peek(I32 offset) {
 
 Loc lex_loc(Cstr begin, Cstr end) {
   Loc loc = {0};
-  loc.file  = lexer.file;
-  loc.start = (U32)(begin - lexer.source);
-  loc.end   = (U32)(end - lexer.source);
+  loc.source  = lexer.source;
+  loc.start = (U32)(begin - lexer.source->data);
+  loc.end   = (U32)(end - lexer.source->data);
   return loc;
 }
 
-Tokens lex_source(Arena* arena, Source_Map* sources, File_Id file, Diags* diags) {
+Tokens lex_source(Arena* arena, Source* source, Diags* diags) {
   Tokens slice_token = {0};
-  Source_File* source_file = source_get(sources, file);
-  assert(source_file);
-  Cstr source        = source_file->data;
-  Umi  source_length = source_file->length;
+  Umi  source_length = source->length;
   slice_token.base = arena_push(arena, sizeof(Token) * (source_length + 2));
   lexer.source = source;
   lexer.stream = source;

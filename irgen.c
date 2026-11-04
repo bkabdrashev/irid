@@ -1652,15 +1652,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
   return result;
 }
 
-Funs irgen_file(Arena* arena, Str* path) {
-  Cstr source        = file_read(path->base);
-  I32  source_length = (I32)file_size(path->base);
-
-  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
-                        str_init(&arena, 2*length);
-
-}
-
 Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
   Arena temp_block_arena = arena_init(arena->capacity);
   Arena temp_var_arena   = arena_init(arena->capacity);

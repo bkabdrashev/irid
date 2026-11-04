@@ -295,16 +295,17 @@ typedef struct {
   I8    alignment;
 } Arena;
 
-Arena arena_init(Umi capacity) {
-  Umi total      = capacity * 2;
-  Arena arena    = {};
-  arena.base     = xmalloc(total);
-  arena.top      = arena.base;
-  arena.capacity = capacity;
-  arena.total    = total;
-  arena.alignment = 8;
+Arena* arena_init(Umi capacity) {
+  Umi total  = capacity * 2;
+  C8* memory = xmalloc(sizeof(Arena) + total);
+  Arena* arena = (Arena*)memory;
+         arena->base     = memory + sizeof(Arena);
+         arena->top      = arena->base;
+         arena->total    = total;
+         arena->capacity = capacity;
+         arena->alignment = 8;
 
-  ASAN_POISON(arena.base, total);
+  ASAN_POISON(arena->base, total);
   return arena;
 }
 
@@ -377,23 +378,23 @@ void arena_free(Arena* arena) {
   if (arena->base) {
     profile_arena_release((U64)(arena->top - arena->base));
   }
-  free(arena->base);
   arena->top = NULL;
   arena->base = NULL;
+  free(arena);
 }
 
 void arena_test() {
-  Arena arena = arena_init(KB(64));
-  C8* buf0 = arena_push(&arena, 16);
-  assert(arena.base + 16 <= arena.top);
-  assert(buf0 + 16 <= arena.top);
-  C8* buf1 = arena_push(&arena, 32);
-  assert(arena.base + 16 + 32 <= arena.top);
+  Arena* arena = arena_init(KB(64));
+  C8* buf0 = arena_push(arena, 16);
+  assert(arena->base + 16 <= arena->top);
+  assert(buf0 + 16 <= arena->top);
+  C8* buf1 = arena_push(arena, 32);
+  assert(arena->base + 16 + 32 <= arena->top);
   assert(buf0 + 16 <= buf1);
-  C8* buf2 = arena_push(&arena, 64);
-  assert(arena.base + 16 + 32 + 64 <= arena.top);
+  C8* buf2 = arena_push(arena, 64);
+  assert(arena->base + 16 + 32 + 64 <= arena->top);
   assert(buf1 + 32 <= buf2);
-  arena_free(&arena);
+  arena_free(arena);
 }
 
 U64 hash_bytes(const void* ptr, U64 len) {
@@ -633,29 +634,15 @@ void hash_map_put(Hash_Map* map, void* key, void* val) {
   }
 }
 
-void* hash_map_get(Hash_Map* map, void* key) {
+void* hash_map_get(Hash_Map map, void* key) {
   I32 i = hash_u64((U64)key);
   for (;;) {
-    i &= map->cap - 1;
-    if (!map->keys[i]) {
+    i &= map.cap - 1;
+    if (!map.keys[i]) {
       return 0;
     }
-    else if (map->keys[i] == key) {
-      return map->vals[i];
-    }
-    i++;
-  }
-}
-
-void** hash_map_get_ptr(Hash_Map* map, void* key) {
-  I32 i = hash_u64((U64)key);
-  for (;;) {
-    i &= map->cap - 1;
-    if (!map->keys[i]) {
-      return 0;
-    }
-    else if (map->keys[i] == key) {
-      return &map->vals[i];
+    else if (map.keys[i] == key) {
+      return map.vals[i];
     }
     i++;
   }
@@ -666,13 +653,13 @@ void hash_map_put_i32(Hash_Map* map, void* key, I32 val) {
   hash_map_put(map, key, (void*)cast);
 }
 
-I32 hash_map_get_i32(Hash_Map* map, void* key) {
+I32 hash_map_get_i32(Hash_Map map, void* key) {
   void* val = hash_map_get(map, key);
   I64 i64 = (I64)val - 1;
   return i64;
 }
 
-void* hash_map_i32_get(Hash_Map* map, I32 key) {
+void* hash_map_i32_get(Hash_Map map, I32 key) {
   I64 cast = key+1;
   void* val = hash_map_get(map, (void*)cast);
   return val;
@@ -683,7 +670,7 @@ void hash_map_i32_put(Hash_Map* map, I32 key, void* val) {
   hash_map_put(map, (void*)cast, val);
 }
 
-I32 hash_map_i32_get_i32(Hash_Map* map, I32 key) {
+I32 hash_map_i32_get_i32(Hash_Map map, I32 key) {
   I64 cast = key+1;
   I32 val  = hash_map_get_i32(map, (void*)cast);
   return val;
@@ -698,8 +685,8 @@ B8 hash_map_is_equal(Hash_Map one, Hash_Map two) {
   if (one.len != two.len) return false;
   for (I32 i = 0; i < one.len; i++) {
     void* key = one.list[i];
-    void* one_val = hash_map_get(&one, key);
-    void* two_val = hash_map_get(&two, key);
+    void* one_val = hash_map_get(one, key);
+    void* two_val = hash_map_get(two, key);
     if (one_val != two_val) {
       return false;
     }

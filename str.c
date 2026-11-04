@@ -32,7 +32,7 @@ struct String_Builder {
   Umi    cap;
 };
 
-Internal internal = {0};
+Internal internal_strs  = {0};
 const Str* str_nil = {0};
 String_Kind token_kind_from_str(Str* str) {
   return str->kind;
@@ -42,39 +42,7 @@ Cstr cstr_from_str(Str* str) {
   return str->base;
 }
 
-Str* str_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
-  I32 len = strlen(cstr);
-  I32 i = hash_bytes(cstr, len);
-  for (;;) {
-    i &= internal.set.cap - 1;
-    Str* str = internal.set.keys[i];
-    if (!str) {
-      Str* new_str = arena_push(internal.arena, sizeof(Str) + (len+1) * sizeof(C8));
-      new_str->length = len;
-      new_str->kind = kind;
-      for (I32 j = 0; j < len; j++) {
-        new_str->base[j] = cstr[j];
-      }
-      new_str->base[len] = '\0';
-      internal.set.keys[i] = new_str;
-      return new_str;
-    }
-    else {
-      if (str->length == len) {
-        I32 j = 0;
-        for (; j < str->length; j++) {
-          if (str->base[j] != cstr[j]) {
-            break;
-          }
-        }
-        if (j == str->length) return str;
-      }
-    }
-    i++;
-  }
-}
-
-Str* str_from_range(Cstr begin, Cstr end) {
+Str* internal_from_range(Internal internal, Cstr begin, Cstr end) {
   I32 len = end - begin;
   I32 i = hash_bytes(begin, len);
   for (;;) {
@@ -106,6 +74,48 @@ Str* str_from_range(Cstr begin, Cstr end) {
   }
 }
 
+Str* str_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
+  I32 len = strlen(cstr);
+  I32 i = hash_bytes(cstr, len);
+  for (;;) {
+    i &= internal_strs.set.cap - 1;
+    Str* str = internal_strs.set.keys[i];
+    if (!str) {
+      Str* new_str = arena_push(internal_strs.arena, sizeof(Str) + (len+1) * sizeof(C8));
+      new_str->length = len;
+      new_str->kind = kind;
+      for (I32 j = 0; j < len; j++) {
+        new_str->base[j] = cstr[j];
+      }
+      new_str->base[len] = '\0';
+      internal_strs.set.keys[i] = new_str;
+      return new_str;
+    }
+    else {
+      if (str->length == len) {
+        I32 j = 0;
+        for (; j < str->length; j++) {
+          if (str->base[j] != cstr[j]) {
+            break;
+          }
+        }
+        if (j == str->length) return str;
+      }
+    }
+    i++;
+  }
+}
+
+Str* str_from_range(Cstr begin, Cstr end) {
+  return internal_from_range(internal_strs, begin, end);
+}
+
+Str* internal_from_cstr(Internal internal, Cstr cstr) {
+  I32 len = strlen(cstr);
+  Cstr end = cstr + len;
+  return internal_from_range(internal, cstr, end);
+}
+
 Str* str_from_cstr(Cstr cstr) {
   I32 len = strlen(cstr);
   Cstr end = cstr + len;
@@ -113,8 +123,8 @@ Str* str_from_cstr(Cstr cstr) {
 }
 
 void str_init(Arena* arena, I32 capacity) {
-  internal.arena = arena;
-  internal.set = hash_set_init(arena, capacity);
+  internal_strs.arena = arena;
+  internal_strs.set = hash_set_init(arena, capacity);
   str_from_cstr_with_kind("if", String_Kind_if);
   str_from_cstr_with_kind("do", String_Kind_do);
   str_from_cstr_with_kind("else", String_Kind_else);

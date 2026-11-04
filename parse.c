@@ -1231,7 +1231,7 @@ Ast_Node* parse_statement(Parser* parser) {
     Ast_Node* exp = parse_new_expression(parser, 0);
     if (parse_expect_token(parser, Token_Kind_str)) {
       node = ast_new_node(parser->perm_arena, Ast_Kind_import);
-      node->str = token.str;
+      node->unary = parse_file(token.str);
       node->loc = token.loc;
     }
   } break;
@@ -1455,6 +1455,25 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
   block.scope = parse_decls_perm(parser);
   parser->decls = save_decls;
   return block;
+}
+
+Ast_Block parse_file(Source_Map* sources, Str* file_path) {
+  Cstr source = file_read(file_path);
+  Umi  length = file_size(file_path);
+  File_Id file = source_add(sources, file_path, source, length);
+
+  Tokens tokens = lex_source(&arena, &sources, file, &diags);
+  Arena temp_ast_arena  = arena_init(perm_arena->capacity);
+  Arena temp_map_arena  = arena_init(perm_arena->capacity);
+
+  // parse the main file
+  // every time import "file_path" is parsed, parse "file_path"
+  // Each import "file_path" with the same name referes to the same import.
+  // Allocate what is needed to parse the files per file
+  // N files => N allocations
+  //
+  // After all files are parsed and combined into single ast generate irgen for it.
+  // do string interning after parsing, when all sizes are known
 }
 
 Ast_Block parse_tokens(Arena* perm_arena, Tokens tokens, Diags* diags) {
