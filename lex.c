@@ -31,7 +31,7 @@ typedef struct {
 Str_View token_str(Token token) {
   Str_View str_view = str_view_from_loc(token.loc);
   str_view.base   += 1;
-  str_view.length -= 1;
+  str_view.length -= 2;
   return str_view;
 }
 

@@ -82,21 +82,6 @@ struct Ast_Pool {
   Ast_Node* base;
 };
 
-typedef enum {
-  Symbol_Kind_none      = 0,
-  Symbol_Kind_constant  = 1,
-  Symbol_Kind_variable  = 2,
-  Symbol_Kind_parameter = 3,
-} Symbol_Kind;
-
-typedef struct Symbol Symbol;
-struct Symbol {
-  Symbol_Kind kind;
-  Ast_Node* ast;
-  Ir* ir;
-  Loc loc;
-};
-
 typedef struct Ast_Decl Ast_Decl;
 struct Ast_Decl {
   Loc       lhs;
@@ -1185,16 +1170,14 @@ Ast_Node* parse_statement(Parser* parser) {
   parse_advance(parser);
   switch (token.kind) {
   case Token_Kind_use: {
-    Ast_Node* exp = parse_new_expression(parser, 0);
-    if (parse_match_token(parser, Token_Kind_colon)) {
-      // TODO: use name: exp
-      assert(0);
-    }
+    // TODO: use name: exp
+    Ast_Node* exp = parse_statement(parser);
     node = parse_new_unary(parser, Ast_Kind_use, exp);
   } break;
   case Token_Kind_import: {
+    Token path_token = *parse_peek(parser);
     if (parse_expect_token(parser, Token_Kind_str)) {
-      Str_View path = token_str(token);
+      Str_View path = token_str(path_token);
       node = parse_new_node(parser, Ast_Kind_import);
       node->source = parse_file(parser->sources, path);
       node->loc = token.loc;

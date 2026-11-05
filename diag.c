@@ -119,7 +119,7 @@ Sources sources_init(I32 max_sources_count, I32 max_diags) {
 
   Sources sources = {};
           sources.max_length = max_sources_count;
-          sources.pool.base  = arena_push_type(arena, Source, max_sources_count);
+          sources.pool       = pool(arena, Source, max_sources_count);
           sources.paths      = internal_init(arena, max_sources_count);
           sources.map        = hash_map_init(arena, max_sources_count);
           sources.diags.base = arena_push_type(arena, Diag, 256);
@@ -128,7 +128,8 @@ Sources sources_init(I32 max_sources_count, I32 max_diags) {
 
 void sources_free(Sources* sources) {
   for (I32 i = 0; i < sources->map.len; i++) {
-    Source* source = sources->map.list[i];
+    Str* path = sources->map.list[i];
+    Source* source = hash_map_get(sources->map, path);
     arena_free(source->arena);
   }
   arena_free(sources->paths.arena);

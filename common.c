@@ -429,6 +429,7 @@ U64 hash_mix(U64 x, U64 y) {
 }
 
 // array
+#define pool(arena, type, max_length) (type ## _Pool){.base = arena_push_zero_type(arena, type, max_length), .length = 0 }
 #define empty(array) ((array).length == 0)
 #define push(array, item) ((array).base[(array).length++] = (item), ((array).length)-1)
 #define add(array, item) do {(array).base[(array).length++] = (item);} while (0)
