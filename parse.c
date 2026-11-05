@@ -103,6 +103,18 @@ struct Ast_Decl {
   Ast_Node* rhs;
 };
 
+typedef struct Ast_Decls Ast_Decls;
+struct Ast_Decls {
+  I32 length;
+  Ast_Decl base[];
+};
+
+typedef struct Ast_Block Ast_Block;
+struct Ast_Block {
+  Ast_Decls* scope;
+  Ast_List*  list;
+};
+
 struct Ast_Node {
   Ast_Kind kind;
   Loc      loc;
@@ -117,12 +129,6 @@ struct Ast_Node {
     Ast_Decl  declare;
     Ast_Block block;
   };
-};
-
-typedef struct Ast_Decls Ast_Decls;
-struct Ast_Decls {
-  I32 length;
-  Ast_Decl base[];
 };
 
 typedef struct Parser Parser;
@@ -415,7 +421,7 @@ Cstr cstr_from_ast(Arena* arena, Ast_Block ast) {
 }
 
 
-Ast_Block parse_file(Sources* sources, Str_View file_path);
+Source*   parse_file(Sources* sources, Str_View file_path);
 Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_match);
 Ast_Node* parse_statement(Parser* parser);
 Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open);
@@ -1030,15 +1036,14 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     node->unary = unary;
     node->loc = loc_join(token.loc, unary->loc);
   } break;
-  case Token_Kind_str: {
-    node = parse_new_node(parser, Ast_Kind_str);
-    node->loc = token.loc;
-  } break;
+  case Token_Kind_str:
   case Token_Kind_int: case Token_Kind_float: case Token_Kind_name:
   {
     Ast_Kind kind = (Ast_Kind)token.kind & 0xff;
     node = parse_new_node(parser, kind);
     node->loc  = token.loc;
+    parser->sources->str_count++;
+    parser->sources->char_count += token.loc.end - token.loc.start;
   } break;
   case Token_Kind_if: {
     Ast_Node* cond = parse_new_expression(parser, 0);
@@ -1086,6 +1091,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
           exp->declare.lhs = lhs->loc;
           exp->declare.rhs = rhs;
           exp->loc = loc_join(lhs->loc, rhs->loc);
+          parser->sources->str_count++;
+          parser->sources->char_count += lhs->loc.end - lhs->loc.start;
         }
         else {
           parse_diag(parser, Diag_Code_bad_declaration_target, lhs->loc);
@@ -1140,16 +1147,14 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
       Ast_Node* lhs = parse_new_expression(parser, 0);
       B8 closed = parse_expect_close(parser, token, Token_Kind_brace_close, token.indent);
       if (!closed) return parse_error_node(parser, token.loc);
-      if (lhs && lhs->kind == Ast_Kind_error) return lhs;
+      if (lhs->kind == Ast_Kind_error) return lhs;
       I32 right_precedence = parse_right_precedence(kind, token.flag);
       Ast_Node* rhs = parse_new_expression(parser, right_precedence);
-      if (rhs && rhs->kind == Ast_Kind_error) return rhs;
+      if (rhs->kind == Ast_Kind_error) return rhs;
       node = parse_new_node(parser, kind);
       node->binary.lhs = lhs;
       node->binary.rhs = rhs;
-      node->loc = loc_join(token.loc,
-                           loc_join(lhs->loc,
-                                    rhs->loc));
+      node->loc = loc_join(token.loc, loc_join(lhs->loc, rhs->loc));
     }
   } break;
   default:
@@ -1191,7 +1196,7 @@ Ast_Node* parse_statement(Parser* parser) {
     if (parse_expect_token(parser, Token_Kind_str)) {
       Str_View path = token_str(token);
       node = parse_new_node(parser, Ast_Kind_import);
-      node->block = parse_file(parser->sources, path);
+      node->source = parse_file(parser->sources, path);
       node->loc = token.loc;
     }
   } break;
@@ -1282,6 +1287,8 @@ Ast_Node* parse_statement(Parser* parser) {
         node = parse_error_node(parser, current.loc);
       }
       else if (node->kind == Ast_Kind_name) {
+        parser->sources->str_count++;
+        parser->sources->char_count += node->loc.end - node->loc.start;
         if (parse_is_token(parser, Token_Kind_equal)) {
           // name : = exp
           Token equal = *parse_peek(parser);
@@ -1373,8 +1380,8 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
       break;
     }
     else if (current.kind == Token_Kind_curly_close
-         || current.kind == Token_Kind_paren_close
-         || current.kind == Token_Kind_brace_close) {
+         ||  current.kind == Token_Kind_paren_close
+         ||  current.kind == Token_Kind_brace_close) {
       parse_unmatched(parser, current);
       parse_advance(parser);
       continue;
@@ -1417,7 +1424,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
   return block;
 }
 
-Ast_Block parse_tokens(Sources* sources, Tokens tokens) {
+Ast_Node* parse_tokens(Sources* sources, Tokens tokens) {
   Parser parser = {0};
   parser.sources = sources;
   parser.perm_arena  = tokens.source->arena;
@@ -1429,31 +1436,33 @@ Ast_Block parse_tokens(Sources* sources, Tokens tokens) {
   parser.tok         = 1;
   parser.last_error_tok = -1;
 
-  Ast_Block block = parse_scope(&parser, Token_Kind_source_leave, (Token){0});
+  Ast_Block block  = parse_scope(&parser, Token_Kind_source_leave, (Token){0});
+  Ast_Node* result = parse_new_node(&parser, Ast_Kind_block);
+            result->block = block;
   sources->ast_count += parser.pool.length;
 
   arena_free(parser.list_arena);
   arena_free(parser.decls_arena);
-  return block;
+  return result;
 }
 
-Ast_Block parse_file(Sources* sources, Str_View file_path) {
+Source* parse_file(Sources* sources, Str_View file_path) {
   Source* source = sources_add(sources, file_path);
-  if (!source->ast.scope) {
+  if (!source->ast) {
     Tokens tokens = lex_source(source, &sources->diags);
     source->ast = parse_tokens(sources, tokens);
   }
-  return source->ast;
+  return source;
 }
 
 void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
   Source*   source  = sources_add_str_view(&sources, (Str_View){source_data, strlen(source_data)});
   Tokens    tokens  = lex_source(source, &sources.diags);
-  Ast_Block ast     = parse_tokens(&sources, tokens);
+  Ast_Node* ast     = parse_tokens(&sources, tokens);
   {
     Arena* arena     = arena_init(128 * sources.ast_count);
-    Cstr      result = cstr_from_ast(arena, ast);
+    Cstr      result = cstr_from_ast(arena, ast->block);
     test_at_source(result, expected, file_name, line, source_data);
     arena_free(arena);
   }

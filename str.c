@@ -18,8 +18,26 @@ struct String_Builder {
   Umi    cap;
 };
 
-Str_View str_view(Cstr start, Cstr end) {
+Str_View str_view_from_range(Cstr start, Cstr end) {
   Str_View result = { start, end - start };
+  return result;
+}
+
+Str_View str_view(Cstr cstr) {
+  Umi len = strlen(cstr);
+  Str_View result = { cstr, len };
+  return result;
+}
+
+Str_View str_view_cat(Str_View a, Str_View b) {
+  C8* base = xmalloc(a.length + b.length);
+  for (Umi i = 0; i < a.length; i++) {
+    base[i] = a.base[i];
+  }
+  for (Umi i = 0; i < b.length; i++) {
+    base[i+a.length] = b.base[i];
+  }
+  Str_View result = { base, a.length + b.length };
   return result;
 }
 
@@ -92,9 +110,11 @@ Str* str_from_cstr(Cstr cstr) {
   return str_from_range(cstr, end);
 }
 
-void str_init(Arena* arena, I32 capacity) {
+void str_init(I32 char_count, I32 str_count) {
+  I32 set_cap = hash_set_alloc_size(str_count);
+  Arena* arena = arena_init(char_count + str_count * set_cap);
   internal_strs.arena = arena;
-  internal_strs.set = hash_set_init(arena, capacity);
+  internal_strs.set = hash_set_init(arena, str_count);
 }
 
 void string_builder_reserve(String_Builder* sb, Umi extra) {

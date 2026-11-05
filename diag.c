@@ -100,6 +100,8 @@ typedef struct Sources Sources;
 struct Sources {
   I32         max_length;
   I32         ast_count;
+  I32         str_count;
+  I32         char_count;
   Source_Pool pool;
   Internal    paths;
   Diags       diags;

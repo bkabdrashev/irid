@@ -320,8 +320,6 @@ struct Fun_Stack {
 
 typedef struct Irgen Irgen;
 struct Irgen {
-  Ast_Block ast;
-
   Arena*  perm_arena;
   Arena*  temp_block_arena;
   Arena*  temp_var_arena;
@@ -1673,17 +1671,15 @@ Ir* irgen_ast_node(Ast_Node* node) {
   return result;
 }
 
-Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
+Funs irgen_ast(Arena* arena, Ast_Node* ast, I32 total_nodes, Diags* diags) {
   Arena* temp_block_arena = arena_init(arena->capacity);
   Arena* temp_var_arena   = arena_init(arena->capacity);
   Arena* temp_ir_arena    = arena_init(arena->capacity);
-  irgen.ast = ast;
   irgen.perm_arena = arena;
   irgen.temp_block_arena = temp_block_arena;
   irgen.temp_var_arena   = temp_var_arena;
   irgen.temp_ir_arena    = temp_ir_arena;
   irgen.diags = diags;
-  irgen.node_loc = LOC_NONE;
   irgen.funs.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Fun));
   irgen.funs.length    = 0;
   irgen.vars.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Var));
@@ -1779,10 +1775,7 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
   }
   irgen.fatal_ready = true;
 
-  irgen_scope_enter(ast.scope);
-  for (I32 i = 0; i < ast.list->length; i++) {
-    irgen_ast_node(ast.list->base[i]);
-  }
+  irgen_ast_node(ast);
   irgen_fun_leave();
   // irgen_scope_leave();
   // del(irgen.scope_stack);
@@ -1794,41 +1787,31 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
   return irgen.funs;
 }
 
-void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
-                        str_init(&arena, 2*length);
+void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
+  Sources   sources = sources_init(16, 256);
+  Str_View  prepend = str_view("use import \"basic.i\"\n");
+  Str_View  source_sv = str_view(source_data);
+  Str_View  combined = str_view_cat(prepend, source_sv);
+  Source*   source  = sources_add_str_view(&sources, combined);
+  Tokens    tokens  = lex_source(source, &sources.diags);
+  Ast_Node* ast     = parse_tokens(&sources, tokens);
+  str_init(sources.char_count, sources.str_count);
+  Arena* arena = arena_init(KB(1) * sources.ast_count);
 
-  Source_Map sources = {0};
-  Diags diags = diags_init(&arena, 256);
-  File_Id builtin_file = source_add(&sources, &arena, "basic.i", builtin, builtin_length);
-
-  Tokens builtin_tokens = lex_source(&arena, &sources, builtin_file, &diags);
-  Ast_Block ast         = parse_tokens(&arena, builtin_tokens, &diags);
-
-  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
-  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
-  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
-
-  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
-  node->block    = source_ast;
-
-  fa_init(&arena, ast.list, 1);
-  fa_add(ast.list, node);
-
-  Funs funs            = irgen_ast(&arena, ast, length, &diags);
+  Funs funs = irgen_ast(arena, ast, sources.ast_count, &sources.diags);
   {
-    Cstr result          = cstr_from_funs(&arena, funs);
-    test_at_source(result, expected, file_name, line, source);
+    Cstr result = cstr_from_funs(arena, funs);
+    test_at_source(result, expected, file_name, line, source_data);
   }
-  arena_free(&arena);
-
+  arena_free(source->arena);
+  sources_free(&sources);
 }
 
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  // test("foo:(a:I32) -> a do 1+2", "");
-  // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
+  test("foo:(a:I32) -> a do 1+2", "");
+  test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");

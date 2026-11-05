@@ -1,11 +1,4 @@
-typedef struct Ast_Decls Ast_Decls;
-typedef struct Ast_List Ast_List;
-typedef struct Ast_Block Ast_Block;
-struct Ast_Block {
-  Ast_Decls* scope;
-  Ast_List*  list;
-};
-
+typedef struct Ast_Node Ast_Node;
 typedef struct Source Source;
 struct Source {
   Arena* arena;
@@ -14,7 +7,7 @@ struct Source {
   Umi  length;
   U32* line_starts;
   I32  line_count;
-  Ast_Block ast;
+  Ast_Node* ast;
 };
 
 typedef struct Loc Loc;

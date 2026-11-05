@@ -49,15 +49,15 @@ typedef enum Token_Kind {
   Token_Kind_pipe_pipe          = 65,
   Token_Kind_amp_amp            = 67,
 
-  Token_Kind_name               = String_Kind_name | Token_Kind_Flag_call_rhs,
-  Token_Kind_if                 = String_Kind_if | Token_Kind_Flag_call_rhs,
-  Token_Kind_do                 = String_Kind_do,
-  Token_Kind_else               = String_Kind_else,
-  Token_Kind_return             = String_Kind_return,
-  Token_Kind_break              = String_Kind_break,
-  Token_Kind_while              = String_Kind_while,
-  Token_Kind_use                = String_Kind_use,
-  Token_Kind_import             = String_Kind_import,
+  Token_Kind_name               = 70 | Token_Kind_Flag_call_rhs,
+  Token_Kind_if                 = 71 | Token_Kind_Flag_call_rhs,
+  Token_Kind_do                 = 72,
+  Token_Kind_else               = 73,
+  Token_Kind_return             = 74,
+  Token_Kind_break              = 75,
+  Token_Kind_while              = 76,
+  Token_Kind_use                = 77,
+  Token_Kind_import             = 78,
 } Token_Kind;
 
 Cstr cstr_from_token_kind(Token_Kind kind) {
