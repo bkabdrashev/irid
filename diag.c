@@ -98,6 +98,7 @@ typedef struct {
 
 typedef struct Sources Sources;
 struct Sources {
+  Arena*      temp_arena;
   I32         max_length;
   I32         ast_count;
   I32         str_count;
@@ -115,9 +116,12 @@ Sources sources_init(I32 max_sources_count, I32 max_diags) {
   total_max_alloc += hash_set_alloc_size(max_sources_count);
   total_max_alloc += max_sources_count * 256;
   total_max_alloc += sizeof(Diag) * 256;
+  total_max_alloc += arena_alloc_size(KB(4)); // for temp stuff
   Arena* arena = arena_init(total_max_alloc);
+  Arena* temp  = arena_part(arena, KB(4));
 
   Sources sources = {};
+          sources.temp_arena = temp;
           sources.max_length = max_sources_count;
           sources.pool       = pool(arena, Source, max_sources_count);
           sources.paths      = internal_init(arena, max_sources_count);
@@ -176,10 +180,32 @@ Source* sources_add_str_view(Sources* sources, Str_View str_view) {
 Source* sources_add(Sources* sources, Str_View path) {
   if (sources->map.len >= sources->max_length) assert(0);
 
-  Str* internal_path = internal_from_str_view(sources->paths, path);
-  if (internal_path->length >= INT32_MAX) assert(0);
+  B8 is_extension_present = false;
+  for (I32 i = (I32)path.length - 1; i >= 0; i--) {
+    if (path.base[i] == '.') {
+      is_extension_present = true;
+      break;
+    }
+  }
 
+  Str_View extension = str_view("irid");
+  if (!is_extension_present) {
+    C8* new_base = arena_push(sources->temp_arena, path.length + 5);
+    for (Umi i = 0; i < path.length; i++) {
+      new_base[i] = path.base[i];
+    }
+    new_base[path.length] = '.';
+    for (Umi i = 0; i < extension.length; i++) {
+      new_base[i + path.length + 1] = extension.base[i];
+    }
+    path.base = new_base;
+    path.length += extension.length+1;
+  }
+
+  Str* internal_path = internal_from_str_view(sources->paths, path);
   Str_View file_view = file_read(internal_path->base);
+  if (file_view.length >= INT32_MAX) assert(0);
+
 
   Source* source = hash_map_get(sources->map, internal_path);
   if (!source) {

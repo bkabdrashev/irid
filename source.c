@@ -1,4 +1,5 @@
 typedef struct Ast_Node Ast_Node;
+typedef struct Decls Decls;
 typedef struct Source Source;
 struct Source {
   Arena* arena;
@@ -8,6 +9,7 @@ struct Source {
   U32* line_starts;
   I32  line_count;
   Ast_Node* ast;
+  Hash_Map* decls; // str->sym
 };
 
 typedef struct Loc Loc;

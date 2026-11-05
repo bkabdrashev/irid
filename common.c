@@ -299,8 +299,22 @@ typedef struct {
   I8    alignment;
 } Arena;
 
-Arena* arena_init(Umi capacity) {
+Umi arena_alloc_size(Umi capacity) {
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
   Umi total  = capacity * 2;
+#else
+  Umi total  = capacity;
+#endif
+  Umi size  = sizeof(Arena) + total;
+  return size;
+}
+
+Arena* arena_init(Umi capacity) {
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  Umi total  = capacity * 2;
+#else
+  Umi total  = capacity;
+#endif
   C8* memory = xmalloc(sizeof(Arena) + total);
   Arena* arena = (Arena*)memory;
          arena->base     = memory + sizeof(Arena);
@@ -332,6 +346,23 @@ void* arena_push(Arena* arena, Umi size) {
   arena->top = (C8*)arena->top + total;
   profile_arena_push(size, total);
   return result;
+}
+
+Arena* arena_part(Arena* arena, Umi capacity) {
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  Umi total = capacity * 2;
+#else
+  Umi total = capacity;
+#endif
+  Arena* new_arena = arena_push(arena, sizeof(Arena));
+         new_arena->base      = arena_push(arena, total);
+         new_arena->top       = new_arena->base;
+         new_arena->total     = total;
+         new_arena->capacity  = capacity;
+         new_arena->alignment = 8;
+
+  ASAN_POISON(new_arena->base, total);
+  return new_arena;
 }
 
 void* arena_push_zero(Arena* arena, Umi size) {
@@ -429,9 +460,9 @@ U64 hash_mix(U64 x, U64 y) {
 }
 
 // array
-#define pool(arena, type, max_length) (type ## _Pool){.base = arena_push_zero_type(arena, type, max_length), .length = 0 }
+#define pool(arena, type, max_length) (type ## _Pool){.base = arena_push_zero_type((arena), type, (max_length)), .length = 0 }
 #define empty(array) ((array).length == 0)
-#define push(array, item) ((array).base[(array).length++] = (item), ((array).length)-1)
+#define push(array, item) ((array).base[(array).length++] = (item), (array).base[(array).length-1])
 #define add(array, item) do {(array).base[(array).length++] = (item);} while (0)
 #define new(array) ((array).base[(array).length++])
 #define pop(array) ((array).base[--(array).length])
@@ -594,6 +625,7 @@ Umi hash_map_alloc_size(Umi capacity) {
   Umi result = sizeof(void*)*cap + sizeof(void*)*cap + sizeof(void*)*capacity;
   return result;
 }
+
 Hash_Map hash_map_init(Arena* arena, Umi capacity) {
   Hash_Map map = {};
   map.cap  = 2*power_of_2_up(capacity);
@@ -601,6 +633,12 @@ Hash_Map hash_map_init(Arena* arena, Umi capacity) {
   map.keys = arena_push_zero(arena, sizeof(void*)*map.cap);
   map.list = arena_push_zero(arena, sizeof(void*)*capacity);
   map.vals = arena_push(arena, sizeof(void*)*map.cap);
+  return map;
+}
+
+Hash_Map* hash_map_new(Arena* arena, Umi capacity) {
+  Hash_Map* map = arena_push_type(arena, Hash_Map, 1);
+  *map = hash_map_init(arena, capacity);
   return map;
 }
 

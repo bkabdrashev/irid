@@ -18,6 +18,20 @@ struct String_Builder {
   Umi    cap;
 };
 
+B8 str_view_is_equal(Str_View a, Str_View b) {
+  B8 result = false;
+  if (a.length == b.length) {
+    result = true;
+    for (Umi i = 0; i < a.length; i++) {
+      if (a.base[i] != b.base[i]) {
+        result = false;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
 Str_View str_view_from_range(Cstr start, Cstr end) {
   Str_View result = { start, end - start };
   return result;
@@ -39,6 +53,10 @@ Str_View str_view_cat(Str_View a, Str_View b) {
   }
   Str_View result = { base, a.length + b.length };
   return result;
+}
+
+void str_view_free(Str_View sv) {
+  free((C8*)sv.base);
 }
 
 Internal internal_strs  = {0};
@@ -115,6 +133,10 @@ void str_init(I32 char_count, I32 str_count) {
   Arena* arena = arena_init(char_count + str_count * set_cap);
   internal_strs.arena = arena;
   internal_strs.set = hash_set_init(arena, str_count);
+}
+
+void str_free() {
+  arena_free(internal_strs.arena);
 }
 
 void string_builder_reserve(String_Builder* sb, Umi extra) {

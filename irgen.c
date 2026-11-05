@@ -288,10 +288,16 @@ struct Rec_Pool {
   Rec* base;
 };
 
-typedef struct Scope_Stack Scope_Stack;
-struct Scope_Stack {
+typedef struct Hash_Map_Pool Hash_Map_Pool;
+struct Hash_Map_Pool {
   Hash_Map* base;
   I32       length;
+};
+
+typedef struct Scope_Stack Scope_Stack;
+struct Scope_Stack {
+  Hash_Map** base;
+  I32        length;
 };
 
 typedef enum Fun_Kind {
@@ -389,6 +395,7 @@ Diag* irgen_diag_impl(Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_
 
 void irgen_fail(void) {
   if (irgen.fatal_ready) {
+    assert(0);
     longjmp(irgen.fatal, 1);
   }
   assert(0);
@@ -962,14 +969,14 @@ Block* irgen_block_return(void) {
 Ir* irgen_ast_node(Ast_Node* node);
 
 void irgen_sym_put(Str* str, Sym* sym) {
-  Hash_Map* scope = &top(irgen.scope_stack);
+  Hash_Map* scope = top(irgen.scope_stack);
   hash_map_put(scope, str, sym);
 }
 
 Sym* irgen_sym_get(Str* str) {
   for (I32 i = irgen.scope_stack.length - 1; i >= 0; i--) {
-    Hash_Map scope = irgen.scope_stack.base[i];
-    Sym* sym = hash_map_get(scope, str);
+    Hash_Map* scope = irgen.scope_stack.base[i];
+    Sym* sym = hash_map_get(*scope, str);
     if (sym) {
       return sym;
     }
@@ -1007,13 +1014,13 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
 }
 
 void irgen_scope_enter(Ast_Decls* decls) {
-  Hash_Map scope = hash_map_init(irgen.perm_arena, decls->length);
+  Hash_Map* scope = hash_map_new(irgen.perm_arena, decls->length);
   for (I32 i = 0; i < decls->length; i++) {
     Ast_Decl decl = decls->base[i];
     Str* key = str_from_loc(decl.lhs);
     Sym* sym = &new(irgen.syms);
     sym->ast = decl.rhs;
-    hash_map_put(&scope, key, sym);
+    hash_map_put(scope, key, sym);
     Sym* previous = irgen_sym_get(key);
     if (previous) {
       Diag* diag = irgen_diag(Diag_Code_shadowed_declaration, sym->loc);
@@ -1035,19 +1042,20 @@ void irgen_scope_enter(Ast_Decls* decls) {
   }
   add(irgen.scope_stack, scope);
 
-  for (I32 i = 0; i < scope.len; i++) {
-    Str* key = scope.list[i];
-    Sym* sym = hash_map_get(scope, key);
+  for (I32 i = 0; i < scope->len; i++) {
+    Str* key = scope->list[i];
+    Sym* sym = hash_map_get(*scope, key);
     irgen_var_declare(sym->ir->var, sym->ast);
     irgen_push_declare(sym->ir->var);
   }
 }
 
-void irgen_scope_leave(void) {
-  del(irgen.scope_stack);
+Hash_Map* irgen_scope_leave(void) {
+  Hash_Map* scope = pop(irgen.scope_stack);
   while (irgen.uses && irgen.uses->depth > irgen.scope_stack.length) {
     irgen.uses = irgen.uses->next;
   }
+  return scope;
 }
 
 Fun* irgen_fun_enter(void) {
@@ -1105,9 +1113,7 @@ Fun* irgen_fun_leave(void) {
 void irgen_builtin_enter(void) {
   // foreign : (c: (str:Str) -> (fun: @Type) -> @Fun)
   // len : (record: @Type) -> I32
-  // TODO: this copies/deletes too much,
-  // may be scope_stack has pointers to scopes instead?
-  add(irgen.scope_stack, irgen.builtins);
+  add(irgen.scope_stack, &irgen.builtins);
 }
 
 void irgen_builtin_leave(void) {
@@ -1239,6 +1245,12 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_use(base);
   } break;
   case Ast_Kind_import: {
+    if (node->source->ast) {
+      Ast_Decls* ast_decls = node->source->ast->block.scope;
+      // TODO: Scope should be seperate per file
+      irgen_scope_enter(ast_decls);
+      node->source->decls = irgen_scope_leave();
+    }
     result = irgen_push_import(node->source);
   } break;
   case Ast_Kind_dot: {
@@ -1609,7 +1621,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       Ast_Node* lhs = node->binary.lhs->binary.lhs;
       if (lhs->kind == Ast_Kind_record) {
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
-        add(irgen.scope_stack, scope);
+        add(irgen.scope_stack, &scope);
         arg_var->name = str_from_cstr("__arg");
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
@@ -1627,7 +1639,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
       else if (lhs->kind == Ast_Kind_declare) {
         scope = hash_map_init(irgen.perm_arena, 1);
-        add(irgen.scope_stack, scope);
+        add(irgen.scope_stack, &scope);
         arg_var->name = str_from_loc(lhs->declare.lhs);
         Sym* sym = arena_push_zero(irgen.perm_arena, sizeof(Sym));
         sym->kind = Sym_Kind_variable;
@@ -1641,7 +1653,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
       else if (lhs->kind == Ast_Kind_name) {
         scope = hash_map_init(irgen.perm_arena, 1);
-        add(irgen.scope_stack, scope);
+        add(irgen.scope_stack, &scope);
         arg_var->name = str_from_loc(lhs->loc);
         Sym* sym = arena_push_zero(irgen.perm_arena, sizeof(Sym));
         sym->kind = Sym_Kind_parameter;
@@ -1701,17 +1713,17 @@ Fun_Pool irgen_ast(Arena* arena, Ast_Node* ast, I32 total_nodes, Diags* diags) {
   Arena* temp_block_arena = arena_init(arena->capacity);
   Arena* temp_var_arena   = arena_init(arena->capacity);
   Arena* temp_ir_arena    = arena_init(arena->capacity);
-  irgen.perm_arena = arena;
+  irgen.perm_arena       = arena;
   irgen.temp_block_arena = temp_block_arena;
   irgen.temp_var_arena   = temp_var_arena;
   irgen.temp_ir_arena    = temp_ir_arena;
   irgen.diags = diags;
-  irgen.funs    = pool(irgen.perm_arena, Fun,   total_nodes);
-  irgen.syms    = pool(irgen.perm_arena, Sym,   total_nodes);
-  irgen.vars    = pool(irgen.perm_arena, Var,   total_nodes);
-  irgen.blocks  = pool(irgen.perm_arena, Block, total_nodes);
-  irgen.irs     = pool(irgen.perm_arena, Ir,    total_nodes);
-  irgen.records = pool(irgen.perm_arena, Rec,   total_nodes);
+  irgen.funs    = pool(irgen.perm_arena, Fun,      total_nodes);
+  irgen.syms    = pool(irgen.perm_arena, Sym,      total_nodes);
+  irgen.vars    = pool(irgen.perm_arena, Var,      total_nodes);
+  irgen.blocks  = pool(irgen.perm_arena, Block,    total_nodes);
+  irgen.irs     = pool(irgen.perm_arena, Ir,       total_nodes);
+  irgen.records = pool(irgen.perm_arena, Rec,      total_nodes);
   irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
   irgen.scope_stack.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Hash_Map*));
@@ -1811,7 +1823,7 @@ Fun_Pool irgen_ast(Arena* arena, Ast_Node* ast, I32 total_nodes, Diags* diags) {
 
 void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
-  Str_View  prepend = str_view("use import \"basic.i\"\n");
+  Str_View  prepend = str_view("use import \"basic\"\n");
   Str_View  source_sv = str_view(source_data);
   Str_View  combined = str_view_cat(prepend, source_sv);
   Source*   source  = sources_add_str_view(&sources, combined);
@@ -1825,7 +1837,10 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
     Cstr result = cstr_from_funs(arena, funs);
     test_at_source(result, expected, file_name, line, source_data);
   }
+  arena_free(arena);
+  str_free();
   arena_free(source->arena);
+  str_view_free(combined);
   sources_free(&sources);
 }
 
