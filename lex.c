@@ -29,7 +29,7 @@ typedef struct {
 } Lexer;
 
 Str_View token_str(Token token) {
-  Str_View str_view = loc_str_view(token.loc);
+  Str_View str_view = str_view_from_loc(token.loc);
   str_view.base   += 1;
   str_view.length -= 1;
   return str_view;
@@ -169,7 +169,7 @@ Tokens lex_source(Source* source, Diags* diags) {
         }
         if (base == 10 && (*lexer.stream == 'e' || *lexer.stream == 'E')
             && (isdigit((U8)lex_peek(1))
-             || ((lex_peek(1) == '+' || lex_peek(1) == '-') && isdigit((U8)lex_peek(2))))) {
+            || ((lex_peek(1) == '+' || lex_peek(1) == '-') && isdigit((U8)lex_peek(2))))) {
           break;
         }
         I32 digit = 16;
@@ -220,7 +220,7 @@ Tokens lex_source(Source* source, Diags* diags) {
       }
       if (has_prefix && !saw_digit && lexer.diags) {
         Diag* diag = diag_error(lexer.diags, Diag_Code_missing_digits, lex_loc(number_start, lexer.stream));
-        if (diag) diag->data.text.text = prefix;
+        if (diag) diag->data.text = prefix;
       }
       B8 is_float = false;
       if (base == 10) {
@@ -302,7 +302,7 @@ Tokens lex_source(Source* source, Diags* diags) {
         lex_advance();
       }
       Umi length = lexer.stream - start;
-      if (strncmp("while", start, length) == 0)       token.kind = Token_Kind_while;
+      if (strncmp("while", start, length) == 0)  token.kind = Token_Kind_while;
       else if (strncmp("if", start, length) == 0)     token.kind = Token_Kind_if;
       else if (strncmp("else", start, length) == 0)   token.kind = Token_Kind_else;
       else if (strncmp("do", start, length) == 0)     token.kind = Token_Kind_do;
@@ -530,7 +530,7 @@ Tokens lex_source(Source* source, Diags* diags) {
     default: {
       if (lexer.diags) {
         Diag* diag = diag_error(lexer.diags, Diag_Code_unknown_character, lex_loc(lexer.stream, lexer.stream + 1));
-        if (diag) diag->data.unknown_char.byte = (U8)*lexer.stream;
+        if (diag) diag->data.unknown_char = (U8)*lexer.stream;
       }
       token.kind = Token_Kind_error;
       lex_advance();
@@ -596,7 +596,7 @@ Cstr cstr_from_tokens(Arena* arena, Tokens tokens) {
     case Token_Kind_int:
     case Token_Kind_str:
     case Token_Kind_float: {
-      Str_View str_view = loc_str_view(token->loc);
+      Str_View str_view = str_view_from_loc(token->loc);
       string_builder_push_str_view(&sb, str_view);
     } break;
     case Token_Kind_plus:

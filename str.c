@@ -1,21 +1,7 @@
-typedef enum String_Kind {
-  String_Kind_none   = 0,
-  String_Kind_name   = 128 | (1 << 9),
-  String_Kind_if     = 129 | (1 << 9),
-  String_Kind_do     = 139,
-  String_Kind_else   = 140,
-  String_Kind_return = 141,
-  String_Kind_break  = 142,
-  String_Kind_while  = 143,
-  String_Kind_use    = 144,
-  String_Kind_import = 145,
-} String_Kind;
-
 typedef struct Str Str;
 struct Str {
-  String_Kind kind;
-  I32         length;
-  C8          base[];
+  I32 length;
+  C8  base[];
 };
 
 typedef struct Internal Internal;
@@ -39,9 +25,6 @@ Str_View str_view(Cstr start, Cstr end) {
 
 Internal internal_strs  = {0};
 const Str* str_nil = {0};
-String_Kind token_kind_from_str(Str* str) {
-  return str->kind;
-}
 
 Cstr cstr_from_str(Str* str) {
   return str->base;
@@ -63,7 +46,6 @@ Str* internal_from_range(Internal internal, Cstr begin, Cstr end) {
     if (!str) {
       Str* new_str = arena_push(internal.arena, sizeof(Str) + (len+1) * sizeof(C8));
       new_str->length = len;
-      new_str->kind   = String_Kind_name;
       for (I32 j = 0; j < len; j++) {
         new_str->base[j] = begin[j];
       }
@@ -76,38 +58,6 @@ Str* internal_from_range(Internal internal, Cstr begin, Cstr end) {
         I32 j = 0;
         for (; j < str->length; j++) {
           if (str->base[j] != begin[j]) {
-            break;
-          }
-        }
-        if (j == str->length) return str;
-      }
-    }
-    i++;
-  }
-}
-
-Str* str_from_cstr_with_kind(Cstr cstr, String_Kind kind) {
-  I32 len = strlen(cstr);
-  I32 i = hash_bytes(cstr, len);
-  for (;;) {
-    i &= internal_strs.set.cap - 1;
-    Str* str = internal_strs.set.keys[i];
-    if (!str) {
-      Str* new_str = arena_push(internal_strs.arena, sizeof(Str) + (len+1) * sizeof(C8));
-      new_str->length = len;
-      new_str->kind = kind;
-      for (I32 j = 0; j < len; j++) {
-        new_str->base[j] = cstr[j];
-      }
-      new_str->base[len] = '\0';
-      internal_strs.set.keys[i] = new_str;
-      return new_str;
-    }
-    else {
-      if (str->length == len) {
-        I32 j = 0;
-        for (; j < str->length; j++) {
-          if (str->base[j] != cstr[j]) {
             break;
           }
         }
@@ -132,6 +82,10 @@ Str* internal_from_str_view(Internal internal, Str_View str_view) {
   return internal_from_range(internal, str_view.base, str_view.base + str_view.length);
 }
 
+Str* str_from_str_view(Str_View str_view) {
+  return internal_from_str_view(internal_strs, str_view);
+}
+
 Str* str_from_cstr(Cstr cstr) {
   I32 len = strlen(cstr);
   Cstr end = cstr + len;
@@ -141,14 +95,6 @@ Str* str_from_cstr(Cstr cstr) {
 void str_init(Arena* arena, I32 capacity) {
   internal_strs.arena = arena;
   internal_strs.set = hash_set_init(arena, capacity);
-  str_from_cstr_with_kind("if", String_Kind_if);
-  str_from_cstr_with_kind("do", String_Kind_do);
-  str_from_cstr_with_kind("else", String_Kind_else);
-  str_from_cstr_with_kind("return", String_Kind_return);
-  str_from_cstr_with_kind("while", String_Kind_while);
-  str_from_cstr_with_kind("break", String_Kind_break);
-  str_from_cstr_with_kind("use",   String_Kind_use);
-  str_from_cstr_with_kind("import", String_Kind_import);
 }
 
 void string_builder_reserve(String_Builder* sb, Umi extra) {

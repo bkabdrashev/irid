@@ -47,7 +47,9 @@ typedef enum Ir_Kind {
   Ir_Kind_var       = Ast_Kind_name,
   Ir_Kind_declare   = Ast_Kind_declare,
   Ir_Kind_ptr       = Ast_Kind_ptr | Ir_Flag_unary,
-  Ir_Kind_store     = 128 | Ir_Flag_binary,
+  Ir_Kind_store     = Ast_Kind_assign | Ir_Flag_binary,
+
+  Ir_Kind_import = Ast_Kind_import,
 
   Ir_Kind_record          = 131,
   Ir_Kind_position_offset = 132,
@@ -163,6 +165,7 @@ struct Ir {
     Rec*    rec;
     Ir_Pair binary;
     Ir*     unary;
+    Source* source;
     Position_Offset position;
     Name_Offset     name_offset;
     Maybe_Using     maybe_using;
@@ -285,6 +288,12 @@ struct Rec_Pool {
   Rec* base;
 };
 
+typedef struct Scope_Stack Scope_Stack;
+struct Scope_Stack {
+  Hash_Map* base;
+  I32       length;
+};
+
 typedef enum Fun_Kind {
   Fun_Kind_none  = 0,
   Fun_Kind_macro = 1,
@@ -368,14 +377,14 @@ void irgen_fail(void) {
 void irgen_error_name_impl(Diag_Code code, Loc loc, Str* name,
                            Cstr compiler_file, I32 compiler_line) {
   Diag* diag = irgen_diag_impl(code, loc, compiler_file, compiler_line);
-  if (diag) diag->data.name.name = name;
+  if (diag) diag->data.name = name;
   irgen_fail();
 }
 
 void irgen_error_text_impl(Diag_Code code, Loc loc, Cstr text,
                            Cstr compiler_file, I32 compiler_line) {
   Diag* diag = irgen_diag_impl(code, loc, compiler_file, compiler_line);
-  if (diag) diag->data.text.text = text;
+  if (diag) diag->data.text = text;
   irgen_fail();
 }
 
@@ -403,7 +412,7 @@ Ir_Field irgen_record_get_by_position(Rec* record, I32 position) {
 }
 
 Ir_Field irgen_record_get_by_name(Rec* record, Str* name) {
-  I32 position = hash_map_get_i32(&record->position_from_name, name);
+  I32 position = hash_map_get_i32(record->position_from_name, name);
   Ir_Field field = irgen_record_get_by_position(record, position);
   return field;
 }
@@ -833,6 +842,11 @@ Ir* irgen_push_use(Ir* base) {
   return irgen_push(ir);
 }
 
+Ir* irgen_push_import(Source* source) {
+  Ir ir = { .kind = Ir_Kind_import, .source = source };
+  return irgen_push(ir);
+}
+
 Ir* irgen_push_declare(Var* var) {
   Ir ir = { .kind = Ir_Kind_declare, .declare = { .var = var }};
   return irgen_push(ir);
@@ -926,13 +940,13 @@ Block* irgen_block_return(void) {
 Ir* irgen_ast_node(Ast_Node* node);
 
 void irgen_sym_put(Str* str, Symbol* sym) {
-  Hash_Map* scope = top(irgen.scope_stack);
+  Hash_Map* scope = &top(irgen.scope_stack);
   hash_map_put(scope, str, sym);
 }
 
 Symbol* irgen_sym_get(Str* str) {
   for (I32 i = irgen.scope_stack.length - 1; i >= 0; i--) {
-    Hash_Map* scope = irgen.scope_stack.base[i];
+    Hash_Map scope = irgen.scope_stack.base[i];
     Symbol* sym = hash_map_get(scope, str);
     if (sym) {
       return sym;
@@ -970,19 +984,20 @@ void irgen_var_declare(Var* var, Ast_Node* node) {
   del(irgen.fun_stack);
 }
 
-void irgen_scope_enter(Hash_Map* scope) {
-  for (I32 i = 0; i < scope->len; i++) {
-    Str* key = scope->list[i];
+void irgen_scope_enter(Ast_Decls* decls) {
+  Hash_Map scope = hash_map_init(irgen.perm_arena, decls->length);
+  for (I32 i = 0; i < decls->length; i++) {
+    Ast_Decl decl = decls->base[i];
+    Str* key = str_from_loc(decl.lhs);
     Symbol* sym = hash_map_get(scope, key);
     Symbol* previous = irgen_sym_get(key);
-    if (previous && loc_is_valid(sym->loc) && loc_is_valid(previous->loc)) {
+    if (previous) {
       Diag* diag = irgen_diag(Diag_Code_shadowed_declaration, sym->loc);
       if (diag) {
-        diag->data.name.name = key;
+        diag->data.name = key;
         I32 parent = (I32)(diag - irgen.diags->base);
-        Diag* note = diag_note(irgen.diags, parent,
-                               Diag_Code_previous_declaration, previous->loc);
-        if (note) note->data.name.name = key;
+        Diag* note = diag_note(irgen.diags, parent, Diag_Code_previous_declaration, previous->loc);
+        if (note) note->data.name = key;
       }
       irgen_fail();
     }
@@ -996,8 +1011,8 @@ void irgen_scope_enter(Hash_Map* scope) {
   }
   add(irgen.scope_stack, scope);
 
-  for (I32 i = 0; i < scope->len; i++) {
-    Str* key = scope->list[i];
+  for (I32 i = 0; i < scope.len; i++) {
+    Str* key = scope.list[i];
     Symbol* sym = hash_map_get(scope, key);
     irgen_var_declare(sym->ir->var, sym->ast);
     irgen_push_declare(sym->ir->var);
@@ -1066,7 +1081,9 @@ Fun* irgen_fun_leave(void) {
 void irgen_builtin_enter(void) {
   // foreign : (c: (str:Str) -> (fun: @Type) -> @Fun)
   // len : (record: @Type) -> I32
-  add(irgen.scope_stack, &irgen.builtins);
+  // TODO: this copies/deletes too much,
+  // may be scope_stack has pointers to scopes instead?
+  add(irgen.scope_stack, irgen.builtins);
 }
 
 void irgen_builtin_leave(void) {
@@ -1076,7 +1093,8 @@ void irgen_builtin_leave(void) {
 void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   switch (lhs->kind) {
   case Ast_Kind_name: {
-    Symbol* sym = irgen_sym_get(lhs->str);
+    Str* str = str_from_loc(lhs->loc);
+    Symbol* sym = irgen_sym_get(str);
     if (sym) {
       if (sym->kind == Symbol_Kind_variable) {
         irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
@@ -1085,39 +1103,39 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
         irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
       }
       else {
-        irgen_error_name(Diag_Code_not_assignable, lhs->loc, lhs->str);
+        irgen_error_name(Diag_Code_not_assignable, lhs->loc, str);
       }
     }
     else if (irgen.uses) {
-      Ir* var = irgen_push_maybe_using(lhs->str, irgen.uses);
+      Ir* var = irgen_push_maybe_using(str, irgen.uses);
       irgen_push_binary(Ir_Kind_store, var, rhs);
     }
     else {
-      irgen_error_name(Diag_Code_undefined_name, lhs->loc, lhs->str);
+      irgen_error_name(Diag_Code_undefined_name, lhs->loc, str);
     }
   } break;
   case Ast_Kind_declare: {
-    Symbol* sym = irgen_sym_get(lhs->declare.name);
+    Str* str = str_from_loc(lhs->declare.lhs);
+    Symbol* sym = irgen_sym_get(str);
     if (sym) {
       Diag* diag = irgen_diag(Diag_Code_shadowed_declaration, lhs->loc);
       if (diag) {
-        diag->data.name.name = lhs->declare.name;
+        diag->data.name = str;
         I32 parent = (I32)(diag - irgen.diags->base);
-        Diag* note = diag_note(irgen.diags, parent,
-                               Diag_Code_previous_declaration, sym->loc);
-        if (note) note->data.name.name = lhs->declare.name;
+        Diag* note = diag_note(irgen.diags, parent, Diag_Code_previous_declaration, sym->loc);
+        if (note) note->data.name = str;
       }
       irgen_fail();
     }
     else {
       Var* var = irgen_var_new();
-      var->name = lhs->declare.name;
+      var->name = str;
       sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
       sym->kind = Symbol_Kind_variable;
       sym->ast = 0;
       sym->loc = lhs->loc;
       sym->ir = irgen_push_var(var);
-      irgen_var_declare(var, lhs->declare.node);
+      irgen_var_declare(var, lhs->declare.rhs);
       irgen_sym_put(var->name, sym);
       irgen_push_binary(Ir_Kind_store, sym->ir, rhs);
     }
@@ -1138,13 +1156,12 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
   } break;
   default : {
     Ir* lhs_ir = irgen_ast_node(lhs);
-    if (lhs_ir && lhs_ir->kind == Ir_Kind_load) {
+    if (lhs_ir->kind == Ir_Kind_load) {
       lhs_ir->kind = Ir_Kind_store;
       lhs_ir->binary.two = rhs;
     }
     else {
-      irgen_error_simple(Diag_Code_invalid_assignment_target,
-                         lhs ? lhs->loc : LOC_NONE);
+      irgen_error_simple(Diag_Code_invalid_assignment_target, lhs->loc);
     }
   } break;
   }
@@ -1152,10 +1169,7 @@ void irgen_assign(Ast_Node* lhs, Ir* rhs) {
 
 Ir* irgen_ast_node(Ast_Node* node) {
   Loc saved_loc = irgen.node_loc;
-  irgen.node_loc = node ? node->loc : LOC_NONE;
-  if (!node) {
-    irgen_error_text(Diag_Code_unsupported_construct, LOC_NONE, "empty expression");
-  }
+  irgen.node_loc = node->loc;
   Ir* result = 0;
   switch (node->kind) {
   case Ast_Kind_error: {
@@ -1163,16 +1177,20 @@ Ir* irgen_ast_node(Ast_Node* node) {
     return 0;
   } break;
   case Ast_Kind_int: {
-    result = irgen_push_int(node->i64);
+    I64 i64 = i64_from_loc(node->loc);
+    result = irgen_push_int(i64);
   } break;
   case Ast_Kind_float: {
-    result = irgen_push_float(node->f64);
+    I64 f64 = f64_from_loc(node->loc);
+    result = irgen_push_float(f64);
   } break;
   case Ast_Kind_str: {
-    result = irgen_push_str(node->str);
+    Str* str = str_from_loc(node->loc);
+    result = irgen_push_str(str);
   } break;
   case Ast_Kind_name: {
-    Symbol* sym = irgen_sym_get(node->str);
+    Str* str = str_from_loc(node->loc);
+    Symbol* sym = irgen_sym_get(str);
     if (sym) {
       if (sym->kind == Symbol_Kind_variable) {
         result = irgen_push_unary(Ir_Kind_load, sym->ir);
@@ -1184,11 +1202,11 @@ Ir* irgen_ast_node(Ast_Node* node) {
         result = sym->ir;
       }
       else {
-        irgen_error_name(Diag_Code_undefined_name, node->loc, node->str);
+        irgen_error_name(Diag_Code_undefined_name, node->loc, str);
       }
     }
     else {
-      Ir* maybe = irgen_push_maybe_using(node->str, irgen.uses);
+      Ir* maybe = irgen_push_maybe_using(str, irgen.uses);
       result = irgen_push_unary(Ir_Kind_load, maybe);
     }
   } break;
@@ -1197,31 +1215,32 @@ Ir* irgen_ast_node(Ast_Node* node) {
     result = irgen_push_use(base);
   } break;
   case Ast_Kind_import: {
-    irgen_file(node->str);
-    result = irgen_push_unary(base);
+    result = irgen_push_import(node->source);
   } break;
   case Ast_Kind_dot: {
     Ir* lhs = irgen_ast_node(node->binary.lhs);
     if (node->binary.rhs->kind == Ast_Kind_name) {
+      Str* str = str_from_loc(node->binary.rhs->loc);
       if (lhs->kind == Ir_Kind_load) {
         lhs->kind = Ir_Kind_name_offset;
         lhs->name_offset.of = lhs->unary;
-        lhs->name_offset.at = node->binary.rhs->str;
+        lhs->name_offset.at = str;
         result = irgen_push_unary(Ir_Kind_load, lhs);
       }
       else {
-        result = irgen_push_name_offset(lhs, node->binary.rhs->str);
+        result = irgen_push_name_offset(lhs, str);
       }
     }
     else if (node->binary.rhs->kind == Ast_Kind_int) {
+      I64 i64 = i64_from_loc(node->binary.rhs->loc);
       if (lhs->kind == Ir_Kind_load) {
         lhs->kind = Ir_Kind_position_offset;
         lhs->position.of = lhs->unary;
-        lhs->position.at = node->binary.rhs->i64;
+        lhs->position.at = i64;
         result = irgen_push_unary(Ir_Kind_load, lhs);
       }
       else {
-        result = irgen_push_position_offset(lhs, node->binary.rhs->i64);
+        result = irgen_push_position_offset(lhs, i64);
       }
     }
     else {
@@ -1234,23 +1253,23 @@ Ir* irgen_ast_node(Ast_Node* node) {
   } break;
   case Ast_Kind_record: {
     Rec* rec = irgen_record_new(node->list->length);
-    Hash_Map scope = hash_map_init(irgen.perm_arena, rec->length);
+    I32 size = sizeof(Ast_Decls) + node->list->length * sizeof(Ast_Decl);
+    Ast_Decls* decls = arena_push(irgen.perm_arena, size);
     for (I32 i = 0; i < node->list->length; i++) {
       Ast_Node* field_node = node->list->base[i];
       if (field_node->kind == Ast_Kind_declare) {
-        Symbol* sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
-        sym->ast = field_node->declare.node;
-        hash_map_put(&scope, field_node->declare.name, sym);
+        fa_add(decls, field_node->declare);
       }
     }
-    irgen_scope_enter(&scope);
+    irgen_scope_enter(decls);
 
     for (I32 i = 0; i < node->list->length; i++) {
       Ast_Node* field_node = node->list->base[i];
       if (field_node->kind == Ast_Kind_declare) {
-        Ir* ir = irgen_ast_node(field_node->declare.node);
-        hash_map_put_i32(&rec->position_from_name, field_node->declare.name, i);
-        rec->names[i] = field_node->declare.name;
+        Str* str = str_from_loc(field_node->declare.lhs);
+        Ir* ir = irgen_ast_node(field_node->declare.rhs);
+        hash_map_put_i32(&rec->position_from_name, str, i);
+        rec->names[i] = str;
         rec->irs[i]   = ir;
       }
       else {
@@ -1265,9 +1284,10 @@ Ir* irgen_ast_node(Ast_Node* node) {
 
   case Ast_Kind_declare: {
     Rec* record = irgen_record_new(1);
-    Ir* ir = irgen_ast_node(node->declare.node);
-    hash_map_put_i32(&record->position_from_name, node->declare.name, 0);
-    record->names[0] = node->declare.name;
+    Str* str = str_from_loc(node->declare.lhs);
+    Ir* ir = irgen_ast_node(node->declare.rhs);
+    hash_map_put_i32(&record->position_from_name, str, 0);
+    record->names[0] = str;
     record->irs[0]   = ir;
     result = irgen_push_record(record);
   } break;
@@ -1565,7 +1585,7 @@ Ir* irgen_ast_node(Ast_Node* node) {
       Ast_Node* lhs = node->binary.lhs->binary.lhs;
       if (lhs->kind == Ast_Kind_record) {
         scope = hash_map_init(irgen.perm_arena, lhs->list->length);
-        add(irgen.scope_stack, &scope);
+        add(irgen.scope_stack, scope);
         arg_var->name = str_from_cstr("__arg");
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
@@ -1583,22 +1603,22 @@ Ir* irgen_ast_node(Ast_Node* node) {
       }
       else if (lhs->kind == Ast_Kind_declare) {
         scope = hash_map_init(irgen.perm_arena, 1);
-        add(irgen.scope_stack, &scope);
-        arg_var->name = lhs->declare.name;
+        add(irgen.scope_stack, scope);
+        arg_var->name = str_from_loc(lhs->declare.lhs);
         Symbol* sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
         sym->kind = Symbol_Kind_variable;
-        sym->ast = lhs->declare.node;
+        sym->ast = lhs->declare.rhs;
         sym->loc = lhs->loc;
         sym->ir = irgen_push_arg(arg_var);
         fun->arg_var = sym->ir;
-        irgen_var_declare(arg_var, lhs->declare.node);
+        irgen_var_declare(arg_var, lhs->declare.rhs);
         irgen_push_declare(arg_var);
         irgen_sym_put(arg_var->name, sym);
       }
       else if (lhs->kind == Ast_Kind_name) {
         scope = hash_map_init(irgen.perm_arena, 1);
-        add(irgen.scope_stack, &scope);
-        arg_var->name = lhs->str;
+        add(irgen.scope_stack, scope);
+        arg_var->name = str_from_loc(lhs->loc);
         Symbol* sym = arena_push_zero(irgen.perm_arena, sizeof(Symbol));
         sym->kind = Symbol_Kind_parameter;
         sym->loc = lhs->loc;
@@ -1654,14 +1674,14 @@ Ir* irgen_ast_node(Ast_Node* node) {
 }
 
 Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
-  Arena temp_block_arena = arena_init(arena->capacity);
-  Arena temp_var_arena   = arena_init(arena->capacity);
-  Arena temp_ir_arena    = arena_init(arena->capacity);
+  Arena* temp_block_arena = arena_init(arena->capacity);
+  Arena* temp_var_arena   = arena_init(arena->capacity);
+  Arena* temp_ir_arena    = arena_init(arena->capacity);
   irgen.ast = ast;
   irgen.perm_arena = arena;
-  irgen.temp_block_arena = &temp_block_arena;
-  irgen.temp_var_arena   = &temp_var_arena;
-  irgen.temp_ir_arena    = &temp_ir_arena;
+  irgen.temp_block_arena = temp_block_arena;
+  irgen.temp_var_arena   = temp_var_arena;
+  irgen.temp_ir_arena    = temp_ir_arena;
   irgen.diags = diags;
   irgen.node_loc = LOC_NONE;
   irgen.funs.base      = arena_push(irgen.perm_arena, total_nodes * sizeof(Fun));
@@ -1775,11 +1795,6 @@ Funs irgen_ast(Arena* arena, Ast_Block ast, I32 total_nodes, Diags* diags) {
 }
 
 void _test_ir(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Cstr builtin        = file_read("basic.i");
-  I32  builtin_length = (I32)file_size("basic.i");
-  I32  source_length  = strlen(source);
-  I32  length         = source_length + builtin_length + 32;
-
   Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
                         str_init(&arena, 2*length);
 

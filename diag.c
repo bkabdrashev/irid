@@ -56,12 +56,12 @@ typedef enum  Diag_Code {
 
 typedef union Diag_Data Diag_Data;
 union Diag_Data {
+  Str* name;
+  Cstr text;
+  U32  unknown_char;
   struct { Token_Kind expected; Token_Kind found; B8 end_of_line; } expected;
   struct { Token_Kind open; Token_Kind close; }     delimiter;
   struct { I32 digit; I32 base; }                    invalid_digit;
-  struct { U32 byte; }                               unknown_char;
-  struct { Str* name; }                              name;
-  struct { Cstr text; }                              text;
   struct { Cstr expected; Cstr found; }              types;
   struct { Cstr op; Cstr type; }                     operand;
 };
@@ -341,7 +341,7 @@ static void diag_print_found(FILE* out, Sources* sources, Token_Kind kind, Loc l
 static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
   switch (diag->code) {
   case Diag_Code_unknown_character: {
-    U8 byte = (U8)diag->data.unknown_char.byte;
+    U8 byte = (U8)diag->data.unknown_char;
     if (isprint(byte)) {
       fprintf(out, "unknown character '%c'", byte);
     }
@@ -360,7 +360,7 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
     fputs("unterminated block comment", out);
   break;
   case Diag_Code_missing_digits:
-    fprintf(out, "expected at least one digit after '%s'", diag->data.text.text);
+    fprintf(out, "expected at least one digit after '%s'", diag->data.text);
   break;
   case Diag_Code_number_overflow:
     fputs("numeric literal is too large", out);
@@ -384,16 +384,14 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
     diag_print_found(out, sources, diag->data.expected.found, diag->loc);
   break;
   case Diag_Code_unclosed_delimiter:
-    fprintf(out, "expected '%s' to close this '%s'",
-            cstr_from_token_kind(diag->data.delimiter.close),
-            cstr_from_token_kind(diag->data.delimiter.open));
+    fprintf(out, "expected '%s' to close this '%s'", cstr_from_token_kind(diag->data.delimiter.close), cstr_from_token_kind(diag->data.delimiter.open));
   break;
   case Diag_Code_unmatched_delimiter:
     fprintf(out, "unmatched '%s'",
             cstr_from_token_kind(diag->data.delimiter.open));
   break;
   case Diag_Code_duplicate_declaration:
-    fprintf(out, "duplicate declaration of '%s'", diag->data.name.name->base);
+    fprintf(out, "duplicate declaration of '%s'", diag->data.name->base);
   break;
   case Diag_Code_bad_declaration_target:
     fputs("expected a name before ':'", out);
@@ -405,24 +403,19 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
     fputs("too many errors emitted; stopping now", out);
   break;
   case Diag_Code_undefined_name:
-    fprintf(out, "use of undeclared name '%s'",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+    fprintf(out, "use of undeclared name '%s'", diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_not_assignable:
-    fprintf(out, "cannot assign to '%s'",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+    fprintf(out, "cannot assign to '%s'", diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_shadowed_declaration:
-    fprintf(out, "declaration of '%s' shadows a previous declaration",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+    fprintf(out, "declaration of '%s' shadows a previous declaration", diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_invalid_function_parameter:
-    fprintf(out, "invalid function parameter: %s",
-            diag->data.text.text ? diag->data.text.text : "expected a name or record");
+    fprintf(out, "invalid function parameter: %s", diag->data.text ? diag->data.text : "expected a name or record");
   break;
   case Diag_Code_unsupported_construct:
-    fprintf(out, "%s is not supported yet",
-            diag->data.text.text ? diag->data.text.text : "this construct");
+    fprintf(out, "%s is not supported yet", diag->data.text ? diag->data.text : "this construct");
   break;
   case Diag_Code_invalid_assignment_target:
     fputs("cannot assign to this expression", out);
@@ -437,23 +430,23 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
   break;
   case Diag_Code_unknown_field:
     fprintf(out, "record has no field named '%s'",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+            diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_join_field_missing:
     fprintf(out, "field '%s' is not present in every possible record",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+            diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_join_field_mismatch:
     fprintf(out, "field '%s' has an inconsistent layout across joined records",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+            diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_empty_narrowed_record:
     fprintf(out, "cannot access field '%s' of an empty narrowed record",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+            diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_invalid_escape:
     fprintf(out, "invalid escape sequence '%s' in string literal",
-            diag->data.text.text ? diag->data.text.text : "?");
+            diag->data.text ? diag->data.text : "?");
   break;
   case Diag_Code_call_argument_mismatch:
     fprintf(out, "invalid argument: expected %s, found %s",
@@ -467,7 +460,7 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
   break;
   case Diag_Code_assign_to_constant:
     fprintf(out, "cannot assign to constant '%s'",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+            diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_invalid_store:
     fputs("cannot assign to this expression", out);
@@ -478,11 +471,11 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
   break;
   case Diag_Code_unsupported_semantics:
     fprintf(out, "%s is not supported yet",
-            diag->data.text.text ? diag->data.text.text : "this construct");
+            diag->data.text ? diag->data.text : "this construct");
   break;
   case Diag_Code_cyclic_declaration:
     fprintf(out, "cyclic declaration of '%s'",
-            diag->data.name.name ? diag->data.name.name->base : "?");
+            diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_invalid_condition:
     fprintf(out, "condition must have a scalar type, found %s",
@@ -504,7 +497,7 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
             cstr_from_token_kind(diag->data.delimiter.open));
   break;
   case Diag_Code_previous_declaration:
-    fprintf(out, "'%s' was first declared here", diag->data.name.name->base);
+    fprintf(out, "'%s' was first declared here", diag->data.name->base);
   break;
   default:
     fputs("unknown diagnostic", out);

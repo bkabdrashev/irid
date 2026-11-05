@@ -68,12 +68,6 @@ typedef enum Ast_Kind {
   Ast_Kind_error,
 } Ast_Kind;
 
-typedef struct Scope_Stack Scope_Stack;
-struct Scope_Stack {
-  Hash_Map** base;
-  I32 length;
-};
-
 typedef struct Ir Ir;
 typedef struct Ast_Node Ast_Node;
 typedef struct Ast_List Ast_List;
@@ -103,10 +97,10 @@ struct Symbol {
   Loc loc;
 };
 
-typedef struct Ast_Named Ast_Named;
-struct Ast_Named {
-  Loc       name;
-  Ast_Node* node;
+typedef struct Ast_Decl Ast_Decl;
+struct Ast_Decl {
+  Loc       lhs;
+  Ast_Node* rhs;
 };
 
 struct Ast_Node {
@@ -120,15 +114,9 @@ struct Ast_Node {
       Ast_Node* lhs;
       Ast_Node* rhs;
     } binary;
-    Ast_Named declare;
+    Ast_Decl  declare;
     Ast_Block block;
   };
-};
-
-typedef struct Ast_Decl Ast_Decl;
-struct Ast_Decl {
-  Loc       lhs;
-  Ast_Node* rhs;
 };
 
 typedef struct Ast_Decls Ast_Decls;
@@ -380,9 +368,9 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
     string_builder_push_ast_node(sb, node->binary.rhs);
   } break;
   case Ast_Kind_declare: {
-    string_builder_push_loc_str(sb, node->declare.name);
+    string_builder_push_loc_str(sb, node->declare.lhs);
     string_builder_push_cstr(sb, ":");
-    string_builder_push_ast_node(sb, node->declare.node);
+    string_builder_push_ast_node(sb, node->declare.rhs);
   } break;
   case Ast_Kind_run: {
     string_builder_push_cstr(sb, "(");
@@ -1095,8 +1083,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
         Ast_Node* rhs = parse_new_expression(parser, 0);
         if (lhs->kind == Ast_Kind_name) {
           exp = parse_new_node(parser, Ast_Kind_declare);
-          exp->declare.name = lhs->loc;
-          exp->declare.node = rhs;
+          exp->declare.lhs = lhs->loc;
+          exp->declare.rhs = rhs;
           exp->loc = loc_join(lhs->loc, rhs->loc);
         }
         else {

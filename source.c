@@ -45,13 +45,64 @@ Loc loc_at(Source* source, Cstr base, Cstr begin, Cstr end) {
   return loc;
 }
 
-Str_View loc_str_view(Loc loc) {
+Str_View str_view_from_loc(Loc loc) {
   Str_View result = { loc.source->data + loc.start, loc.end - loc.start };
   return result;
 }
 
+Str* str_from_loc(Loc loc) {
+  Str_View str_view = str_view_from_loc(loc);
+  return str_from_str_view(str_view);
+}
+
+I64 i64_from_loc(Loc loc) {
+  Str_View str_view = str_view_from_loc(loc);
+  Cstr data = str_view.base;
+  Cstr end  = str_view.base + str_view.length;
+  U64 result = 0;
+  I8 base = 10;
+
+  if (*data == '0') {
+    data++;
+    if (*data == 'x' || *data == 'X') {
+      base = 16;
+      data++;
+    }
+    else if (*data == 'b' || *data == 'B') {
+      base = 2;
+      data++;
+    }
+    else {
+      base = 8;
+    }
+  }
+  for (; data < end; data++) {
+    if (*data != '_') {
+      I8 digit = 16;
+      switch (*data) {
+      case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+        digit = *data - '0';
+      break;
+      case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+        digit = *data - 'a' + 10;
+      break;
+      case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+        digit = *data - 'A' + 10;
+      break;
+      }
+      result = result * base + digit;
+    }
+  }
+  return (I64)result;
+}
+
+F64 f64_from_loc(Loc loc) {
+  Str* str = str_from_loc(loc);
+  return atof(str->base);
+}
+
 void string_builder_push_loc_str(String_Builder* sb, Loc loc) {
-  Str_View str_view = loc_str_view(loc);
+  Str_View str_view = str_view_from_loc(loc);
   string_builder_push_str_view(sb, str_view);
 }
 
