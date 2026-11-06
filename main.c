@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
   parse_test();
   // diag_test();
   irgen_test();
-  // sem_test();
+  sem_test();
   // llvm_test();
   // irid_run_path("test.i");
   return 0;

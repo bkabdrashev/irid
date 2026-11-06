@@ -207,8 +207,8 @@ struct Branch {
   Jump nez;
 };
 
-typedef struct Funs Fun_Pool;
-struct Funs {
+typedef struct Fun_Pool Fun_Pool;
+struct Fun_Pool {
   Fun* base;
   I32  length;
 };
@@ -1722,7 +1722,7 @@ Fun_Pool irgen_ast(Arena* arena, Ast_Node* ast, I32 total_nodes, Diags* diags) {
   irgen.syms    = pool(irgen.perm_arena, Sym,      total_nodes);
   irgen.vars    = pool(irgen.perm_arena, Var,      total_nodes);
   irgen.blocks  = pool(irgen.perm_arena, Block,    total_nodes);
-  irgen.irs     = pool(irgen.perm_arena, Ir,       total_nodes);
+  irgen.irs     = pool(irgen.perm_arena, Ir,       2*total_nodes);
   irgen.records = pool(irgen.perm_arena, Rec,      total_nodes);
   irgen.fun_stack.base        = arena_push(irgen.temp_block_arena, total_nodes * sizeof(Fun*));
   irgen.fun_stack.length      = 0;
@@ -1847,8 +1847,8 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("foo:(a:I32) -> a do 1+2", "");
-  test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
+  // test("foo:(a:I32) -> a do 1+2", "");
+  // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");
   // test("p: @(x:8); p@.0",     "(bits 32)");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32", "");

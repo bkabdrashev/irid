@@ -149,10 +149,9 @@ typedef struct Sem Sem;
 struct Sem {
   Arena* temp_arena;
   Arena* perm_arena;
-  Funs   funs;
   Functions* foreign_funs;
-  Hash_Map  type_of_irs;
-  Type_Pool types;
+  Type**     type_of_irs;
+  Type_Pool  types;
 
   Hash_Set  type_set;
   Hash_Set  type_type_set;
@@ -369,7 +368,7 @@ void string_builder_push_type(String_Builder* sb, Block* block, Type* type) {
   }
 }
 
-Cstr cstr_from_sem(Arena* arena, Funs funs) {
+Cstr cstr_from_sem(Arena* arena, Fun_Pool funs) {
   String_Builder sb = string_builder_begin(arena);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
@@ -407,7 +406,7 @@ Cstr cstr_from_sem(Arena* arena, Funs funs) {
         string_builder_push_indent(&sb, 2);
         string_builder_push_ir(&sb, ir);
         string_builder_push_cstr(&sb, " : ");
-        Type* type = hash_map_get(&sem.type_of_irs, ir);
+        Type* type = type_of_ir(ir);
         string_builder_push_type(&sb, block, type);
       }
       switch (block->kind) {
@@ -471,16 +470,11 @@ Cstr sem_type_name(Type* type) {
 }
 
 Loc sem_loc(Ir* ir) {
-  if (ir && loc_is_valid(ir->loc)) return ir->loc;
-  if (loc_is_valid(sem.current_loc)) return sem.current_loc;
-  return LOC_NONE;
+  return ir->loc;
 }
 
 Loc sem_loc_for_var(Var* var) {
-  if (var && var->declared_ir && loc_is_valid(var->declared_ir->loc)) {
-    return var->declared_ir->loc;
-  }
-  return sem_loc(0);
+  return var->declared_ir->loc;
 }
 
 void sem_fail(void) {
@@ -497,14 +491,14 @@ Diag* sem_diag_impl(Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_li
 void sem_error_name_impl(Diag_Code code, Loc loc, Str* name,
                          Cstr compiler_file, I32 compiler_line) {
   Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
-  if (diag) diag->data.name.name = name;
+  if (diag) diag->data.name = name;
   sem_fail();
 }
 
 void sem_error_text_impl(Diag_Code code, Loc loc, Cstr text,
                          Cstr compiler_file, I32 compiler_line) {
   Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
-  if (diag) diag->data.text.text = text;
+  if (diag) diag->data.text = text;
   sem_fail();
 }
 
@@ -1027,12 +1021,14 @@ B8 type_is_subtype(Block* block, Type* one, Type* two) {
 }
 
 Type* type_of_ir(Ir* ir) {
-  Type* type = hash_map_get(&sem.type_of_irs, ir);
+  I32 irid = ir - irgen.irs.base;
+  Type* type = sem.type_of_irs[irid];
   return type;
 }
 
 void type_of_ir_put(Ir* ir, Type* type) {
-  hash_map_put(&sem.type_of_irs, ir, type);
+  I32 irid = ir - irgen.irs.base;
+  sem.type_of_irs[irid] = type;
 }
 
 Type* type_in_set(Type* type) {
@@ -1734,7 +1730,7 @@ Field type_record_get_by_position(Record* record, I32 position) {
 }
 
 Field type_record_get_by_name(Record* record, Str* name) {
-  I32 position = hash_map_get_i32(&record->position_from_name, name);
+  I32 position = hash_map_get_i32(record->position_from_name, name);
   if (position < 0) {
     Field missing = {0};
     missing.name = name;
@@ -1768,7 +1764,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
   sem_var_declare(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
-    I32 position = hash_map_get_i32(&record->position_from_name, name);
+    I32 position = hash_map_get_i32(record->position_from_name, name);
     if (position < 0) {
       sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
     }
@@ -1780,7 +1776,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
     // FIX: this leads to a collion in case of 4 records join.
     // v:A\B\C\D -- A.x and B.x have different offset from C.x and D.x.
     // So if it narrows to only A\B and then later narrows to C\D, v.x has wrong type
-    Var* var_common = hash_map_get(&var->join_vars, name);
+    Var* var_common = hash_map_get(var->join_vars, name);
     if (var_common) {
       return var_common;
     }
@@ -1795,7 +1791,7 @@ Var* sem_get_var_by_name(Block* block, Var* var, Str* name) {
       Type*   element = join->records.list[i];
       Record* record  = element->record;
       if (record->length != 0) {
-        I32 position = hash_map_get_i32(&record->position_from_name, name);
+        I32 position = hash_map_get_i32(record->position_from_name, name);
         if (position < 0) {
           sem_error_name(Diag_Code_join_field_missing, sem_loc(0), name);
         }
@@ -1858,7 +1854,7 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
   I32 result = -1;
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
-    I32 position = hash_map_get_i32(&record->position_from_name, name);
+    I32 position = hash_map_get_i32(record->position_from_name, name);
     if (position < 0) {
       sem_error_name(Diag_Code_unknown_field, sem_loc(0), name);
     }
@@ -1871,7 +1867,7 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
       Type* element = join->records.list[i];
       Record* record = element->record;
       if (record->length > 0) {
-        I32 position = hash_map_get_i32(&record->position_from_name, name);
+        I32 position = hash_map_get_i32(record->position_from_name, name);
         if (position < 0) {
           sem_error_name(Diag_Code_join_field_missing, sem_loc(0), name);
         }
@@ -2405,7 +2401,7 @@ Type* sem_join_field_type(Join* join, Str* name) {
     if (record->length == 0) {
       continue;
     }
-    I32 position = hash_map_get_i32(&record->position_from_name, name);
+    I32 position = hash_map_get_i32(record->position_from_name, name);
     if (position < 0) {
       return sem.type_none;
     }
@@ -2505,8 +2501,8 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
           I32     pos    = -1;
           if (record->length != 0) {
             pos = child->name
-              ? hash_map_get_i32(&record->position_from_name, child->name)
-              : hash_map_i32_get_i32(&record->position_from_offset, child->index);
+              ? hash_map_get_i32(record->position_from_name, child->name)
+              : hash_map_i32_get_i32(record->position_from_offset, child->index);
           }
           Type* meet = pos < 0 ? sem.type_none : sem_type_narrow_meet(new_type, record->types[pos]);
           if (meet != sem.type_none) {
@@ -2522,7 +2518,7 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
         // Keep already cached common fields in sync with the narrowed parent.
         for (I32 c = 0; c < parent->join_vars.len; c++) {
           Str* common_name = parent->join_vars.list[c];
-          Var* common = hash_map_get(&parent->join_vars, common_name);
+          Var* common = hash_map_get(parent->join_vars, common_name);
           Type* type_common = sem_join_field_type(type_parent_new->join, common_name);
           if (type_common->kind == Type_Kind_record && common->declared->kind == Type_Kind_join_records) {
             // NOTE: a join narrowed down to a single record is still a join
@@ -3240,7 +3236,7 @@ Type* sem_fun(Fun* fun);
 B8 type_has_field(Type* type, Str* name) {
   B8 result = false;
   if (type->kind == Type_Kind_record) {
-    I32 pos = hash_map_get_i32(&type->record->position_from_name, name);
+    I32 pos = hash_map_get_i32(type->record->position_from_name, name);
     if (pos >= 0) {
       result = true;
     }
@@ -3252,7 +3248,7 @@ B8 type_has_field(Type* type, Str* name) {
       Type* element = join->records.list[i];
       Record* record = element->record;
       if (record->length > 0) {
-        I32 pos = hash_map_get_i32(&record->position_from_name, name);
+        I32 pos = hash_map_get_i32(record->position_from_name, name);
         if (pos < 0) {
           result = false;
           break;
@@ -3324,7 +3320,7 @@ void sem_ir(Block* block, Ir* ir) {
   Ir* saved_ir = sem.current_ir;
   Loc saved_loc = sem.current_loc;
   sem.current_ir = ir;
-  if (loc_is_valid(ir->loc)) sem.current_loc = ir->loc;
+  sem.current_loc = ir->loc;
   Type* result = sem.type_none;
   switch (ir->kind) {
   case Ir_Kind_none: {
@@ -4490,23 +4486,21 @@ Type* sem_fun(Fun* fun) {
   return fun->type;
 }
 
-void sem_funs(Arena* arena, Funs funs, Diags* diags) {
-  Arena temp = arena_init(arena->capacity);
+void sem_funs(Arena* arena, Fun_Pool funs, Diags* diags) {
+  Arena* temp = arena_init(arena->capacity);
   sem.perm_arena = arena;
-  sem.temp_arena = &temp;
+  sem.temp_arena = temp;
   sem.diags = diags;
   sem.current_ir = 0;
-  sem.current_loc = LOC_NONE;
   sem.current_block = 0;
-  sem.funs = funs;
   sem.sccid = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
-  sem.type_of_irs = hash_map_init(arena, 3 * irgen.irs.length);
-  sem.types.base = arena_push(arena, irgen.irs.length * sizeof(Type));
+  sem.type_of_irs = arena_push_type(arena, Type*, 3 * irgen.irs.length);
+  sem.types.base = arena_push_type(arena, Type, irgen.irs.length);
   sem.types.length = 0;
 
-  sem.elements = arena_push(arena, 3 * irgen.irs.length * sizeof(I32));
+  sem.elements = arena_push_type(arena, I32, 3 * irgen.irs.length);
 
   fa_init(sem.perm_arena, sem.foreign_funs, irgen.irs.length);
   fa_add(sem.foreign_funs, 0);
@@ -4569,7 +4563,7 @@ void sem_funs(Arena* arena, Funs funs, Diags* diags) {
 
   if (setjmp(sem.fatal) != 0) {
     sem.fatal_ready = false;
-    arena_free(&temp);
+    arena_free(temp);
     return;
   }
   sem.fatal_ready = true;
@@ -4581,125 +4575,45 @@ void sem_funs(Arena* arena, Funs funs, Diags* diags) {
     }
   }
   sem.fatal_ready = false;
-  arena_free(&temp);
+  arena_free(temp);
 }
 
-void _test_sem(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Cstr builtin        = file_read("basic.i");
-  I32  builtin_length = (I32)file_size("basic.i");
-  I32  source_length  = strlen(source);
-  I32  length         = source_length + builtin_length + 32;
+void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
+  Sources   sources = sources_init(16, 256);
+  Str_View  prepend = str_view("use import \"basic\"\n");
+  Str_View  source_sv = str_view(source_data);
+  Str_View  combined = str_view_cat(prepend, source_sv);
+  Source*   source  = sources_add_str_view(&sources, combined);
+  Tokens    tokens  = lex_source(source, &sources.diags);
+  Ast_Node* ast     = parse_tokens(&sources, tokens);
+  str_init(sources.char_count, sources.str_count);
+  Arena* arena = arena_init(KB(2) * sources.ast_count);
 
-  Arena arena         = arena_init(KB(4) * length);
-                        str_init(&arena, 2*length);
-
-  Source_Map sources = {0};
-  Diags diags = diags_init(&arena, 256);
-  File_Id builtin_file = source_add(&sources, &arena, "basic.i", builtin, builtin_length);
-
-  Tokens builtin_tokens = lex_source(&arena, &sources, builtin_file, &diags);
-  Ast_Block ast         = parse_tokens(&arena, builtin_tokens, &diags);
-
-  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
-  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
-  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
-
-  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
-  node->block    = source_ast;
-
-  fa_init(&arena, ast.list, 1);
-  fa_add(ast.list, node);
-
-  Funs funs            = irgen_ast(&arena, ast, length, &diags);
-  if (diags_has_errors(&diags)) {
-    diag_print_all(&diags, &sources, stdout, false);
-    assert(0);
-  }
+  Fun_Pool funs = irgen_ast(arena, ast, sources.ast_count, &sources.diags);
   {
-    Cstr result          = cstr_from_funs(&arena, funs);
-    printf("\n%s", result);
+    Cstr result = cstr_from_funs(arena, funs);
+    test_at_source(result, expected, file_name, line, source_data);
   }
-
-                         sem_funs(&arena, funs, &diags);
-  if (diags_has_errors(&diags)) {
-    diag_print_all(&diags, &sources, stdout, false);
-    assert(0);
-  }
+  sem_funs(arena, funs, &sources.diags);
   {
-    Cstr result          = cstr_from_sem(&arena, funs);
-    test_at_source(result, expected, file_name, line, source);
+    Cstr result = cstr_from_sem(arena, funs);
+    test_at_source(result, expected, file_name, line, source_data);
   }
-  arena_free(&arena);
+  arena_free(arena);
+  str_free();
+  arena_free(source->arena);
+  str_view_free(combined);
+  sources_free(&sources);
 }
-
-void _test_pipeline_diag(Cstr source, Diag_Code code, Cstr file_name, I32 line) {
-  Cstr builtin        = file_read("basic.i");
-  I32  builtin_length = (I32)file_size("basic.i");
-  I32  source_length  = strlen(source);
-  I32  length         = source_length + builtin_length + 32;
-
-  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
-                        str_init(&arena, 2*length);
-
-  Source_Map sources = {0};
-  Diags diags = diags_init(&arena, 256);
-  File_Id builtin_file = source_add(&sources, &arena, "basic.i", builtin, builtin_length);
-
-  Tokens builtin_tokens = lex_source(&arena, &sources, builtin_file, &diags);
-  Ast_Block ast         = parse_tokens(&arena, builtin_tokens, &diags);
-
-  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
-  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
-  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
-
-  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
-  node->block    = source_ast;
-
-  fa_init(&arena, ast.list, 1);
-  fa_add(ast.list, node);
-
-  Funs funs = irgen_ast(&arena, ast, length, &diags);
-  if (!diags_has_errors(&diags)) {
-    sem_funs(&arena, funs, &diags);
-  }
-
-  B8 found = false;
-  for (I32 i = 0; i < diags.length; i++) {
-    if (diags.base[i].code == code) {
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    printf("pipeline diagnostic test failed at %s:%d: expected %s\n",
-           file_name, line, cstr_from_diag_code(code));
-    diag_print_all(&diags, &sources, stdout, false);
-    fflush(stdout);
-    assert(0);
-  }
-  arena_free(&arena);
-}
-
-#define test_diag(source, code) _test_pipeline_diag(source, code, __FILE__, __LINE__)
 
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // FIX: while loop somehow affects the type narrowing
-  // a = {
-  //       b23: join (record(x:1, y:0..2) \ record(x:2)),
-  //       b24: join (record(x:1, y:0..2) \ record(x:2)),
-  //       b32: join (record(x:1, y:0..2) \ record(x:2)),
-  //       b33: join (record(x:1, y:0..2) \ record(x:2)),
-  //     }
   test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; ab.a", "");
-  // test_diag("bar:(x:I32)\n#use bar\ny", Diag_Code_undefined_name);
-  // test_diag("{ Vec:(x:I32); bar:Vec; #use bar; x = 1 }\nx", Diag_Code_undefined_name);
-  // test_diag("bar:I32\n#use bar\nx", Diag_Code_invalid_field_base);
   // test("a:(x:I32; y:I32); use a; x = 1; y = 2; x+y", "");
   // test("foo:(a:0..1) -> I32\n return a+2;\nfoo(1)", "");
   // test("a:(0..2); if a && 1 do a else a", "");
