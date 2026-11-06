@@ -165,6 +165,7 @@ struct Ir {
     Rec*    rec;
     Ir_Pair binary;
     Ir*     unary;
+    Type*   type;
     Source* source;
     Position_Offset position;
     Name_Offset     name_offset;
@@ -1836,6 +1837,10 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   {
     Cstr result = cstr_from_funs(arena, funs);
     test_at_source(result, expected, file_name, line, source_data);
+  }
+  if (diags_has_errors(&sources.diags)) {
+    diag_print_all(&sources.diags, &sources, stdout, false);
+    assert(0);
   }
   arena_free(arena);
   str_free();

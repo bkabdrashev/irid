@@ -4126,6 +4126,32 @@ void sem_ir(Block* block, Ir* ir) {
       sem_error_operand(ir->loc, "()", fun_type);
     }
   } break;
+  case Ir_Kind_import: {
+    if (!ir->source->type) {
+      Hash_Map* decls = ir->source->decls;
+      Record* new_record  = type_record_init(decls->len);
+      for (I32 i = 0; i < decls->len; i++) {
+        Str* str = decls->list[i];
+        new_record->names[i] = str;
+        hash_map_put_i32(&new_record->position_from_name, str, i);
+        Sym* sym = hash_map_get(*decls, str);
+        if (sym->kind == Sym_Kind_variable) {
+          new_record->types[i] = sym->ir->var->declared;
+        }
+        else if (sym->kind == Sym_Kind_constant) {
+          new_record->types[i] = type_of_ir(sym->ir);
+        }
+        else if (sym->kind == Sym_Kind_parameter) {
+          new_record->types[i] = type_of_ir(sym->ir);
+        }
+        else {
+          assert(0);
+        }
+      }
+      ir->source->type = type_record(new_record);
+    }
+    result = ir->source->type;
+  } break;
   case Ir_Kind_use: {
     Type* base_type = type_of_ir(ir->unary);
     if (base_type->kind != Type_Kind_record && base_type->kind != Type_Kind_join_records) {
@@ -4594,10 +4620,18 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
     Cstr result = cstr_from_funs(arena, funs);
     test_at_source(result, expected, file_name, line, source_data);
   }
+  if (diags_has_errors(&sources.diags)) {
+    diag_print_all(&sources.diags, &sources, stdout, false);
+    assert(0);
+  }
   sem_funs(arena, funs, &sources.diags);
   {
     Cstr result = cstr_from_sem(arena, funs);
     test_at_source(result, expected, file_name, line, source_data);
+  }
+  if (diags_has_errors(&sources.diags)) {
+    diag_print_all(&sources.diags, &sources, stdout, false);
+    assert(0);
   }
   arena_free(arena);
   str_free();

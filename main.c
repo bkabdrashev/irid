@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
   // diag_test();
   irgen_test();
   sem_test();
-  // llvm_test();
+  llvm_test();
   // irid_run_path("test.i");
   return 0;
 }

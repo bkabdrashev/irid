@@ -60,10 +60,10 @@ union Diag_Data {
   Cstr text;
   U32  unknown_char;
   struct { Token_Kind expected; Token_Kind found; B8 end_of_line; } expected;
-  struct { Token_Kind open; Token_Kind close; }     delimiter;
-  struct { I32 digit; I32 base; }                    invalid_digit;
+  struct { Token_Kind open; Token_Kind close; }      delimiter;
+  struct { I32  digit;    I32  base; }               invalid_digit;
   struct { Cstr expected; Cstr found; }              types;
-  struct { Cstr op; Cstr type; }                     operand;
+  struct { Cstr op;       Cstr type; }               operand;
 };
 
 typedef struct Diag Diag;
@@ -93,7 +93,6 @@ typedef struct {
   I32   error_count;
   I32   warning_count;
   B8    limit_hit;
-  B8    printed;
 } Diags;
 
 typedef struct Sources Sources;
@@ -126,7 +125,9 @@ Sources sources_init(I32 max_sources_count, I32 max_diags) {
           sources.pool       = pool(arena, Source, max_sources_count);
           sources.paths      = internal_init(arena, max_sources_count);
           sources.map        = hash_map_init(arena, max_sources_count);
-          sources.diags.base = arena_push_type(arena, Diag, 256);
+          sources.diags.base = arena_push_zero_type(arena, Diag, 256);
+          sources.diags.limit_hit = false;
+          sources.diags.cap  = max_diags;
   return sources;
 }
 
@@ -154,7 +155,7 @@ Source* sources_add_str_view(Sources* sources, Str_View str_view) {
     }
   }
 
-  U32* line_starts = arena_push(arena, sizeof(U32) * line_count);
+  U32* line_starts = arena_push_type(arena, U32, line_count + 1);
   line_starts[0] = 0;
   I32 line = 1;
   for (Umi i = 0; i < length; i++) {
@@ -166,6 +167,7 @@ Source* sources_add_str_view(Sources* sources, Str_View str_view) {
       line_starts[line++] = (U32)(i + 1);
     }
   }
+  line_starts[line] = length; // NOTE: line_end[i] == line_start[i+1]
   assert(line == line_count);
 
   Source* source = &new(sources->pool);
@@ -247,25 +249,19 @@ Diag* diag_push_impl(Diags* diags, Diag_Severity severity, Diag_Code code, Loc l
 }
 
 B8 diags_has_errors(Diags* diags) {
-  return diags && (diags->error_count > 0 || diags->limit_hit);
+  return diags->error_count > 0 || diags->limit_hit;
 }
 
-Diag* diag_error_impl(Diags* diags, Diag_Code code, Loc loc,
-                      Cstr compiler_file, I32 compiler_line) {
-  return diag_push_impl(diags, Diag_Error, code, loc, -1,
-                        compiler_file, compiler_line);
+Diag* diag_error_impl(Diags* diags, Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_line) {
+  return diag_push_impl(diags, Diag_Error, code, loc, -1, compiler_file, compiler_line);
 }
 
-Diag* diag_warning_impl(Diags* diags, Diag_Code code, Loc loc,
-                        Cstr compiler_file, I32 compiler_line) {
-  return diag_push_impl(diags, Diag_Warning, code, loc, -1,
-                        compiler_file, compiler_line);
+Diag* diag_warning_impl(Diags* diags, Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_line) {
+  return diag_push_impl(diags, Diag_Warning, code, loc, -1, compiler_file, compiler_line);
 }
 
-Diag* diag_note_impl(Diags* diags, I32 parent, Diag_Code code, Loc loc,
-                     Cstr compiler_file, I32 compiler_line) {
-  return diag_push_impl(diags, Diag_Note, code, loc, parent,
-                        compiler_file, compiler_line);
+Diag* diag_note_impl(Diags* diags, I32 parent, Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_line) {
+  return diag_push_impl(diags, Diag_Note, code, loc, parent, compiler_file, compiler_line);
 }
 
 #define diag_error(diags, code, loc) \
@@ -328,76 +324,69 @@ static Cstr diag_color_note(void)  { return "\033[1;36m"; }
 static Cstr diag_color_dim(void)   { return "\033[2m"; }
 static Cstr diag_color_reset(void) { return "\033[0m"; }
 
-static void diag_print_lexeme(FILE* out, Sources* sources, Loc loc) {
-  U32 start = loc.start;
-  U32 end   = loc.end;
-  Source* source = loc.source;
-  if (end > source->length) end = (U32)source->length;
-  if (end <= start) end = start + 1;
-  U32 length = end - start;
-  if (length > 32) {
-    fwrite(source->data + start, 1, 29, out);
-    fputs("...", out);
+void diag_render_found(String_Builder* sb, Token_Kind kind, Loc loc) {
+  if (kind == Token_Kind_source_leave) {
+    string_builder_push_cstr(sb, "end of file");
+  }
+  else if (kind == Token_Kind_source_enter) {
+    string_builder_push_cstr(sb, "start of file");
+  }
+  else if (kind == Token_Kind_error) {
+    string_builder_push_cstr(sb, "invalid token");
+  }
+  else if (kind == Token_Kind_name  || kind == Token_Kind_int
+  ||  kind == Token_Kind_float || kind == Token_Kind_str) {
+    string_builder_push_cstr(sb, "'");
+    string_builder_push_loc_str(sb, loc);
+    string_builder_push_cstr(sb, "'");
   }
   else {
-    fwrite(source->data + start, 1, length, out);
+    string_builder_push_cstr(sb, "'");
+    string_builder_push_cstr(sb, cstr_from_token_kind(kind));
+    string_builder_push_cstr(sb, "'");
   }
 }
 
-static void diag_print_found(FILE* out, Sources* sources, Token_Kind kind, Loc loc) {
-  if (kind == Token_Kind_source_leave) {
-    fputs("end of file", out);
-    return;
-  }
-  if (kind == Token_Kind_source_enter) {
-    fputs("start of file", out);
-    return;
-  }
-  if (kind == Token_Kind_error) {
-    fputs("invalid token", out);
-    return;
-  }
-  if (kind == Token_Kind_name || kind == Token_Kind_int
-      || kind == Token_Kind_float || kind == Token_Kind_str) {
-    fputc('\'', out);
-    diag_print_lexeme(out, sources, loc);
-    fputc('\'', out);
-    return;
-  }
-  fprintf(out, "'%s'", cstr_from_token_kind(kind));
-}
-
-static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
+void diag_render_message(String_Builder* sb, Diag* diag) {
   switch (diag->code) {
   case Diag_Code_unknown_character: {
     U8 byte = (U8)diag->data.unknown_char;
     if (isprint(byte)) {
-      fprintf(out, "unknown character '%c'", byte);
+      string_builder_push_cstr(sb, "unknown character '");
+      string_builder_push_c8(sb, byte);
+      string_builder_push_cstr(sb, "'");
     }
     else {
-      fprintf(out, "unknown character 0x%02x", byte);
+      string_builder_push_cstr(sb, "unknown character ");
+      string_builder_push_hex8(sb, byte);
     }
   } break;
   case Diag_Code_invalid_digit:
-    fprintf(out, "digit '%c' is not valid in a base-%d literal",
-            diag->data.invalid_digit.digit, diag->data.invalid_digit.base);
+    string_builder_push_cstr(sb, "digit '");
+    string_builder_push_c8(sb, diag->data.invalid_digit.digit);
+    string_builder_push_cstr(sb, " ' is not valid in a base-");
+    string_builder_push_i64(sb, diag->data.invalid_digit.base);
+    string_builder_push_cstr(sb, " literal");
   break;
   case Diag_Code_unterminated_string:
-    fputs("unterminated string literal", out);
+    string_builder_push_cstr(sb, "unterminated string literal");
   break;
   case Diag_Code_unterminated_comment:
-    fputs("unterminated block comment", out);
+    string_builder_push_cstr(sb, "unterminated block comment");
   break;
   case Diag_Code_missing_digits:
-    fprintf(out, "expected at least one digit after '%s'", diag->data.text);
+    string_builder_push_cstr(sb, "expected at least one digit after '");
+    string_builder_push_cstr(sb, "diag->data.text");
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_number_overflow:
-    fputs("numeric literal is too large", out);
+    string_builder_push_cstr(sb, "numeric literal is too large");
   break;
   case Diag_Code_expected_token:
-    fprintf(out, "expected '%s' but found ",
-            cstr_from_token_kind(diag->data.expected.expected));
-    diag_print_found(out, sources, diag->data.expected.found, diag->loc);
+    string_builder_push_cstr(sb, "expected '");
+    string_builder_push_cstr(sb, cstr_from_token_kind(diag->data.expected.expected));
+    string_builder_push_cstr(sb, "' but found");
+    diag_render_found(sb, diag->data.expected.found, diag->loc);
   break;
   case Diag_Code_expected_expression:
     if (diag->data.expected.end_of_line) {
@@ -488,8 +477,7 @@ static void diag_print_message(FILE* out, Diag* diag, Sources* sources) {
             diag->data.operand.op ? diag->data.operand.op : "?");
   break;
   case Diag_Code_assign_to_constant:
-    fprintf(out, "cannot assign to constant '%s'",
-            diag->data.name ? diag->data.name->base : "?");
+    fprintf(out, "cannot assign to constant '%s'", diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_invalid_store:
     fputs("cannot assign to this expression", out);
@@ -548,7 +536,7 @@ static I32 diag_display_column(Source* source, U32 line_start, U32 offset) {
   return column;
 }
 
-static void diag_print_window(FILE* out, Source* source, U32 start, U32 end, I32 window_start, I32 window_end, I32 line_width) {
+static void diag_render_window(Source* source, U32 start, U32 end, I32 window_start, I32 window_end, I32 line_width) {
   I32 column = 0;
   if (window_start > 0) fputs("...", out);
   for (U32 at = start; at < end; at++) {
@@ -580,7 +568,7 @@ static I32 diag_digits(I32 value) {
   return result;
 }
 
-static void diag_print_snippet(FILE* out, Sources* sources, Loc loc, Cstr label, Cstr caret_color, B8 color) {
+void diag_render_snippet(String_Builder* sb, Loc loc, Cstr label, Cstr caret_color, B8 color) {
   Source* source = loc.source;
 
   I32 line        = source_line_index(source, loc.start);
@@ -608,8 +596,8 @@ static void diag_print_snippet(FILE* out, Sources* sources, Loc loc, Cstr label,
   I32 shown_caret_start = caret_start;
   if (shown_caret_start < window_start) shown_caret_start = window_start;
   if (shown_caret_start >= window_end
-      && window_end < line_width
-      && window_end > window_start) {
+  &&  window_end < line_width
+  &&  window_end > window_start) {
     shown_caret_start = window_end - 1;
   }
   I32 shown_caret_end = caret_end;
@@ -626,12 +614,10 @@ static void diag_print_snippet(FILE* out, Sources* sources, Loc loc, Cstr label,
   Cstr reset = color ? diag_color_reset() : "";
   Cstr caret = color ? caret_color : "";
 
-  fprintf(out, "%*s%s-->%s %s:%d:%d\n",
-          width, "", dim, reset, source->path->base, line + 1, caret_start + 1);
+  fprintf(out, "%*s%s-->%s %s:%d:%d\n", width, "", dim, reset, source->path->base, line + 1, caret_start + 1);
   fprintf(out, "%*s%s|%s\n", width + 1, "", dim, reset);
   fprintf(out, "%*d %s|%s ", width, line + 1, dim, reset);
-  diag_print_window(out, source, line_start, line_end,
-                    window_start, window_end, line_width);
+  diag_print_window(out, source, line_start, line_end, window_start, window_end, line_width);
   fputc('\n', out);
 
   fprintf(out, "%*s%s|%s ", width + 1, "", dim, reset);
@@ -645,7 +631,7 @@ static void diag_print_snippet(FILE* out, Sources* sources, Loc loc, Cstr label,
   fputc('\n', out);
 }
 
-static void diag_print_one(FILE* out, Diags* diags, I32 index, Sources* sources, B8 color) {
+void diag_render_one(String_Builder* sb, Diags* diags, I32 index) {
   Diag* diag = &diags->base[index];
   Cstr sev;
   Cstr sev_color;
@@ -685,28 +671,22 @@ static void diag_print_one(FILE* out, Diags* diags, I32 index, Sources* sources,
   diag_print_snippet(out, sources, diag->loc, NULL, caret_color, color);
 }
 
-void diag_print_all(Diags* diags, Sources* sources, FILE* out, B8 color) {
-  if (!diags || diags->printed) return;
-  diags->printed = true;
-
+Cstr diag_render_all(Diags* diags) {
   for (I32 i = 0; i < diags->length; i++) {
-    Diag* diag = &diags->base[i];
-    if (diag->severity == Diag_Note) continue;
-    diag_print_one(out, diags, i, sources, color);
+    Diag diag = diags->base[i];
+    if (diag.severity == Diag_Note) continue;
+    diag_render_one(out, diags, i, sources, color);
     for (I32 j = 0; j < diags->length; j++) {
       if (diags->base[j].severity == Diag_Note && diags->base[j].note_of == i) {
-        diag_print_one(out, diags, j, sources, color);
+        diag_render_one(diags, j, color);
       }
     }
   }
 
   if (diags->limit_hit) {
-    fprintf(out, "%serror[P009]%s: too many errors emitted; stopping now\n",
-            color ? diag_color_error() : "", color ? diag_color_reset() : "");
+    fprintf(out, "%serror[P009]%s: too many errors emitted; stopping now\n", diag_color_error(), diag_color_reset());
   }
   if (diags->error_count > 0 || diags->warning_count > 0) {
-    fprintf(out, "%d error%s, %d warning%s\n",
-            diags->error_count, diags->error_count == 1 ? "" : "s",
-            diags->warning_count, diags->warning_count == 1 ? "" : "s");
+    fprintf(out, "%d error%s, %d warning%s\n", diags->error_count, diags->error_count == 1 ? "" : "s", diags->warning_count, diags->warning_count == 1 ? "" : "s");
   }
 }

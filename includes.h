@@ -24,5 +24,5 @@
 #include "parse.c"
 #include "irgen.c"
 #include "sem.c"
-// #include "llvm.c"
+#include "llvm.c"
 // #include "irid.c"

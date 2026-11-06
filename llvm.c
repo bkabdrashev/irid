@@ -612,7 +612,7 @@ void llvm_ir(Ir* ir) {
       Type* object_type = type_pointer_declared(of_type->pointer);
       if (object_type->kind == Type_Kind_record) {
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
-        I32 position = hash_map_get_i32(&object_type->record->position_from_name, ir->name_offset.at);
+        I32 position = hash_map_get_i32(object_type->record->position_from_name, ir->name_offset.at);
         LLVMTypeRef llvm_type = llvm_of_type(object_type);
         result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, position, "");
       }
@@ -631,7 +631,7 @@ void llvm_ir(Ir* ir) {
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
 
         Type* element = sem_element_of_join(ir);
-        I32 position = hash_map_get_i32(&element->record->position_from_name, ir->name_offset.at);
+        I32 position = hash_map_get_i32(element->record->position_from_name, ir->name_offset.at);
 
         LLVMTypeRef llvm_ptr_record = LLVMPointerType(llvm_of_type(element), 0);
         LLVMValueRef casted = LLVMBuildBitCast(llvm_gen.builder, ptr, llvm_ptr_record, "");
@@ -642,7 +642,7 @@ void llvm_ir(Ir* ir) {
     }
     else if (of_type->kind == Type_Kind_record) {
       LLVMValueRef of = llvm_of_ir(ir->position.of);
-      I32 position = hash_map_get_i32(&of_type->record->position_from_name, ir->name_offset.at);
+      I32 position = hash_map_get_i32(of_type->record->position_from_name, ir->name_offset.at);
       result = LLVMBuildExtractValue(llvm_gen.builder, of, position, "");
     }
   } break;
@@ -699,7 +699,7 @@ void llvm_ir(Ir* ir) {
       Str* field_name = type_to->record->names[i];
       I32  position   = i;
       if (field_name) {
-        position = hash_map_get_i32(&type_from->record->position_from_name, field_name);
+        position = hash_map_get_i32(type_from->record->position_from_name, field_name);
       }
       LLVMValueRef field_val       = LLVMBuildExtractValue(llvm_gen.builder, llvm_val, position, "");
       Type*        field_from_type = type_from->record->types[position];
@@ -793,6 +793,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_len:     result = llvm_gen.none; break;
   case Ir_Kind_run:     result = llvm_gen.none; break;
   case Ir_Kind_use:     result = llvm_gen.none; break;
+  case Ir_Kind_import:  result = llvm_gen.none; break;
   case Ir_Kind_maybe_using: assert(0); break;
   case Ir_Kind_foreign: result = llvm_gen.none; break;
   case Ir_Kind_macro_par: assert(0); break;
@@ -867,7 +868,7 @@ LLVMValueRef llvm_fun(Fun* fun) {
   return llvm_gen.function;
 }
 
-I32 llvm_funs(Arena* arena, Funs funs) {
+I32 llvm_funs(Arena* arena, Fun_Pool funs) {
   llvm_gen.perm_arena = arena;
   llvm_gen.blocks = arena_push(arena, irgen.blocks.length * sizeof(LLVMBasicBlockRef));
   llvm_gen.irs    = arena_push(arena, irgen.irs.length    * sizeof(LLVMValueRef));
@@ -1013,49 +1014,37 @@ I32 llvm_funs(Arena* arena, Funs funs) {
   return 0;
 }
 
-void _test_llvm(Cstr source, Cstr expected, Cstr file_name, I32 line) {
-  Cstr basic        = file_read("basic.i");
-  I32  basic_length = (I32)file_size("basic.i");
-  I32  source_length  = strlen(source);
-  I32  length         = source_length + basic_length + 32;
-
-  Arena arena = arena_init(KB(4) * length + 256 * sizeof(Diag));
-                         str_init(&arena, 2*length);
-
-  Source_Map sources = {0};
-  Diags diags = diags_init(&arena, 256);
-  File_Id basic_file = source_add(&sources, &arena, "basic.i", basic, basic_length);
-
-  Tokens basic_tokens   = lex_source(&arena, &sources, basic_file, &diags);
-  Ast_Block ast         = parse_tokens(&arena, basic_tokens, &diags);
-
-  File_Id source_file = source_add(&sources, &arena, file_name, source, strlen(source));
-  Tokens source_tokens = lex_source(&arena, &sources, source_file, &diags);
-  Ast_Block source_ast = parse_tokens(&arena, source_tokens, &diags);
-
-  Ast_Node* node = ast_new_node(&arena, Ast_Kind_block);
-  node->block    = source_ast;
-
-  fa_init(&arena, ast.list, 1);
-  fa_add(ast.list, node);
-
-  Funs funs = irgen_ast(&arena, ast, length, &diags);
-  if (diags_has_errors(&diags)) {
-    diag_print_all(&diags, &sources, stdout, false);
+void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
+  Sources   sources = sources_init(16, 256);
+  Str_View  prepend = str_view("use import \"basic\"\n");
+  Str_View  source_sv = str_view(source_data);
+  Str_View  combined = str_view_cat(prepend, source_sv);
+  Source*   source  = sources_add_str_view(&sources, combined);
+  Tokens    tokens  = lex_source(source, &sources.diags);
+  Ast_Node* ast     = parse_tokens(&sources, tokens);
+  str_init(sources.char_count, sources.str_count);
+  Arena* arena = arena_init(KB(2) * sources.ast_count);
+  Fun_Pool funs = irgen_ast(arena, ast, sources.ast_count, &sources.diags);
+  if (diags_has_errors(&sources.diags)) {
+    diag_print_all(&sources.diags, &sources, stdout, false);
     assert(0);
   }
-  sem_funs(&arena, funs, &diags);
-  if (diags_has_errors(&diags)) {
-    diag_print_all(&diags, &sources, stdout, false);
+  sem_funs(arena, funs, &sources.diags);
+  if (diags_has_errors(&sources.diags)) {
+    diag_print_all(&sources.diags, &sources, stdout, false);
     assert(0);
   }
   {
-    Cstr result          = cstr_from_sem(&arena, funs);
+    Cstr result = cstr_from_sem(arena, funs);
     printf("\n%s", result);
   }
-                         llvm_funs(&arena, funs);
+  llvm_funs(arena, funs);
 
-  arena_free(&arena);
+  arena_free(arena);
+  str_free();
+  arena_free(source->arena);
+  str_view_free(combined);
+  sources_free(&sources);
 }
 
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
@@ -1065,7 +1054,7 @@ void llvm_test(void) {
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
-  // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
+  test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");
