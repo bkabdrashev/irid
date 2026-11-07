@@ -390,41 +390,50 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_expected_expression:
     if (diag->data.expected.end_of_line) {
-      fputs("expected an expression, found end of line", out);
+      string_builder_push_cstr(sb, "expected an expression, found end of line");
     }
     else {
-      fputs("expected an expression, found ", out);
-      diag_print_found(out, sources, diag->data.expected.found, diag->loc);
+      string_builder_push_cstr(sb, "expected an expression, found ");
+      diag_render_found(sb, diag->data.expected.found, diag->loc);
     }
   break;
   case Diag_Code_unexpected_token:
-    fputs("unexpected ", out);
-    diag_print_found(out, sources, diag->data.expected.found, diag->loc);
+    string_builder_push_cstr(sb, "unexpected ");
+    diag_render_found(sb, diag->data.expected.found, diag->loc);
   break;
   case Diag_Code_unclosed_delimiter:
-    fprintf(out, "expected '%s' to close this '%s'", cstr_from_token_kind(diag->data.delimiter.close), cstr_from_token_kind(diag->data.delimiter.open));
+    string_builder_push_cstr(sb, "expected '");
+    string_builder_push_cstr(sb, cstr_from_token_kind(diag->data.delimiter.close));
+    string_builder_push_cstr(sb, "' to close this '");
+    string_builder_push_cstr(sb, cstr_from_token_kind(diag->data.delimiter.open));
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_unmatched_delimiter:
-    fprintf(out, "unmatched '%s'",
-            cstr_from_token_kind(diag->data.delimiter.open));
+    string_builder_push_cstr(sb, "unmatched '");
+    string_builder_push_cstr(sb, cstr_from_token_kind(diag->data.delimiter.open));
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_duplicate_declaration:
-    fprintf(out, "duplicate declaration of '%s'", diag->data.name->base);
+    string_builder_push_cstr(sb, "duplicate declaration of '");
+    string_builder_push_cstr(sb, diag->data.name->base);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_bad_declaration_target:
-    fputs("expected a name before ':'", out);
+    string_builder_push_cstr(sb, "expected a name before ':'");
   break;
   case Diag_Code_expected_block:
-    fputs("expected an indented block", out);
+    string_builder_push_cstr(sb, "expected an indented block");
   break;
   case Diag_Code_too_many_errors:
-    fputs("too many errors emitted; stopping now", out);
+    string_builder_push_cstr(sb, "too many errors emitted; stopping now");
   break;
   case Diag_Code_undefined_name:
-    fprintf(out, "use of undeclared name '%s'", diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "use of undeclared name '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_not_assignable:
-    fprintf(out, "cannot assign to '%s'", diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "cannot assign to '", diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_shadowed_declaration:
     fprintf(out, "declaration of '%s' shadows a previous declaration", diag->data.name ? diag->data.name->base : "?");
@@ -436,15 +445,16 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     fprintf(out, "%s is not supported yet", diag->data.text ? diag->data.text : "this construct");
   break;
   case Diag_Code_invalid_assignment_target:
-    fputs("cannot assign to this expression", out);
+    string_builder_push_cstr(sb, "cannot assign to this expression");
   break;
   case Diag_Code_invalid_field_access:
-    fputs("field access requires a name or an integer index", out);
+    string_builder_push_cstr(sb, "field access requires a name or an integer index");
   break;
   case Diag_Code_type_mismatch:
-    fprintf(out, "type mismatch: expected %s, found %s",
-            diag->data.types.expected ? diag->data.types.expected : "unknown",
-            diag->data.types.found ? diag->data.types.found : "unknown");
+    string_builder_push_cstr("type mismatch: expected");
+    string_builder_push_str(diag->data.types.expected);
+    string_builder_push_cstr("found ")
+    string_builder_push_str(diag->data.types.found);
   break;
   case Diag_Code_unknown_field:
     fprintf(out, "record has no field named '%s'",
@@ -480,7 +490,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     fprintf(out, "cannot assign to constant '%s'", diag->data.name ? diag->data.name->base : "?");
   break;
   case Diag_Code_invalid_store:
-    fputs("cannot assign to this expression", out);
+    string_builder_push_cstr(sb, "cannot assign to this expression");
   break;
   case Diag_Code_invalid_dereference:
     fprintf(out, "cannot dereference a value of type %s",
@@ -507,7 +517,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
             diag->data.types.found ? diag->data.types.found : "unknown");
   break;
   case Diag_Code_join_layout_mismatch:
-    fputs("field has an inconsistent layout across joined records", out);
+    string_builder_push_cstr(sb, "field has an inconsistent layout across joined records");
   break;
   case Diag_Code_opened_here:
     fprintf(out, "'%s' opened here",
@@ -517,7 +527,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     fprintf(out, "'%s' was first declared here", diag->data.name->base);
   break;
   default:
-    fputs("unknown diagnostic", out);
+    string_builder_push_cstr(sb, "unknown diagnostic");
   break;
   }
 }
