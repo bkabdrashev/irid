@@ -129,6 +129,7 @@ struct Parser {
   I32  tok;
 
   Ast_Decls* decls;
+  Ast_Node*  uses;
 
   Diags* diags;
   I32    last_error_tok;
@@ -1173,6 +1174,8 @@ Ast_Node* parse_statement(Parser* parser) {
     // TODO: use name: exp
     Ast_Node* exp = parse_statement(parser);
     node = parse_new_unary(parser, Ast_Kind_use, exp);
+    // TODO: track uses to apply them before all other declarations
+    parser->uses
   } break;
   case Token_Kind_import: {
     Token path_token = *parse_peek(parser);

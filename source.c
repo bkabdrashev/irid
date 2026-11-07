@@ -1,6 +1,7 @@
 typedef struct Ast_Node Ast_Node;
 typedef struct Decls Decls;
 typedef struct Source Source;
+typedef struct Ir   Ir;
 typedef struct Type Type;
 struct Source {
   Arena* arena;
@@ -10,6 +11,7 @@ struct Source {
   U32* line_starts;
   I32  line_count;
   Ast_Node* ast;
+  Ir*       ir_var;
   Hash_Map* decls; // str->sym
   Type*     type;
 };

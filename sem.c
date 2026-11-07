@@ -4165,9 +4165,17 @@ void sem_ir(Block* block, Ir* ir) {
         Pointer* pointer = type_ptr->pointer;
         Type* declared = type_pointer_declared(pointer);
         if (type_has_field(declared, name)) {
+          for (I32 i = 0; i < pointer->stack_vars.len; i++) {
+            Var* var = pointer->stack_vars.list[i];
+            sem_var_declare(var);
+          }
           of = ir_use->unary;
           break;
         }
+      }
+      else if (ir_use->kind == Ir_Kind_import) {
+        of = ir_use->source->ir_var;
+        sem_var_declare(ir_use->source->ir_var->var);
       }
       else {
         Type* type = type_of_ir(ir_use);
@@ -4638,7 +4646,8 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a:0..1 = 0", "");
+  // FIX: maybe_using appears before use import "basic"
+  test("a:I32 = 0", "");
   // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");

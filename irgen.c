@@ -784,6 +784,7 @@ Fun* irgen_fun_top(void) {
 Var* irgen_var_new(void) {
   Fun* fun = irgen_fun_top();
   Var* var = &new(irgen.vars);
+  var->global = irgen.scope_stack.length == 1;
   fa_extend(irgen.temp_var_arena, fun->vars, var);
   return var;
 }
@@ -1248,9 +1249,17 @@ Ir* irgen_ast_node(Ast_Node* node) {
   case Ast_Kind_import: {
     if (node->source->ast) {
       Ast_Decls* ast_decls = node->source->ast->block.scope;
-      // TODO: Scope should be seperate per file
-      irgen_scope_enter(ast_decls);
-      node->source->decls = irgen_scope_leave();
+      if (!node->source->decls) {
+        // TODO: Scope should be seperate per file
+        Var* var = irgen_var_new();
+        var->global = true;
+        var->name = node->source->path;
+        irgen_scope_enter(ast_decls);
+        node->source->decls = irgen_scope_leave();
+        irgen_var_declare(var, node);
+        irgen_push_declare(var);
+        node->source->ir_var = irgen_push_var(var);
+      }
     }
     result = irgen_push_import(node->source);
   } break;
@@ -1380,7 +1389,6 @@ Ir* irgen_ast_node(Ast_Node* node) {
       Var* var = irgen_var_new();
            var->kind   = Var_Kind_none;
            var->state  = Var_State_unresolved;
-           var->global = irgen.scope_stack.length == 1;
            var->name   = irgen.str_anon;
            var->declared_ir = lhs;
       Ir* ir_var = irgen_push_var(var);
