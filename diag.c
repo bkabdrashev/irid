@@ -190,7 +190,7 @@ Source* sources_add(Sources* sources, Str_View path) {
     }
   }
 
-  Str_View extension = str_view("irid");
+  Str_View extension = str_view_from_cstr("irid");
   if (!is_extension_present) {
     C8* new_base = arena_push(sources->temp_arena, path.length + 5);
     for (Umi i = 0; i < path.length; i++) {
@@ -364,7 +364,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   case Diag_Code_invalid_digit:
     string_builder_push_cstr(sb, "digit '");
     string_builder_push_c8(sb, diag->data.invalid_digit.digit);
-    string_builder_push_cstr(sb, " ' is not valid in a base-");
+    string_builder_push_cstr(sb, "' is not valid in a base-");
     string_builder_push_i64(sb, diag->data.invalid_digit.base);
     string_builder_push_cstr(sb, " literal");
   break;
@@ -376,7 +376,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_missing_digits:
     string_builder_push_cstr(sb, "expected at least one digit after '");
-    string_builder_push_cstr(sb, "diag->data.text");
+    string_builder_push_cstr(sb, diag->data.text);
     string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_number_overflow:
@@ -385,7 +385,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   case Diag_Code_expected_token:
     string_builder_push_cstr(sb, "expected '");
     string_builder_push_cstr(sb, cstr_from_token_kind(diag->data.expected.expected));
-    string_builder_push_cstr(sb, "' but found");
+    string_builder_push_cstr(sb, "' but found ");
     diag_render_found(sb, diag->data.expected.found, diag->loc);
   break;
   case Diag_Code_expected_expression:
@@ -415,7 +415,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_duplicate_declaration:
     string_builder_push_cstr(sb, "duplicate declaration of '");
-    string_builder_push_cstr(sb, diag->data.name->base);
+    string_builder_push_str(sb, diag->data.name);
     string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_bad_declaration_target:
@@ -433,16 +433,22 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_not_assignable:
-    string_builder_push_cstr(sb, "cannot assign to '", diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "cannot assign to '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_shadowed_declaration:
-    fprintf(out, "declaration of '%s' shadows a previous declaration", diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "declaration of '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "' shadows a previous declaration");
   break;
   case Diag_Code_invalid_function_parameter:
-    fprintf(out, "invalid function parameter: %s", diag->data.text ? diag->data.text : "expected a name or record");
+    string_builder_push_cstr(sb, "invalid function parameter: ");
+    string_builder_push_cstr(sb, diag->data.text);
   break;
   case Diag_Code_unsupported_construct:
-    fprintf(out, "%s is not supported yet", diag->data.text ? diag->data.text : "this construct");
+    string_builder_push_cstr(sb, diag->data.text);
+    string_builder_push_cstr(sb, " is not supported yet");
   break;
   case Diag_Code_invalid_assignment_target:
     string_builder_push_cstr(sb, "cannot assign to this expression");
@@ -451,80 +457,94 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_cstr(sb, "field access requires a name or an integer index");
   break;
   case Diag_Code_type_mismatch:
-    string_builder_push_cstr("type mismatch: expected");
-    string_builder_push_str(diag->data.types.expected);
-    string_builder_push_cstr("found ")
-    string_builder_push_str(diag->data.types.found);
+    string_builder_push_cstr(sb, "type mismatch: expected ");
+    string_builder_push_cstr(sb, diag->data.types.expected);
+    string_builder_push_cstr(sb, ", found ");
+    string_builder_push_cstr(sb, diag->data.types.found);
   break;
   case Diag_Code_unknown_field:
-    fprintf(out, "record has no field named '%s'",
-            diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "record has no field named '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_join_field_missing:
-    fprintf(out, "field '%s' is not present in every possible record",
-            diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "field '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "' is not present in every possible record");
   break;
   case Diag_Code_join_field_mismatch:
-    fprintf(out, "field '%s' has an inconsistent layout across joined records",
-            diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "field '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "' has an inconsistent layout across joined records");
   break;
   case Diag_Code_empty_narrowed_record:
-    fprintf(out, "cannot access field '%s' of an empty narrowed record",
-            diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "cannot access field '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "' of an empty narrowed record");
   break;
   case Diag_Code_invalid_escape:
-    fprintf(out, "invalid escape sequence '%s' in string literal",
-            diag->data.text ? diag->data.text : "?");
+    string_builder_push_cstr(sb, "invalid escape sequence '");
+    string_builder_push_cstr(sb, diag->data.text);
+    string_builder_push_cstr(sb, "' in string literal");
   break;
   case Diag_Code_call_argument_mismatch:
-    fprintf(out, "invalid argument: expected %s, found %s",
-            diag->data.types.expected ? diag->data.types.expected : "unknown",
-            diag->data.types.found ? diag->data.types.found : "unknown");
+    string_builder_push_cstr(sb, "invalid argument: expected ");
+    string_builder_push_cstr(sb, diag->data.types.expected);
+    string_builder_push_cstr(sb, ", found ");
+    string_builder_push_cstr(sb, diag->data.types.found);
   break;
   case Diag_Code_invalid_operand:
-    fprintf(out, "invalid operand of type %s for '%s'",
-            diag->data.operand.type ? diag->data.operand.type : "unknown",
-            diag->data.operand.op ? diag->data.operand.op : "?");
+    string_builder_push_cstr(sb, "invalid operand of type ");
+    string_builder_push_cstr(sb, diag->data.operand.type);
+    string_builder_push_cstr(sb, " for '");
+    string_builder_push_cstr(sb, diag->data.operand.op);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_assign_to_constant:
-    fprintf(out, "cannot assign to constant '%s'", diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "cannot assign to constant '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_invalid_store:
     string_builder_push_cstr(sb, "cannot assign to this expression");
   break;
   case Diag_Code_invalid_dereference:
-    fprintf(out, "cannot dereference a value of type %s",
-            diag->data.types.found ? diag->data.types.found : "unknown");
+    string_builder_push_cstr(sb, "cannot dereference a value of type ");
+    string_builder_push_cstr(sb, diag->data.types.found);
   break;
   case Diag_Code_unsupported_semantics:
-    fprintf(out, "%s is not supported yet",
-            diag->data.text ? diag->data.text : "this construct");
+    string_builder_push_cstr(sb, diag->data.text);
+    string_builder_push_cstr(sb, " is not supported yet");
   break;
   case Diag_Code_cyclic_declaration:
-    fprintf(out, "cyclic declaration of '%s'",
-            diag->data.name ? diag->data.name->base : "?");
+    string_builder_push_cstr(sb, "cyclic declaration of '");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_invalid_condition:
-    fprintf(out, "condition must have a scalar type, found %s",
-            diag->data.types.found ? diag->data.types.found : "unknown");
+    string_builder_push_cstr(sb, "condition must have a scalar type, found ");
+    string_builder_push_cstr(sb, diag->data.types.found);
   break;
   case Diag_Code_invalid_array_length:
-    fprintf(out, "array length must be a single constant, found %s",
-            diag->data.types.found ? diag->data.types.found : "unknown");
+    string_builder_push_cstr(sb, "array length must be a single constant, found ");
+    string_builder_push_cstr(sb, diag->data.types.found);
   break;
   case Diag_Code_invalid_field_base:
-    fprintf(out, "cannot access a field of type %s",
-            diag->data.types.found ? diag->data.types.found : "unknown");
+    string_builder_push_cstr(sb, "cannot access a field of type ");
+    string_builder_push_cstr(sb, diag->data.types.found);
   break;
   case Diag_Code_join_layout_mismatch:
     string_builder_push_cstr(sb, "field has an inconsistent layout across joined records");
   break;
   case Diag_Code_opened_here:
-    fprintf(out, "'%s' opened here",
-            cstr_from_token_kind(diag->data.delimiter.open));
+    string_builder_push_cstr(sb, "'");
+    string_builder_push_cstr(sb, cstr_from_token_kind(diag->data.delimiter.open));
+    string_builder_push_cstr(sb, "' opened here");
   break;
   case Diag_Code_previous_declaration:
-    fprintf(out, "'%s' was first declared here", diag->data.name->base);
+    string_builder_push_cstr(sb, "'");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "' was first declared here");
   break;
   default:
     string_builder_push_cstr(sb, "unknown diagnostic");
@@ -546,9 +566,9 @@ static I32 diag_display_column(Source* source, U32 line_start, U32 offset) {
   return column;
 }
 
-static void diag_render_window(Source* source, U32 start, U32 end, I32 window_start, I32 window_end, I32 line_width) {
+static void diag_render_window(String_Builder* sb, Source* source, U32 start, U32 end, I32 window_start, I32 window_end, I32 line_width) {
   I32 column = 0;
-  if (window_start > 0) fputs("...", out);
+  if (window_start > 0) string_builder_push_cstr(sb, "...");
   for (U32 at = start; at < end; at++) {
     if (column >= window_end) break;
     C8 c = source->data[at];
@@ -556,17 +576,17 @@ static void diag_render_window(Source* source, U32 start, U32 end, I32 window_st
       I32 next = (column / 4 + 1) * 4;
       for (I32 at_column = column; at_column < next; at_column++) {
         if (at_column >= window_start && at_column < window_end) {
-          fputc(' ', out);
+          string_builder_push_c8(sb, ' ');
         }
       }
       column = next;
     }
     else {
-      if (column >= window_start) fputc(c, out);
+      if (column >= window_start) string_builder_push_c8(sb, c);
       column += 1;
     }
   }
-  if (window_end < line_width) fputs("...", out);
+  if (window_end < line_width) string_builder_push_cstr(sb, "...");
 }
 
 static I32 diag_digits(I32 value) {
@@ -576,6 +596,12 @@ static I32 diag_digits(I32 value) {
     result += 1;
   }
   return result;
+}
+
+static void diag_push_spaces(String_Builder* sb, I32 count) {
+  for (I32 i = 0; i < count; i++) {
+    string_builder_push_c8(sb, ' ');
+  }
 }
 
 void diag_render_snippet(String_Builder* sb, Loc loc, Cstr label, Cstr caret_color, B8 color) {
@@ -624,24 +650,51 @@ void diag_render_snippet(String_Builder* sb, Loc loc, Cstr label, Cstr caret_col
   Cstr reset = color ? diag_color_reset() : "";
   Cstr caret = color ? caret_color : "";
 
-  fprintf(out, "%*s%s-->%s %s:%d:%d\n", width, "", dim, reset, source->path->base, line + 1, caret_start + 1);
-  fprintf(out, "%*s%s|%s\n", width + 1, "", dim, reset);
-  fprintf(out, "%*d %s|%s ", width, line + 1, dim, reset);
-  diag_print_window(out, source, line_start, line_end, window_start, window_end, line_width);
-  fputc('\n', out);
+  diag_push_spaces(sb, width);
+  string_builder_push_cstr(sb, dim);
+  string_builder_push_cstr(sb, "-->");
+  string_builder_push_cstr(sb, reset);
+  string_builder_push_cstr(sb, " ");
+  string_builder_push_cstr(sb, source->path ? source->path->base : "<anonymous>");
+  string_builder_push_cstr(sb, ":");
+  string_builder_push_i64(sb, line + 1);
+  string_builder_push_cstr(sb, ":");
+  string_builder_push_i64(sb, caret_start + 1);
+  string_builder_push_cstr(sb, "\n");
 
-  fprintf(out, "%*s%s|%s ", width + 1, "", dim, reset);
-  for (I32 i = 0; i < caret_column; i++) fputc(' ', out);
-  fputs(caret, out);
-  for (I32 i = 0; i < caret_width; i++) fputc('^', out);
-  fputs(reset, out);
+  diag_push_spaces(sb, width + 1);
+  string_builder_push_cstr(sb, dim);
+  string_builder_push_cstr(sb, "|");
+  string_builder_push_cstr(sb, reset);
+  string_builder_push_cstr(sb, "\n");
+
+  diag_push_spaces(sb, width - diag_digits(line + 1));
+  string_builder_push_i64(sb, line + 1);
+  string_builder_push_cstr(sb, " ");
+  string_builder_push_cstr(sb, dim);
+  string_builder_push_cstr(sb, "|");
+  string_builder_push_cstr(sb, reset);
+  string_builder_push_cstr(sb, " ");
+  diag_render_window(sb, source, line_start, line_end, window_start, window_end, line_width);
+  string_builder_push_cstr(sb, "\n");
+
+  diag_push_spaces(sb, width + 1);
+  string_builder_push_cstr(sb, dim);
+  string_builder_push_cstr(sb, "|");
+  string_builder_push_cstr(sb, reset);
+  string_builder_push_cstr(sb, " ");
+  diag_push_spaces(sb, caret_column);
+  string_builder_push_cstr(sb, caret);
+  for (I32 i = 0; i < caret_width; i++) string_builder_push_c8(sb, '^');
+  string_builder_push_cstr(sb, reset);
   if (label) {
-    fprintf(out, " %s", label);
+    string_builder_push_cstr(sb, " ");
+    string_builder_push_cstr(sb, label);
   }
-  fputc('\n', out);
+  string_builder_push_cstr(sb, "\n");
 }
 
-void diag_render_one(String_Builder* sb, Diags* diags, I32 index) {
+void diag_render_one(String_Builder* sb, Diags* diags, I32 index, B8 color) {
   Diag* diag = &diags->base[index];
   Cstr sev;
   Cstr sev_color;
@@ -662,41 +715,61 @@ void diag_render_one(String_Builder* sb, Diags* diags, I32 index) {
   Cstr reset = color ? diag_color_reset() : "";
 
   if (diag->severity == Diag_Note) {
-    fprintf(out, "%snote%s: ", sev_color, reset);
+    string_builder_push_cstr(sb, sev_color);
+    string_builder_push_cstr(sb, "note");
+    string_builder_push_cstr(sb, reset);
+    string_builder_push_cstr(sb, ": ");
   }
   else {
-    fprintf(out, "%s%s[%s]%s: ",
-            sev_color, sev, cstr_from_diag_code(diag->code), reset);
+    string_builder_push_cstr(sb, sev_color);
+    string_builder_push_cstr(sb, sev);
+    string_builder_push_cstr(sb, "[");
+    string_builder_push_cstr(sb, cstr_from_diag_code(diag->code));
+    string_builder_push_cstr(sb, "]");
+    string_builder_push_cstr(sb, reset);
+    string_builder_push_cstr(sb, ": ");
   }
-  diag_print_message(out, diag, sources);
+  diag_render_message(sb, diag);
 #if DIAG_SHOW_COMPILER_LOCATION
   if (diag->compiler_file) {
-    fprintf(out, " (compiler: %s:%d)", diag->compiler_file, diag->compiler_line);
+    string_builder_push_cstr(sb, " (compiler: ");
+    string_builder_push_cstr(sb, diag->compiler_file);
+    string_builder_push_cstr(sb, ":");
+    string_builder_push_i64(sb, diag->compiler_line);
+    string_builder_push_cstr(sb, ")");
   }
 #endif
-  fputc('\n', out);
+  string_builder_push_cstr(sb, "\n");
   Cstr caret_color = diag_color_error();
   if (diag->severity == Diag_Warning) caret_color = diag_color_warn();
   else if (diag->severity == Diag_Note) caret_color = diag_color_note();
-  diag_print_snippet(out, sources, diag->loc, NULL, caret_color, color);
+  diag_render_snippet(sb, diag->loc, NULL, caret_color, color);
 }
 
-Cstr diag_render_all(Diags* diags) {
+Cstr diag_render_all(Arena* arena, Diags* diags, B8 color) {
+  String_Builder sb = string_builder_begin(arena);
   for (I32 i = 0; i < diags->length; i++) {
-    Diag diag = diags->base[i];
-    if (diag.severity == Diag_Note) continue;
-    diag_render_one(out, diags, i, sources, color);
+    Diag* diag = &diags->base[i];
+    if (diag->severity == Diag_Note) continue;
+    diag_render_one(&sb, diags, i, color);
     for (I32 j = 0; j < diags->length; j++) {
       if (diags->base[j].severity == Diag_Note && diags->base[j].note_of == i) {
-        diag_render_one(diags, j, color);
+        diag_render_one(&sb, diags, j, color);
       }
     }
   }
 
   if (diags->limit_hit) {
-    fprintf(out, "%serror[P009]%s: too many errors emitted; stopping now\n", diag_color_error(), diag_color_reset());
+    string_builder_push_cstr(&sb, color ? diag_color_error() : "");
+    string_builder_push_cstr(&sb, "error[P009]");
+    string_builder_push_cstr(&sb, color ? diag_color_reset() : "");
+    string_builder_push_cstr(&sb, ": too many errors emitted; stopping now\n");
   }
   if (diags->error_count > 0 || diags->warning_count > 0) {
-    fprintf(out, "%d error%s, %d warning%s\n", diags->error_count, diags->error_count == 1 ? "" : "s", diags->warning_count, diags->warning_count == 1 ? "" : "s");
+    string_builder_push_i64(&sb, diags->error_count);
+    string_builder_push_cstr(&sb, diags->error_count == 1 ? " error, " : " errors, ");
+    string_builder_push_i64(&sb, diags->warning_count);
+    string_builder_push_cstr(&sb, diags->warning_count == 1 ? " warning\n" : " warnings\n");
   }
+  return string_builder_end(&sb);
 }

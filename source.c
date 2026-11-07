@@ -61,16 +61,18 @@ I64 i64_from_loc(Loc loc) {
 
   if (*data == '0') {
     data++;
-    if (*data == 'x' || *data == 'X') {
-      base = 16;
-      data++;
-    }
-    else if (*data == 'b' || *data == 'B') {
-      base = 2;
-      data++;
-    }
-    else {
-      base = 8;
+    if (data < end) {
+      if (*data == 'x' || *data == 'X') {
+        base = 16;
+        data++;
+      }
+      else if (*data == 'b' || *data == 'B') {
+        base = 2;
+        data++;
+      }
+      else {
+        base = 8;
+      }
     }
   }
   for (; data < end; data++) {

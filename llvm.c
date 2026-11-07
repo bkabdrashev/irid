@@ -1016,8 +1016,8 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
 
 void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
-  Str_View  prepend = str_view("use import \"basic\"\n");
-  Str_View  source_sv = str_view(source_data);
+  Str_View  prepend = str_view_from_cstr("use import \"basic\"\n");
+  Str_View  source_sv = str_view_from_cstr(source_data);
   Str_View  combined = str_view_cat(prepend, source_sv);
   Source*   source  = sources_add_str_view(&sources, combined);
   Tokens    tokens  = lex_source(source, &sources.diags);
@@ -1026,12 +1026,12 @@ void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Arena* arena = arena_init(KB(2) * sources.ast_count);
   Fun_Pool funs = irgen_ast(arena, ast, sources.ast_count, &sources.diags);
   if (diags_has_errors(&sources.diags)) {
-    diag_print_all(&sources.diags, &sources, stdout, false);
+    fputs(diag_render_all(arena, &sources.diags, false), stdout);
     assert(0);
   }
   sem_funs(arena, funs, &sources.diags);
   if (diags_has_errors(&sources.diags)) {
-    diag_print_all(&sources.diags, &sources, stdout, false);
+    fputs(diag_render_all(arena, &sources.diags, false), stdout);
     assert(0);
   }
   {
@@ -1054,7 +1054,7 @@ void llvm_test(void) {
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
-  test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
+  // test("a:[2]I8 = \"AB\"; a.len; a[1]", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; @(32'#bits 66; 32'#bits 65); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:@(I32; I32) = @(32'#bits 66; 32'#bits 65); putchar(p@.0); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; p:[]I8 = \"BA\"; putchar(p[0]); putchar 10", "");

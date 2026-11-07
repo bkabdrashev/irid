@@ -303,14 +303,14 @@ Tokens lex_source(Source* source, Diags* diags) {
       }
       Umi length = lexer.stream - start;
       Str_View sv = { .base = start, .length = length };
-      if (str_view_is_equal(str_view("while"), sv))  token.kind = Token_Kind_while;
-      else if (str_view_is_equal(str_view("if"), sv))     token.kind = Token_Kind_if;
-      else if (str_view_is_equal(str_view("else"), sv))   token.kind = Token_Kind_else;
-      else if (str_view_is_equal(str_view("do"), sv))     token.kind = Token_Kind_do;
-      else if (str_view_is_equal(str_view("return"), sv)) token.kind = Token_Kind_return;
-      else if (str_view_is_equal(str_view("break"), sv))  token.kind = Token_Kind_break;
-      else if (str_view_is_equal(str_view("use"), sv))    token.kind = Token_Kind_use;
-      else if (str_view_is_equal(str_view("import"), sv)) token.kind = Token_Kind_import;
+      if (str_view_is_equal(str_view_from_cstr("while"), sv))  token.kind = Token_Kind_while;
+      else if (str_view_is_equal(str_view_from_cstr("if"), sv))     token.kind = Token_Kind_if;
+      else if (str_view_is_equal(str_view_from_cstr("else"), sv))   token.kind = Token_Kind_else;
+      else if (str_view_is_equal(str_view_from_cstr("do"), sv))     token.kind = Token_Kind_do;
+      else if (str_view_is_equal(str_view_from_cstr("return"), sv)) token.kind = Token_Kind_return;
+      else if (str_view_is_equal(str_view_from_cstr("break"), sv))  token.kind = Token_Kind_break;
+      else if (str_view_is_equal(str_view_from_cstr("use"), sv))    token.kind = Token_Kind_use;
+      else if (str_view_is_equal(str_view_from_cstr("import"), sv)) token.kind = Token_Kind_import;
       else {
         token.kind  = Token_Kind_name;
       }

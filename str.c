@@ -15,7 +15,6 @@ struct String_Builder {
   Arena* arena;
   C8*    base;
   Umi    size;
-  Umi    cap;
 };
 
 B8 str_view_is_equal(Str_View a, Str_View b) {
@@ -37,7 +36,7 @@ Str_View str_view_from_range(Cstr start, Cstr end) {
   return result;
 }
 
-Str_View str_view(Cstr cstr) {
+Str_View str_view_from_cstr(Cstr cstr) {
   Umi len = strlen(cstr);
   Str_View result = { cstr, len };
   return result;
@@ -139,34 +138,44 @@ void str_free() {
   arena_free(internal_strs.arena);
 }
 
+void string_builder_reserve(String_Builder* sb, Umi extra) {
+  arena_reserve(sb->arena, sb->base, sb->size + extra);
+}
+
 String_Builder string_builder_begin(Arena* arena) {
   String_Builder sb = { .arena = arena };
+  sb.base = arena_push(arena, 0);
   return sb;
 }
 
 Cstr string_builder_end(String_Builder* sb) {
+  string_builder_reserve(sb, 1);
   sb->base[sb->size] = '\0';
   return sb->base;
 }
 
 void string_builder_push_cstr(String_Builder* sb, Cstr str) {
   Umi length = strlen(str);
+  string_builder_reserve(sb, length);
   memcpy(sb->base + sb->size, str, length);
   sb->size += length;
 }
 
 void string_builder_push_c8(String_Builder* sb, C8 c8) {
+  string_builder_reserve(sb, 1);
   sb->base[sb->size] = c8;
   sb->size += 1;
 }
 
 void string_builder_push_str_view(String_Builder* sb, Str_View str_view) {
+  string_builder_reserve(sb, str_view.length);
   memcpy(sb->base + sb->size, str_view.base, str_view.length);
   sb->size += str_view.length;
 }
 
 void string_builder_push_indent(String_Builder* sb, I32 indent) {
   Umi length = indent * 2;
+  string_builder_reserve(sb, length);
   for (I32 i = 0; i < indent; i++) {
     sb->base[sb->size++] = ' ';
     sb->base[sb->size++] = ' ';
@@ -181,7 +190,7 @@ void string_builder_push_i64(String_Builder* sb, I64 val) {
 
 void string_builder_push_hex8(String_Builder* sb, U8 u8) {
   C8 line_str[21];
-  sprintf(line_str, "0x%x", u8);
+  sprintf(line_str, "0x%02x", u8);
   string_builder_push_cstr(sb, line_str);
 }
 
@@ -192,11 +201,13 @@ void string_builder_push_f64(String_Builder* sb, F64 val) {
 }
 
 void string_builder_push_str(String_Builder* sb, Str* str) {
+  string_builder_reserve(sb, str->length);
   memcpy(sb->base + sb->size, str->base, str->length);
   sb->size += str->length;
 }
 
 void string_builder_push_string_builder(String_Builder* sb, String_Builder one) {
+  string_builder_reserve(sb, one.size);
   if (one.size) {
     memcpy(sb->base + sb->size, one.base, one.size);
     sb->size += one.size;

@@ -327,8 +327,24 @@ Arena* arena_init(Umi capacity) {
   return arena;
 }
 
-#define arena_push_type(arena, type, length) arena_push(arena, sizeof(type) * length)
-#define arena_push_zero_type(arena, type, length) arena_push_zero(arena, sizeof(type) * length)
+#define arena_push_type(arena, type, length) arena_push((arena), sizeof(type) * (length))
+#define arena_push_zero_type(arena, type, length) arena_push_zero((arena), sizeof(type) * (length))
+
+void arena_reserve(Arena* arena, void* base, Umi size) {
+  assert(arena->base <= (C8*)base);
+  assert((C8*)base <= arena->top);
+  assert((C8*)base + size <= arena->base + arena->total);
+
+  Umi offset = size - (arena->top - (C8*)base);
+  Umi aligned_size = align_up(offset, arena->alignment);
+  Umi redzone_size = aligned_size;
+  Umi total        = aligned_size + redzone_size;
+
+  ASAN_UNPOISON(base, size);
+
+  arena->top = (C8*)arena->top + total;
+  profile_arena_push(size, total);
+}
 
 void* arena_push(Arena* arena, Umi size) {
   Umi aligned_size = align_up(size, arena->alignment);
@@ -338,10 +354,8 @@ void* arena_push(Arena* arena, Umi size) {
   assert(arena->top + total <= arena->base + arena->total);
 
   void* result   = arena->top;
-  void* redzone  = arena->top + aligned_size;
 
-  ASAN_UNPOISON(result,  aligned_size);
-  ASAN_POISON  (redzone, redzone_size);
+  ASAN_UNPOISON(result,  size);
 
   arena->top = (C8*)arena->top + total;
   profile_arena_push(size, total);

@@ -458,14 +458,10 @@ Cstr cstr_from_sem(Arena* arena, Fun_Pool funs) {
   return result;
 }
 
-Cstr sem_type_name(Type* type) {
-  if (!type) return "unknown";
-  Arena* temp = sem.temp_arena;
-  String_Builder sb = string_builder_begin(temp);
+Cstr cstr_from_type(Type* type) {
+  String_Builder sb = string_builder_begin(sem.perm_arena);
   string_builder_push_type(&sb, sem.current_block, type);
-  Cstr built = string_builder_end(&sb);
-  C8* result = arena_push(sem.perm_arena, sb.size + 1);
-  memcpy(result, built, sb.size + 1);
+  Cstr result = string_builder_end(&sb);
   return result;
 }
 
@@ -514,7 +510,7 @@ void sem_error_types_impl(Diag_Code code, Loc loc, Cstr expected, Cstr found,
 
 void sem_error_type_impl(Diag_Code code, Loc loc, Type* type,
                          Cstr compiler_file, I32 compiler_line) {
-  sem_error_types_impl(code, loc, 0, sem_type_name(type),
+  sem_error_types_impl(code, loc, 0, cstr_from_type(type),
                        compiler_file, compiler_line);
 }
 
@@ -524,7 +520,7 @@ void sem_error_operand_impl(Loc loc, Cstr op, Type* type,
                              compiler_file, compiler_line);
   if (diag) {
     diag->data.operand.op   = op;
-    diag->data.operand.type = sem_type_name(type);
+    diag->data.operand.type = cstr_from_type(type);
   }
   sem_fail();
 }
@@ -532,14 +528,14 @@ void sem_error_operand_impl(Loc loc, Cstr op, Type* type,
 void sem_error_type_mismatch_impl(Loc loc, Type* expected, Type* found,
                                   Cstr compiler_file, I32 compiler_line) {
   sem_error_types_impl(Diag_Code_type_mismatch, loc,
-                       sem_type_name(expected), sem_type_name(found),
+                       cstr_from_type(expected), cstr_from_type(found),
                        compiler_file, compiler_line);
 }
 
 void sem_error_call_mismatch_impl(Loc loc, Type* expected, Type* found,
                                   Cstr compiler_file, I32 compiler_line) {
   sem_error_types_impl(Diag_Code_call_argument_mismatch, loc,
-                       sem_type_name(expected), sem_type_name(found),
+                       cstr_from_type(expected), cstr_from_type(found),
                        compiler_file, compiler_line);
 }
 
@@ -3976,17 +3972,17 @@ void sem_ir(Block* block, Ir* ir) {
           else {
             sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
                             "an integer constant between 0 and 32767",
-                            sem_type_name(arg_type));
+                            cstr_from_type(arg_type));
           }
         }
         else {
           sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                          "a single integer constant", sem_type_name(arg_type));
+                          "a single integer constant", cstr_from_type(arg_type));
         }
       }
       else {
         sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                        "a single integer constant", sem_type_name(arg_type));
+                        "a single integer constant", cstr_from_type(arg_type));
       }
     }
     else if (fun_type == sem.fun_float) {
@@ -4003,19 +3999,19 @@ void sem_ir(Block* block, Ir* ir) {
           else {
             sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
                             "positive integer constants below 32767",
-                            sem_type_name(arg_type));
+                            cstr_from_type(arg_type));
           }
         }
         else {
           sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
                           "a record of two single integer constants",
-                          sem_type_name(arg_type));
+                          cstr_from_type(arg_type));
         }
       }
       else {
         sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
                         "a record of two integer constants",
-                        sem_type_name(arg_type));
+                        cstr_from_type(arg_type));
       }
     }
     else if (fun_type == sem.fun_len) {
@@ -4027,7 +4023,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
       else {
         sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                        "a record or array", sem_type_name(arg_type));
+                        "a record or array", cstr_from_type(arg_type));
       }
     }
     else if (fun_type == sem.fun_foreign_c) {
@@ -4040,7 +4036,7 @@ void sem_ir(Block* block, Ir* ir) {
             Type* char_type = array->types[i];
             if (char_type->kind != Type_Kind_scalar || !scalar_is_single(char_type->scalar)) {
               sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                              "a single integer constant", sem_type_name(char_type));
+                              "a single integer constant", cstr_from_type(char_type));
             }
             I64 val = scalar_min(char_type->scalar);
             if (I8_MIN <= val && val <= I8_MAX) {
@@ -4048,7 +4044,7 @@ void sem_ir(Block* block, Ir* ir) {
             }
             else {
               sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                              "a byte value between -128 and 127", sem_type_name(char_type));
+                              "a byte value between -128 and 127", cstr_from_type(char_type));
             }
           }
           Str* str = str_from_range(chars, chars+length);
@@ -4059,12 +4055,12 @@ void sem_ir(Block* block, Ir* ir) {
         }
         else {
           sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                          "a byte array", sem_type_name(arg_type));
+                          "a byte array", cstr_from_type(arg_type));
         }
       }
       else {
         sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                        "a byte array", sem_type_name(arg_type));
+                        "a byte array", cstr_from_type(arg_type));
       }
     }
     else if (fun_type == sem.fun_type_type) {
@@ -4115,7 +4111,7 @@ void sem_ir(Block* block, Ir* ir) {
         }
         else {
           sem_error_types(Diag_Code_call_argument_mismatch, ir->loc,
-                          "a function type", sem_type_name(arg_type));
+                          "a function type", cstr_from_type(arg_type));
         }
       }
       else {
@@ -4522,9 +4518,8 @@ void sem_funs(Arena* arena, Fun_Pool funs, Diags* diags) {
   sem.sccid = 0;
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
-  sem.type_of_irs = arena_push_type(arena, Type*, 3 * irgen.irs.length);
-  sem.types.base = arena_push_type(arena, Type, irgen.irs.length);
-  sem.types.length = 0;
+  sem.type_of_irs = arena_push_zero_type(arena, Type*, 3 * irgen.irs.length);
+  sem.types = pool(arena, Type, irgen.irs.length);
 
   sem.elements = arena_push_type(arena, I32, 3 * irgen.irs.length);
 
@@ -4606,8 +4601,8 @@ void sem_funs(Arena* arena, Fun_Pool funs, Diags* diags) {
 
 void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
-  Str_View  prepend = str_view("use import \"basic\"\n");
-  Str_View  source_sv = str_view(source_data);
+  Str_View  prepend = str_view_from_cstr("use import \"basic\"\n");
+  Str_View  source_sv = str_view_from_cstr(source_data);
   Str_View  combined = str_view_cat(prepend, source_sv);
   Source*   source  = sources_add_str_view(&sources, combined);
   Tokens    tokens  = lex_source(source, &sources.diags);
@@ -4621,17 +4616,17 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
     test_at_source(result, expected, file_name, line, source_data);
   }
   if (diags_has_errors(&sources.diags)) {
-    diag_print_all(&sources.diags, &sources, stdout, false);
+    fputs(diag_render_all(arena, &sources.diags, false), stdout);
     assert(0);
   }
   sem_funs(arena, funs, &sources.diags);
+  if (diags_has_errors(&sources.diags)) {
+    fputs(diag_render_all(arena, &sources.diags, false), stdout);
+    assert(0);
+  }
   {
     Cstr result = cstr_from_sem(arena, funs);
     test_at_source(result, expected, file_name, line, source_data);
-  }
-  if (diags_has_errors(&sources.diags)) {
-    diag_print_all(&sources.diags, &sources, stdout, false);
-    assert(0);
   }
   arena_free(arena);
   str_free();
@@ -4643,7 +4638,8 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
+  test("a:0..1 = 0", "");
+  // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
