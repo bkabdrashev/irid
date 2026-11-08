@@ -38,6 +38,42 @@ struct LLVM_Gen {
 
 LLVM_Gen llvm_gen;
 
+LLVMTypeRef llvm_of_type(Type* type);
+LLVMTypeRef llvm_of_type_function(Function* function) {
+  LLVMTypeRef* arg_types;
+  I32 arg_count = 0;
+  if (function->arg->kind == Type_Kind_none) {
+    arg_types = 0;
+    arg_count = 0;
+  }
+  else if (function->foreign_name != irgen.str_nil) {
+    if (function->arg->kind == Type_Kind_record) {
+      Record* record = function->arg->record;
+      arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
+      for (I32 i = 0; i < record->length; i++) {
+        Type* arg_type = record->types[i];
+        arg_types[i] = llvm_of_type(arg_type);
+      }
+      arg_count = record->length;
+    }
+    else {
+      LLVMTypeRef arg_type = llvm_of_type(function->arg);
+      arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
+      arg_types[0] = arg_type;
+      arg_count = 1;
+    }
+  }
+  else {
+    LLVMTypeRef arg_type = llvm_of_type(function->arg);
+    arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
+    arg_types[0] = arg_type;
+    arg_count = 1;
+  }
+  LLVMTypeRef ret_type = llvm_of_type(function->ret);
+  LLVMTypeRef result   = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
+  return result;
+}
+
 LLVMTypeRef llvm_of_type(Type* type) {
   I32 typeid = type - sem.types.base;
   LLVMTypeRef result = llvm_gen.types[typeid];
@@ -112,37 +148,8 @@ LLVMTypeRef llvm_of_type(Type* type) {
       result = LLVMStructTypeInContext(llvm_gen.context, field_types, 2, false);
     } break;
     case Type_Kind_fun: {
-      LLVMTypeRef* arg_types;
-      I32 arg_count = 0;
-      if (type->function->arg->kind == Type_Kind_none) {
-        arg_types = 0;
-        arg_count = 0;
-      }
-      else if (type->function->foreign_name != irgen.str_nil) {
-        if (type->function->arg->kind == Type_Kind_record) {
-          Record* record = type->function->arg->record;
-          arg_types = arena_push(llvm_gen.perm_arena, record->length * sizeof(LLVMTypeRef));
-          for (I32 i = 0; i < record->length; i++) {
-            Type* arg_type = record->types[i];
-            arg_types[i] = llvm_of_type(arg_type);
-          }
-          arg_count = record->length;
-        }
-        else {
-          LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
-          arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
-          arg_types[0] = arg_type;
-          arg_count = 1;
-        }
-      }
-      else {
-        LLVMTypeRef arg_type = llvm_of_type(type->function->arg);
-        arg_types = arena_push(llvm_gen.perm_arena, 1 * sizeof(LLVMTypeRef));
-        arg_types[0] = arg_type;
-        arg_count = 1;
-      }
-      LLVMTypeRef ret_type = llvm_of_type(type->function->ret);
-      result = LLVMFunctionType(ret_type, arg_types, arg_count, 0);
+      LLVMTypeRef llvm_type_function = llvm_of_type_function(type->function);
+      result = LLVMPointerType(llvm_type_function, 0);
     } break;
     }
 
@@ -519,7 +526,7 @@ void llvm_ir(Ir* ir) {
       result = llvm_gen.none;
     }
     else if (fun_type->kind == Type_Kind_fun) {
-      LLVMTypeRef llvm_fun_type = llvm_of_type(fun_type);
+      LLVMTypeRef llvm_fun_type = llvm_of_type_function(fun_type->function);
       Ir*   ir_arg   = ir->binary.two;
       Type* arg_type = type_of_ir(ir_arg);
       LLVMValueRef* llvm_args;
@@ -561,8 +568,9 @@ void llvm_ir(Ir* ir) {
       else if (fun_type->str) {
         assert(type->kind == Type_Kind_fun);
         result = llvm_of_fun(type->function->fun);
-        LLVMTypeRef llvm_fun_type = llvm_of_type(type);
-        result = LLVMAddFunction(llvm_gen.module, cstr_from_str(type->function->foreign_name), llvm_fun_type);
+        LLVMTypeRef llvm_fun_type = llvm_of_type_function(type->function);
+        Cstr name = cstr_from_str(type->function->foreign_name);
+        result = LLVMAddFunction(llvm_gen.module, name, llvm_fun_type);
         llvm_of_fun_put(type->function->fun, result);
       }
     }
@@ -886,8 +894,10 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
     if (fun->kind == Fun_Kind_none) {
-      LLVMTypeRef  llvm_fun_type = llvm_of_type(fun->type);
-      LLVMValueRef llvm_fun      = LLVMAddFunction(llvm_gen.module, cstr_from_str(fun->name), llvm_fun_type);
+      assert(fun->type->kind == Type_Kind_fun);
+      LLVMTypeRef  llvm_fun_type = llvm_of_type_function(fun->type->function);
+      Cstr         name          = cstr_from_str(fun->name);
+      LLVMValueRef llvm_fun      = LLVMAddFunction(llvm_gen.module, name, llvm_fun_type);
       llvm_of_fun_put(fun, llvm_fun);
     }
   }
@@ -1050,7 +1060,7 @@ void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  // test("foo : () -> {}; foo()", "");
+  test("foo : () -> {}; foo()", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");

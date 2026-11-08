@@ -1228,7 +1228,10 @@ Ir* irgen_ast(Ast* ast) {
     result = irgen_push_float(f64);
   } break;
   case Ast_Kind_str: {
-    Str* str = str_from_loc(ast->loc);
+    Str_View sv = str_view_from_loc(ast->loc);
+    sv.base   += 1;
+    sv.length -= 2;
+    Str* str = str_from_str_view(sv);
     result = irgen_push_str(str);
   } break;
   case Ast_Kind_name: {
@@ -1687,8 +1690,7 @@ Ir* irgen_ast(Ast* ast) {
         irgen_sym_put(arg_var->name, sym);
       }
       else {
-        irgen_error_text(Diag_Code_invalid_function_parameter, lhs->loc,
-                         "a function parameter must be a record");
+        irgen_error_text(Diag_Code_invalid_function_parameter, lhs->loc, "a function parameter must be a record");
       }
     }
     if (ast->binary.rhs) {

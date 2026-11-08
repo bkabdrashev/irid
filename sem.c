@@ -1453,6 +1453,9 @@ Type* type_function(Function* function) {
   Type* new_type = &new(sem.types);
   new_type->kind = Type_Kind_fun;
   new_type->function = function;
+  new_type->flag       = 0;
+  new_type->bits_size  = 64;
+  new_type->bits_align = 64;
   if (new_type->function->fun) {
     new_type->flag = Type_Flag_comptime_const;
   }
