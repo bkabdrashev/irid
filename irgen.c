@@ -396,7 +396,6 @@ Diag* irgen_diag_impl(Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_
 
 void irgen_fail(void) {
   if (irgen.fatal_ready) {
-    assert(0);
     longjmp(irgen.fatal, 1);
   }
   assert(0);
@@ -1028,6 +1027,7 @@ void irgen_scope_enter(Ast_Block block) {
     Ast_Decl decl = decls->base[i];
     Str* key = str_from_loc(decl.lhs);
     Sym* sym = &new(irgen.syms);
+    sym->loc = decl.lhs;
     sym->ast = decl.rhs;
     hash_map_put(scope, key, sym);
     Sym* previous = irgen_sym_get(key);

@@ -25,4 +25,4 @@
 #include "irgen.c"
 #include "sem.c"
 #include "llvm.c"
-// #include "irid.c"
+#include "irid.c"

@@ -38,9 +38,7 @@ static uint64_t profile_end_live_bytes;
 static uint64_t profile_default_lines;
 
 static const char* profile_source_path;
-static const char* profile_builtin_path;
 static uint64_t    profile_source_lines;
-static uint64_t    profile_builtin_lines;
 
 static int profile_is_enabled(void) {
   static int enabled = -1;
@@ -72,18 +70,13 @@ void profile_run_begin(void) {
   profile_end_live_bytes  = 0;
   profile_default_lines   = 0;
   profile_source_path     = NULL;
-  profile_builtin_path    = NULL;
   profile_source_lines    = 0;
-  profile_builtin_lines   = 0;
 }
 
-void profile_set_input(const char* source_path, uint64_t source_lines,
-                       const char* builtin_path, uint64_t builtin_lines) {
+void profile_set_input(const char* source_path, uint64_t source_lines) {
   profile_source_path   = source_path;
   profile_source_lines  = source_lines;
-  profile_builtin_path  = builtin_path;
-  profile_builtin_lines = builtin_lines;
-  profile_default_lines = source_lines + builtin_lines;
+  profile_default_lines = source_lines;
 }
 
 static void profile_stage_close(int32_t index) {
@@ -261,10 +254,6 @@ void profile_print(FILE* out) {
   if (profile_source_path) {
     fprintf(out, "  source : %s (%llu lines)\n",
             profile_source_path, (unsigned long long)profile_source_lines);
-  }
-  if (profile_builtin_path) {
-    fprintf(out, "  builtin: %s (%llu lines)\n",
-            profile_builtin_path, (unsigned long long)profile_builtin_lines);
   }
   fprintf(out, "  total  : %llu lines\n", (unsigned long long)profile_default_lines);
   fprintf(out, "  memory : arena only; allocated = requested bytes,\n");
