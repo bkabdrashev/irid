@@ -1021,10 +1021,10 @@ void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Str_View  combined = str_view_cat(prepend, source_sv);
   Source*   source  = sources_add_str_view(&sources, combined);
   Tokens    tokens  = lex_source(source, &sources.diags);
-  Ast_Node* ast     = parse_tokens(&sources, tokens);
+  Ast*      ast     = parse_tokens(&sources, tokens);
   str_init(sources.char_count, sources.str_count);
   Arena* arena = arena_init(KB(2) * sources.ast_count);
-  Fun_Pool funs = irgen_ast(arena, ast, sources.ast_count, &sources.diags);
+  Fun_Pool funs = irgen_ast_root(arena, ast, sources.ast_count, &sources.diags);
   if (diags_has_errors(&sources.diags)) {
     fputs(diag_render_all(arena, &sources.diags, false), stdout);
     assert(0);

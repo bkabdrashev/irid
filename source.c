@@ -1,4 +1,4 @@
-typedef struct Ast_Node Ast_Node;
+typedef struct Ast Ast;
 typedef struct Decls Decls;
 typedef struct Source Source;
 typedef struct Ir   Ir;
@@ -10,7 +10,7 @@ struct Source {
   Umi  length;
   U32* line_starts;
   I32  line_count;
-  Ast_Node* ast;
+  Ast* ast;
   Ir*       ir_var;
   Hash_Map* decls; // str->sym
   Type*     type;

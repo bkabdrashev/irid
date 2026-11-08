@@ -4175,7 +4175,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
       else if (ir_use->kind == Ir_Kind_import) {
         of = ir_use->source->ir_var;
-        sem_var_declare(ir_use->source->ir_var->var);
+        sem_var_declare(of->var);
       }
       else {
         Type* type = type_of_ir(ir_use);
@@ -4614,11 +4614,11 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Str_View  combined = str_view_cat(prepend, source_sv);
   Source*   source  = sources_add_str_view(&sources, combined);
   Tokens    tokens  = lex_source(source, &sources.diags);
-  Ast_Node* ast     = parse_tokens(&sources, tokens);
+  Ast*      ast     = parse_tokens(&sources, tokens);
   str_init(sources.char_count, sources.str_count);
   Arena* arena = arena_init(KB(2) * sources.ast_count);
 
-  Fun_Pool funs = irgen_ast(arena, ast, sources.ast_count, &sources.diags);
+  Fun_Pool funs = irgen_ast_root(arena, ast, sources.ast_count, &sources.diags);
   {
     Cstr result = cstr_from_funs(arena, funs);
     test_at_source(result, expected, file_name, line, source_data);

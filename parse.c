@@ -69,23 +69,23 @@ typedef enum Ast_Kind {
 } Ast_Kind;
 
 typedef struct Ir Ir;
-typedef struct Ast_Node Ast_Node;
+typedef struct Ast     Ast;
 typedef struct Ast_List Ast_List;
 struct Ast_List {
   I32 length;
-  Ast_Node* base[];
+  Ast* base[];
 };
 
 typedef struct Ast_Pool Ast_Pool;
 struct Ast_Pool {
   I32       length;
-  Ast_Node* base;
+  Ast* base;
 };
 
 typedef struct Ast_Decl Ast_Decl;
 struct Ast_Decl {
   Loc       lhs;
-  Ast_Node* rhs;
+  Ast* rhs;
 };
 
 typedef struct Ast_Decls Ast_Decls;
@@ -96,20 +96,21 @@ struct Ast_Decls {
 
 typedef struct Ast_Block Ast_Block;
 struct Ast_Block {
-  Ast_Decls* scope;
+  Ast_Decls* decls;
+  Ast_List*  uses;
   Ast_List*  list;
 };
 
-struct Ast_Node {
+struct Ast {
   Ast_Kind kind;
   Loc      loc;
   union {
     Source*   source;
-    Ast_Node* unary;
+    Ast* unary;
     Ast_List* list;
     struct {
-      Ast_Node* lhs;
-      Ast_Node* rhs;
+      Ast* lhs;
+      Ast* rhs;
     } binary;
     Ast_Decl  declare;
     Ast_Block block;
@@ -121,6 +122,7 @@ struct Parser {
   Sources* sources;
   Arena* perm_arena;
   Arena* list_arena;
+  Arena* uses_arena;
   Arena* decls_arena;
 
   Ast_Pool pool;
@@ -129,21 +131,21 @@ struct Parser {
   I32  tok;
 
   Ast_Decls* decls;
-  Ast_Node*  uses;
+  Ast_List*  uses;
 
   Diags* diags;
   I32    last_error_tok;
   B8     panic;
 };
 
-Ast_Node* parse_new_node(Parser* parser, Ast_Kind kind) {
-  Ast_Node* node = &new(parser->pool);
+Ast* parse_new_node(Parser* parser, Ast_Kind kind) {
+  Ast* node = &new(parser->pool);
   node->kind = kind;
   return node;
 }
 
-Ast_Node* parse_new_error(Parser* parser, Loc loc) {
-  Ast_Node* node = parse_new_node(parser, Ast_Kind_error);
+Ast* parse_new_error(Parser* parser, Loc loc) {
+  Ast* node = parse_new_node(parser, Ast_Kind_error);
   node->loc = loc;
   return node;
 }
@@ -203,7 +205,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   return result;
 }
 
-void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
+void string_builder_push_ast_node(String_Builder* sb, Ast* node) {
   switch (node->kind) {
   case Ast_Kind_none: {
     Cstr cstr = cstr_from_ast_kind(node->kind);
@@ -234,7 +236,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
   } break;
   case Ast_Kind_block_value: case Ast_Kind_block: {
     string_builder_push_cstr(sb, "{");
-    Ast_Decls* scope = node->block.scope;
+    Ast_Decls* scope = node->block.decls;
     for (I32 i = 0; i < scope->length; i++) {
       Ast_Decl decl = scope->base[i];
       string_builder_push_loc_str(sb, decl.lhs);
@@ -386,7 +388,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast_Node* node) {
 
 Cstr cstr_from_ast(Arena* arena, Ast_Block ast) {
   String_Builder sb = string_builder_begin(arena);
-  Ast_Decls* scope = ast.scope;
+  Ast_Decls* scope = ast.decls;
   for (I32 i = 0; i < scope->length; i++) {
     Ast_Decl decl = scope->base[i];
     string_builder_push_loc_str(&sb, decl.lhs);
@@ -408,8 +410,8 @@ Cstr cstr_from_ast(Arena* arena, Ast_Block ast) {
 
 
 Source*   parse_file(Sources* sources, Str_View file_path);
-Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_match);
-Ast_Node* parse_statement(Parser* parser);
+Ast* parse_new_expression(Parser* parser, I32 precedence_to_match);
+Ast* parse_statement(Parser* parser);
 Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open);
 
 I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
@@ -697,8 +699,8 @@ B8 parse_is_sync(Parser* parser, I16 indent) {
   if (token.kind == Token_Kind_semicolon) return true;
   if (token.kind == Token_Kind_curly_close) return true;
   if (has_flag(token.flag, Token_Flag_wasnewline)
-      && token.indent <= indent
-      && parse_token_starts_statement(token.kind)) {
+  &&  token.indent <= indent
+  &&  parse_token_starts_statement(token.kind)) {
     return true;
   }
   return false;
@@ -758,7 +760,7 @@ B8 parse_expect_token(Parser* parser, Token_Kind kind) {
   return parse_expected(parser, token, kind);
 }
 
-Ast_Node* parse_error_node(Parser* parser, Loc loc) {
+Ast* parse_error_node(Parser* parser, Loc loc) {
   return parse_new_error(parser, loc);
 }
 
@@ -766,20 +768,33 @@ void parse_list_end(Parser* parser, Ast_List* list) {
   arena_release_mark(parser->list_arena, list);
 }
 
-void parse_list_push(Parser* parser, Ast_List* list, Ast_Node* node) {
-  arena_extend(parser->list_arena, list, sizeof(Ast_List) + (list->length+1)*sizeof(Ast_Node*));
+void parse_list_push(Parser* parser, Ast_List* list, Ast* node) {
+  arena_extend(parser->list_arena, list, sizeof(Ast_List) + (list->length+1)*sizeof(Ast*));
   fa_add(list, node);
 }
 
 Ast_List* parse_list_perm(Parser* parser, Ast_List* temp_list) {
-  I32 size = sizeof(Ast_List) + temp_list->length * sizeof(Ast_Node*);
+  I32 size = sizeof(Ast_List) + temp_list->length * sizeof(Ast*);
   Ast_List* perm_list = arena_push(parser->perm_arena, size);
   memcpy(perm_list, temp_list, size);
   arena_release_mark(parser->list_arena, temp_list);
   return perm_list;
 }
 
-void parse_decls_push(Parser* parser, Loc lhs, Ast_Node* rhs) {
+void parse_uses_push(Parser* parser, Ast_List* uses, Ast* node) {
+  arena_extend(parser->uses_arena, uses, sizeof(Ast_List) + (uses->length+1)*sizeof(Ast*));
+  fa_add(uses, node);
+}
+
+Ast_List* parse_uses_perm(Parser* parser, Ast_List* temp_list) {
+  I32 size = sizeof(Ast_List) + temp_list->length * sizeof(Ast*);
+  Ast_List* perm_list = arena_push(parser->perm_arena, size);
+  memcpy(perm_list, temp_list, size);
+  arena_release_mark(parser->uses_arena, temp_list);
+  return perm_list;
+}
+
+void parse_decls_push(Parser* parser, Loc lhs, Ast* rhs) {
   Ast_Decl decl = { lhs, rhs };
   fa_extend(parser->decls_arena, parser->decls, decl);
 }
@@ -792,27 +807,27 @@ Ast_Decls* parse_decls_perm(Parser* parser) {
   return perm_decls;
 }
 
-Ast_Node* parse_new_unary(Parser* parser, Ast_Kind kind, Ast_Node* lhs) {
-  Ast_Node* node = parse_new_node(parser, kind);
+Ast* parse_new_unary(Parser* parser, Ast_Kind kind, Ast* lhs) {
+  Ast* node = parse_new_node(parser, kind);
   node->unary = lhs;
   if (lhs) node->loc = lhs->loc;
   return node;
 }
 
-Ast_Node* parse_new_infix(Parser* parser, Ast_Kind kind, Ast_Node* lhs, I32 token_flags) {
+Ast* parse_new_infix(Parser* parser, Ast_Kind kind, Ast* lhs, I32 token_flags) {
   I32 right_precedence = parse_right_precedence(kind, token_flags);
-  Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+  Ast* rhs = parse_new_expression(parser, right_precedence);
   if (rhs && rhs->kind == Ast_Kind_error) {
     return rhs;
   }
-  Ast_Node* node = parse_new_node(parser, kind);
+  Ast* node = parse_new_node(parser, kind);
   node->binary.lhs = lhs;
   node->binary.rhs = rhs;
   node->loc = loc_join(lhs->loc, rhs->loc);
   return node;
 }
 
-Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
+Ast* parse_indented_block(Parser* parser, I16 indent) {
   if (parse_at_end(parser)) {
     Token token = *parse_peek(parser);
     parse_diag(parser, Diag_Code_expected_block, token.loc);
@@ -841,7 +856,7 @@ Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
       continue;
     }
     I32 before = parser->tok;
-    Ast_Node* node = parse_statement(parser);
+    Ast* node = parse_statement(parser);
     if (node) {
       parse_list_push(parser, temp, node);
     }
@@ -859,13 +874,13 @@ Ast_Node* parse_indented_block(Parser* parser, I16 indent) {
     parser->panic = true;
     return parse_error_node(parser, token.loc);
   }
-  Ast_Node* node = parse_new_node(parser, Ast_Kind_iblock);
+  Ast* node = parse_new_node(parser, Ast_Kind_iblock);
   node->list = parse_list_perm(parser, temp);
   return node;
 }
 
-Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to_match) {
-  Ast_Node* node = lhs;
+Ast* parse_infix_or_suffix(Parser* parser, Ast* lhs, I32 precedence_to_match) {
+  Ast* node = lhs;
   if (node && node->kind == Ast_Kind_error) return node;
   while (true) {
     if (node && node->kind == Ast_Kind_error) return node;
@@ -898,8 +913,8 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       I32 precedence = parse_left_precedence(kind, token.flag);
       if (precedence >= precedence_to_match) {
         lhs = node;
-        Ast_Node* fun_arrow = parse_new_infix(parser, kind, lhs, token.flag);
-        Ast_Node* fun_block = 0;
+        Ast* fun_arrow = parse_new_infix(parser, kind, lhs, token.flag);
+        Ast* fun_block = 0;
         if (parse_match_token(parser, Token_Kind_do)) {
           fun_block = parse_indented_block(parser, token.indent);
         }
@@ -909,7 +924,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
             fun_block = parse_indented_block(parser, token.indent);
           }
         }
-        Ast_Node* fun = parse_new_node(parser, Ast_Kind_fun);
+        Ast* fun = parse_new_node(parser, Ast_Kind_fun);
         fun->binary.lhs = fun_arrow;
         fun->binary.rhs = fun_block;
         fun->loc = fun_arrow->loc;
@@ -926,7 +941,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
       if (precedence >= precedence_to_match) {
         lhs = node;
         I32 right_precedence = parse_right_precedence(kind, token.flag);
-        Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+        Ast* rhs = parse_new_expression(parser, right_precedence);
         if (rhs && rhs->kind == Ast_Kind_error) return rhs;
         node = parse_new_node(parser, kind);
         node->binary.lhs = rhs;
@@ -973,7 +988,7 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
           lhs = node;
           Token left_token = parser->tokens.base[parser->tok-1];
           I32 right_precedence = parse_right_precedence(kind, left_token.flag);
-          Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+          Ast* rhs = parse_new_expression(parser, right_precedence);
           if (rhs && rhs->kind == Ast_Kind_error) return rhs;
           node = parse_new_node(parser, Ast_Kind_call);
           node->binary.lhs = lhs;
@@ -992,11 +1007,11 @@ Ast_Node* parse_infix_or_suffix(Parser* parser, Ast_Node* lhs, I32 precedence_to
   }
 }
 
-Ast_Node* parse_prefix_or_atom(Parser* parser) {
+Ast* parse_prefix_or_atom(Parser* parser) {
   if (parse_at_end(parser)) return NULL;
   Token token = *parse_peek(parser);
   parse_advance(parser);
-  Ast_Node* node = NULL;
+  Ast* node = NULL;
   switch (token.kind) {
   case Token_Kind_error: {
     node = parse_new_error(parser, token.loc);
@@ -1004,7 +1019,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_sharp: {
     Ast_Kind kind = Ast_Kind_run;
     I32 precedence = parse_right_precedence(kind, token.flag);
-    Ast_Node* unary = parse_new_expression(parser, precedence);
+    Ast* unary = parse_new_expression(parser, precedence);
     if (unary && unary->kind == Ast_Kind_error) return unary;
     node = parse_new_node(parser, kind);
     node->unary = unary;
@@ -1016,7 +1031,7 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;
     I32 precedence = parse_right_precedence(kind, token.flag);
-    Ast_Node* unary = parse_new_expression(parser, precedence);
+    Ast* unary = parse_new_expression(parser, precedence);
     if (unary && unary->kind == Ast_Kind_error) return unary;
     node = parse_new_node(parser, kind);
     node->unary = unary;
@@ -1032,16 +1047,16 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     parser->sources->char_count += token.loc.end - token.loc.start;
   } break;
   case Token_Kind_if: {
-    Ast_Node* cond = parse_new_expression(parser, 0);
+    Ast* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);
-    Ast_Node* if_value = parse_new_expression(parser, 0);
+    Ast* if_value = parse_new_expression(parser, 0);
     node = parse_new_node(parser, Ast_Kind_if_value);
     node->binary.lhs = cond;
     node->binary.rhs = if_value;
     node->loc = loc_join(token.loc, loc_join(cond->loc, if_value->loc));
     if (parse_match_token(parser, Token_Kind_else)) {
-      Ast_Node* if_node = node;
-      Ast_Node* else_value = parse_new_expression(parser, 0);
+      Ast* if_node = node;
+      Ast* else_value = parse_new_expression(parser, 0);
       node = parse_new_node(parser, Ast_Kind_else_value);
       node->binary.lhs = if_node;
       node->binary.rhs = else_value;
@@ -1049,9 +1064,9 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     }
   } break;
   case Token_Kind_while: {
-    Ast_Node* cond = parse_new_expression(parser, 0);
+    Ast* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);
-    Ast_Node* while_block = parse_indented_block(parser, token.indent);
+    Ast* while_block = parse_indented_block(parser, token.indent);
     node = parse_new_node(parser, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
@@ -1068,10 +1083,10 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
       }
       if (parse_is_token(parser, Token_Kind_curly_close)) break;
       I32 before = parser->tok;
-      Ast_Node* exp = parse_new_expression(parser, 0);
+      Ast* exp = parse_new_expression(parser, 0);
       if (parse_match_token(parser, Token_Kind_colon)) {
-        Ast_Node* lhs = exp;
-        Ast_Node* rhs = parse_new_expression(parser, 0);
+        Ast* lhs = exp;
+        Ast* rhs = parse_new_expression(parser, 0);
         if (lhs->kind == Ast_Kind_name) {
           exp = parse_new_node(parser, Ast_Kind_declare);
           exp->declare.lhs = lhs->loc;
@@ -1123,19 +1138,19 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
     Ast_Kind kind = Ast_Kind_array;
     if (parse_match_token(parser, Token_Kind_brace_close)) {
       I32 right_precedence = parse_right_precedence(Ast_Kind_span, token.flag);
-      Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+      Ast* rhs = parse_new_expression(parser, right_precedence);
       if (rhs && rhs->kind == Ast_Kind_error) return rhs;
       node = parse_new_node(parser, Ast_Kind_span);
       node->unary = rhs;
       node->loc = loc_join(token.loc, rhs->loc);
     }
     else {
-      Ast_Node* lhs = parse_new_expression(parser, 0);
+      Ast* lhs = parse_new_expression(parser, 0);
       B8 closed = parse_expect_close(parser, token, Token_Kind_brace_close, token.indent);
       if (!closed) return parse_error_node(parser, token.loc);
       if (lhs->kind == Ast_Kind_error) return lhs;
       I32 right_precedence = parse_right_precedence(kind, token.flag);
-      Ast_Node* rhs = parse_new_expression(parser, right_precedence);
+      Ast* rhs = parse_new_expression(parser, right_precedence);
       if (rhs->kind == Ast_Kind_error) return rhs;
       node = parse_new_node(parser, kind);
       node->binary.lhs = lhs;
@@ -1150,8 +1165,8 @@ Ast_Node* parse_prefix_or_atom(Parser* parser) {
   return node;
 }
 
-Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_match) {
-  Ast_Node* prefix_or_atom = parse_prefix_or_atom(parser);
+Ast* parse_new_expression(Parser* parser, I32 precedence_to_match) {
+  Ast* prefix_or_atom = parse_prefix_or_atom(parser);
   if (!prefix_or_atom) {
     Token token = *parse_peek(parser);
     parse_expected_expression(parser, token);
@@ -1160,22 +1175,20 @@ Ast_Node* parse_new_expression(Parser* parser, I32 precedence_to_match) {
   if (prefix_or_atom->kind == Ast_Kind_error) {
     return prefix_or_atom;
   }
-  Ast_Node* node = parse_infix_or_suffix(parser, prefix_or_atom, precedence_to_match);
+  Ast* node = parse_infix_or_suffix(parser, prefix_or_atom, precedence_to_match);
   return node;
 }
 
-Ast_Node* parse_statement(Parser* parser) {
+Ast* parse_statement(Parser* parser) {
   if (parse_at_end(parser)) return NULL;
-  Ast_Node* node = NULL;
+  Ast* node = NULL;
   Token token = *parse_peek(parser);
   parse_advance(parser);
   switch (token.kind) {
   case Token_Kind_use: {
     // TODO: use name: exp
-    Ast_Node* exp = parse_statement(parser);
-    node = parse_new_unary(parser, Ast_Kind_use, exp);
-    // TODO: track uses to apply them before all other declarations
-    parser->uses
+    Ast* exp = parse_statement(parser);
+    parse_uses_push(parser, parser->uses, exp);
   } break;
   case Token_Kind_import: {
     Token path_token = *parse_peek(parser);
@@ -1187,9 +1200,9 @@ Ast_Node* parse_statement(Parser* parser) {
     }
   } break;
   case Token_Kind_if: {
-    Ast_Node* cond = parse_new_expression(parser, 0);
+    Ast* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);
-    Ast_Node* if_block = parse_indented_block(parser, token.indent);
+    Ast* if_block = parse_indented_block(parser, token.indent);
     node = parse_new_node(parser, Ast_Kind_if);
     node->binary.lhs = cond;
     node->binary.rhs = if_block;
@@ -1197,8 +1210,8 @@ Ast_Node* parse_statement(Parser* parser) {
                          loc_join(cond->loc,
                                   if_block->loc));
     if (parse_match_token(parser, Token_Kind_else)) {
-      Ast_Node* if_node = node;
-      Ast_Node* else_block = parse_indented_block(parser, token.indent);
+      Ast* if_node = node;
+      Ast* else_block = parse_indented_block(parser, token.indent);
       node = parse_new_node(parser, Ast_Kind_else);
       node->binary.lhs = if_node;
       node->binary.rhs = else_block;
@@ -1206,9 +1219,9 @@ Ast_Node* parse_statement(Parser* parser) {
     }
   } break;
   case Token_Kind_while: {
-    Ast_Node* cond = parse_new_expression(parser, 0);
+    Ast* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);
-    Ast_Node* while_block = parse_indented_block(parser, token.indent);
+    Ast* while_block = parse_indented_block(parser, token.indent);
     node = parse_new_node(parser, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
@@ -1221,7 +1234,7 @@ Ast_Node* parse_statement(Parser* parser) {
       node->loc = token.loc;
     }
     else {
-      Ast_Node* unary = parse_new_expression(parser, 0);
+      Ast* unary = parse_new_expression(parser, 0);
       if (unary && unary->kind == Ast_Kind_error) return unary;
       node = parse_new_unary(parser, Ast_Kind_return_value, unary);
       node->loc = loc_join(token.loc, unary->loc);
@@ -1233,7 +1246,7 @@ Ast_Node* parse_statement(Parser* parser) {
       node->loc = token.loc;
     }
     else {
-      Ast_Node* unary = parse_new_expression(parser, 0);
+      Ast* unary = parse_new_expression(parser, 0);
       if (unary && unary->kind == Ast_Kind_error) return unary;
       node = parse_new_unary(parser, Ast_Kind_break_value, unary);
       node->loc = loc_join(token.loc, unary->loc);
@@ -1248,7 +1261,7 @@ Ast_Node* parse_statement(Parser* parser) {
   default: {
     parse_retreat(parser);
     node = parse_new_expression(parser, 0);
-    if (node && node->kind == Ast_Kind_error) return node;
+    if (node->kind == Ast_Kind_error) return node;
     Token current = *parse_peek(parser);
     if (parse_is_token(parser, Token_Kind_equal)) {
       Token equal = *parse_peek(parser);
@@ -1257,8 +1270,8 @@ Ast_Node* parse_statement(Parser* parser) {
         parse_expected_expression_eol(parser, equal.loc);
         return parse_error_node(parser, equal.loc);
       }
-      Ast_Node* lhs = node;
-      Ast_Node* rhs = parse_new_expression(parser, 0);
+      Ast* lhs = node;
+      Ast* rhs = parse_new_expression(parser, 0);
       if (rhs && rhs->kind == Ast_Kind_error) return rhs;
       node = parse_new_node(parser, Ast_Kind_assign);
       node->binary.lhs = lhs;
@@ -1284,8 +1297,8 @@ Ast_Node* parse_statement(Parser* parser) {
             node = parse_error_node(parser, equal.loc);
           }
           else {
-            Ast_Node* lhs = node;
-            Ast_Node* rhs = parse_new_expression(parser, 0);
+            Ast* lhs = node;
+            Ast* rhs = parse_new_expression(parser, 0);
             if (rhs && rhs->kind == Ast_Kind_error) {
               node = rhs;
             }
@@ -1300,8 +1313,8 @@ Ast_Node* parse_statement(Parser* parser) {
         }
         else {
           // name : exp
-          Ast_Node* decl_rhs = parse_new_expression(parser, 0);
-          if (decl_rhs && decl_rhs->kind == Ast_Kind_error) {
+          Ast* decl_rhs = parse_new_expression(parser, 0);
+          if (decl_rhs->kind == Ast_Kind_error) {
             node = decl_rhs;
           }
           else {
@@ -1315,8 +1328,8 @@ Ast_Node* parse_statement(Parser* parser) {
                 node = parse_error_node(parser, equal.loc);
               }
               else {
-                Ast_Node* lhs = node;
-                Ast_Node* rhs = parse_new_expression(parser, 0);
+                Ast* lhs = node;
+                Ast* rhs = parse_new_expression(parser, 0);
                 if (rhs && rhs->kind == Ast_Kind_error) {
                   node = rhs;
                 }
@@ -1346,10 +1359,12 @@ Ast_Node* parse_statement(Parser* parser) {
 }
 
 Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
-  Ast_Decls* save_decls = parser->decls;
+  Ast_Decls* decls_save = parser->decls;
+  Ast_List*  uses_save  = parser->uses;
 
   Ast_Block block = {};
   Ast_List* fa_temp(parser->list_arena, temp);
+  fa_temp(parser->uses_arena,  parser->uses);
   fa_temp(parser->decls_arena, parser->decls);
   while (true) {
     parser->panic = false;
@@ -1383,7 +1398,7 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
     }
 
     I32 before = parser->tok;
-    Ast_Node* node = parse_statement(parser);
+    Ast* node = parse_statement(parser);
     if (!node) {
       parse_sync(parser, current.indent);
       if (parser->tok == before) {
@@ -1404,30 +1419,33 @@ Ast_Block parse_scope(Parser* parser, Token_Kind end_token_kind, Token open) {
 
     while (parse_match_token(parser, Token_Kind_semicolon)) {}
   }
-  block.list = parse_list_perm(parser, temp);
-  block.scope = parse_decls_perm(parser);
-  parser->decls = save_decls;
+  block.list  = parse_list_perm(parser, temp);
+  block.uses  = parse_uses_perm(parser, parser->uses);
+  block.decls = parse_decls_perm(parser);
+  parser->decls = decls_save;
+  parser->uses  = uses_save;
   return block;
 }
 
-Ast_Node* parse_tokens(Sources* sources, Tokens tokens) {
+Ast* parse_tokens(Sources* sources, Tokens tokens) {
   Parser parser = {0};
   parser.sources = sources;
   parser.perm_arena  = tokens.source->arena;
   parser.list_arena  = arena_init(tokens.source->arena->capacity);
+  parser.uses_arena  = arena_init(tokens.source->arena->capacity);
   parser.decls_arena = arena_init(tokens.source->arena->capacity);
   parser.tokens      = tokens;
-  parser.pool.base   = arena_push_zero_type(parser.perm_arena, Ast_Node, tokens.length);
-  parser.pool.length = 0;
+  parser.pool        = pool(parser.perm_arena, Ast, tokens.length);
   parser.tok         = 1;
   parser.last_error_tok = -1;
 
   Ast_Block block  = parse_scope(&parser, Token_Kind_source_leave, (Token){0});
-  Ast_Node* result = parse_new_node(&parser, Ast_Kind_block);
+  Ast* result = parse_new_node(&parser, Ast_Kind_block);
             result->block = block;
   sources->ast_count += parser.pool.length;
 
   arena_free(parser.list_arena);
+  arena_free(parser.uses_arena);
   arena_free(parser.decls_arena);
   return result;
 }
@@ -1445,7 +1463,7 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
   Source*   source  = sources_add_str_view(&sources, (Str_View){source_data, strlen(source_data)});
   Tokens    tokens  = lex_source(source, &sources.diags);
-  Ast_Node* ast     = parse_tokens(&sources, tokens);
+  Ast* ast     = parse_tokens(&sources, tokens);
   {
     Arena* arena     = arena_init(128 * sources.ast_count);
     Cstr      result = cstr_from_ast(arena, ast->block);
