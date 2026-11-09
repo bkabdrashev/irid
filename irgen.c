@@ -1837,10 +1837,6 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
     Source* source = &sources.pool.base[i];
     if (source->ast) {
       Ast_Block ast_block = source->ast->block;
-      { // resolving the source ast
-        irgen_scope_enter(ast_block);
-        source->decls = irgen_scope_leave();
-      }
 
       { // declaring the source var
         Var* var = irgen_var_new();
@@ -1850,31 +1846,20 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
         source->ir_var = irgen_push_var(var);
 
         irgen_fun_temp();
-        Rec* rec = irgen_record_new(source->decls->len);
+        Rec* rec = irgen_record_new(ast_block.decls->length);
 
-        add(irgen.scope_stack, source->decls);
+        irgen_scope_enter(ast_block);
 
-        for (I32 j = 0; j < source->decls->len; j++) {
-          Str* str = source->decls->list[j];
-          Sym* sym = hash_map_get(*source->decls, str);
+        for (I32 j = 0; j < ast_block.decls->length; j++) {
+          Ast_Decl decl = ast_block.decls->base[j];
+          Str* str = str_from_loc(decl.lhs);
+          Ir* ir = irgen_ast(decl.rhs);
           rec->names[j] = str;
-          if (sym->kind == Sym_Kind_variable) {
-            rec->irs[j] = irgen_push_unary(Ir_Kind_load, sym->ir);
-            sym->ir->var->parent = var;
-          }
-          else if (sym->kind == Sym_Kind_constant) {
-            rec->irs[j] = sym->ir;
-          }
-          else if (sym->kind == Sym_Kind_parameter) {
-            rec->irs[j] = sym->ir;
-          }
-          else {
-            assert(0);
-          }
-          hash_map_put_i32(&rec->position_from_name, str, i);
+          rec->irs[j]   = ir;
+          hash_map_put_i32(&rec->position_from_name, str, j);
         }
 
-        irgen_scope_leave();
+        source->decls = irgen_scope_leave();
         Ir* ir = irgen_push_record(rec);
         var->blocks = irgen_fun_temp_end();
         var->declared_ir = ir;
