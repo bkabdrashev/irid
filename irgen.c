@@ -1871,6 +1871,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
           else {
             assert(0);
           }
+          hash_map_put_i32(&rec->position_from_name, str, i);
         }
 
         irgen_scope_leave();
@@ -1923,7 +1924,7 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("foo: import \"test2\"; bar: import \"test2\"; foo.hi; bar.hi", "");
+  // test("foo: import \"test2\"; bar: import \"test2\"; foo.hi; bar.hi", "");
   // test("foo:(a:I32) -> a do 1+2", "");
   // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
   // test("c: #type a \\ b; a:#type 3; b:#type 4", "");

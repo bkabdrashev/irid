@@ -62,8 +62,8 @@ union Diag_Data {
   struct { Token_Kind expected; Token_Kind found; B8 end_of_line; } expected;
   struct { Token_Kind open; Token_Kind close; }      delimiter;
   struct { I32  digit;    I32  base; }               invalid_digit;
-  struct { Cstr expected; Cstr found; }              types;
-  struct { Cstr op;       Cstr type; }               operand;
+  struct { Type* expected; Type* found; }            types;
+  struct { Cstr op;       Type* type; }              operand;
 };
 
 typedef struct Diag Diag;
@@ -324,6 +324,7 @@ static Cstr diag_color_note(void)  { return "\033[1;36m"; }
 static Cstr diag_color_dim(void)   { return "\033[2m"; }
 static Cstr diag_color_reset(void) { return "\033[0m"; }
 
+void string_builder_push_type(String_Builder* sb, Type* type);
 void diag_render_found(String_Builder* sb, Token_Kind kind, Loc loc) {
   if (kind == Token_Kind_source_leave) {
     string_builder_push_cstr(sb, "end of file");
@@ -458,9 +459,9 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_type_mismatch:
     string_builder_push_cstr(sb, "type mismatch: expected ");
-    string_builder_push_cstr(sb, diag->data.types.expected);
+    string_builder_push_type(sb, diag->data.types.expected);
     string_builder_push_cstr(sb, ", found ");
-    string_builder_push_cstr(sb, diag->data.types.found);
+    string_builder_push_type(sb, diag->data.types.found);
   break;
   case Diag_Code_unknown_field:
     string_builder_push_cstr(sb, "record has no field named '");
@@ -488,14 +489,12 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_cstr(sb, "' in string literal");
   break;
   case Diag_Code_call_argument_mismatch:
-    string_builder_push_cstr(sb, "invalid argument: expected ");
-    string_builder_push_cstr(sb, diag->data.types.expected);
-    string_builder_push_cstr(sb, ", found ");
-    string_builder_push_cstr(sb, diag->data.types.found);
+    string_builder_push_cstr(sb, "invalid argument: ");
+    string_builder_push_type(sb, diag->data.types.found);
   break;
   case Diag_Code_invalid_operand:
     string_builder_push_cstr(sb, "invalid operand of type ");
-    string_builder_push_cstr(sb, diag->data.operand.type);
+    string_builder_push_type(sb, diag->data.operand.type);
     string_builder_push_cstr(sb, " for '");
     string_builder_push_cstr(sb, diag->data.operand.op);
     string_builder_push_cstr(sb, "'");
@@ -510,7 +509,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_invalid_dereference:
     string_builder_push_cstr(sb, "cannot dereference a value of type ");
-    string_builder_push_cstr(sb, diag->data.types.found);
+    string_builder_push_type(sb, diag->data.types.found);
   break;
   case Diag_Code_unsupported_semantics:
     string_builder_push_cstr(sb, diag->data.text);
@@ -523,15 +522,15 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_invalid_condition:
     string_builder_push_cstr(sb, "condition must have a scalar type, found ");
-    string_builder_push_cstr(sb, diag->data.types.found);
+    string_builder_push_type(sb, diag->data.types.found);
   break;
   case Diag_Code_invalid_array_length:
     string_builder_push_cstr(sb, "array length must be a single constant, found ");
-    string_builder_push_cstr(sb, diag->data.types.found);
+    string_builder_push_type(sb, diag->data.types.found);
   break;
   case Diag_Code_invalid_field_base:
     string_builder_push_cstr(sb, "cannot access a field of type ");
-    string_builder_push_cstr(sb, diag->data.types.found);
+    string_builder_push_type(sb, diag->data.types.found);
   break;
   case Diag_Code_join_layout_mismatch:
     string_builder_push_cstr(sb, "field has an inconsistent layout across joined records");
