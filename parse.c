@@ -1016,6 +1016,15 @@ Ast* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_error: {
     node = parse_new_error(parser, token.loc);
   } break;
+  case Token_Kind_import: {
+    Token path_token = *parse_peek(parser);
+    if (parse_expect_token(parser, Token_Kind_str)) {
+      Str_View path = token_str(path_token);
+      node = parse_new_node(parser, Ast_Kind_import);
+      node->source = parse_file(parser->sources, path);
+      node->loc = token.loc;
+    }
+  } break;
   case Token_Kind_sharp: {
     Ast_Kind kind = Ast_Kind_run;
     I32 precedence = parse_right_precedence(kind, token.flag);
@@ -1189,15 +1198,6 @@ Ast* parse_statement(Parser* parser) {
     // TODO: use name: exp
     Ast* exp = parse_statement(parser);
     parse_uses_push(parser, parser->uses, exp);
-  } break;
-  case Token_Kind_import: {
-    Token path_token = *parse_peek(parser);
-    if (parse_expect_token(parser, Token_Kind_str)) {
-      Str_View path = token_str(path_token);
-      node = parse_new_node(parser, Ast_Kind_import);
-      node->source = parse_file(parser->sources, path);
-      node->loc = token.loc;
-    }
   } break;
   case Token_Kind_if: {
     Ast* cond = parse_new_expression(parser, 0);
@@ -1466,6 +1466,10 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Ast* ast     = parse_tokens(&sources, tokens);
   {
     Arena* arena     = arena_init(128 * sources.ast_count);
+    if (diags_has_errors(&sources.diags)) {
+      fputs(diag_render_all(arena, &sources.diags, false), stdout);
+      assert(0);
+    }
     Cstr      result = cstr_from_ast(arena, ast->block);
     test_at_source(result, expected, file_name, line, source_data);
     arena_free(arena);
@@ -1477,6 +1481,7 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
+  test("a:import \"test2\"",        "");
   return;
   test("buf[i] = digit",        "");
   test("f:()->a\n return 1",        "");

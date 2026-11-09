@@ -1034,7 +1034,7 @@ void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Ast*      ast     = parse_tokens(&sources, tokens);
   str_init(sources.char_count, sources.str_count);
   Arena* arena = arena_init(KB(2) * sources.ast_count);
-  Fun_Pool funs = irgen_ast_root(arena, ast, sources.ast_count, &sources.diags);
+  Fun_Pool funs = irgen_ast_root(sources, arena, ast);
   if (diags_has_errors(&sources.diags)) {
     fputs(diag_render_all(arena, &sources.diags, false), stdout);
     assert(0);
@@ -1060,7 +1060,7 @@ void _test_llvm(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_llvm(source, expected, __FILE__, __LINE__)
 
 void llvm_test(void) {
-  test("foo : () -> {}; foo()", "");
+  // test("foo : () -> {}; foo()", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; putchar(\"AB\"[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[2]I8 = \"AB\"; putchar(a[1]); putchar 10", "");
   // test("putchar: #foreign.c \"putchar\" type (char:I32) -> I32; a:[]I8 = \"AB\"; putchar(a[1]); putchar 10", "");

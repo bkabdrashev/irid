@@ -24,7 +24,7 @@ I32 irid_run_path(Cstr path) {
   profile_stage_begin("irgen", 0);
   str_init(sources.char_count, sources.str_count);
   Arena* arena = arena_init(KB(2) * sources.ast_count);
-  Fun_Pool funs = irgen_ast_root(arena, ast, sources.ast_count, &sources.diags);
+  Fun_Pool funs = irgen_ast_root(sources, arena, ast);
 
   if (diags_has_errors(&sources.diags)) {
     fputs(diag_render_all(arena, &sources.diags, false), stdout);

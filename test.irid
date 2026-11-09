@@ -87,7 +87,7 @@ new_food : () -> {
         }
         i = i + 1
 
-      r: I32 = rand(empty_n)
+      r: I32 = sdl.rand(empty_n)
       game.food_p[game.food_n].x = empty[r].x
       game.food_p[game.food_n].y = empty[r].y
       game.food_n = game.food_n + 1
@@ -96,7 +96,7 @@ new_food : () -> {
 }
 
 update : () -> {
-  now: F32 = F32 GetTicks()
+  now: F32 = F32 sdl.GetTicks()
   dt:  F32 = now - game.last_tick
   game.last_tick = now
 
@@ -174,16 +174,16 @@ update : () -> {
 }
 
 draw : () -> {
-  sdl.SetRenderDrawColor(renderer; 15; 15; 15; ALPHA_OPAQUE)
+  sdl.SetRenderDrawColor(renderer; 15; 15; 15; sdl.ALPHA_OPAQUE)
   sdl.RenderClear(renderer)
 
-  r: FRect = (0.0; 0.0; BLOCK_PIXELS - 2.0; BLOCK_PIXELS - 2.0)
+  r: sdl.FRect = (0.0; 0.0; BLOCK_PIXELS - 2.0; BLOCK_PIXELS - 2.0)
   {
     i: I32 = 0
   while i < game.food_n do
     r.x = game.food_p[i].x * (r.w + 2.0)
     r.y = game.food_p[i].y * (r.h + 2.0)
-    sdl.SetRenderDrawColor(renderer; 127; 16; 16; ALPHA_OPAQUE)
+    sdl.SetRenderDrawColor(renderer; 127; 16; 16; sdl.ALPHA_OPAQUE)
     sdl.RenderFillRect(renderer; @r)
     i = i + 1
   }
@@ -193,22 +193,22 @@ draw : () -> {
   while i < game.snake_n do
     r.x = game.snake_p[i].x * (r.w + 2.0)
     r.y = game.snake_p[i].y * (r.h + 2.0)
-    sdl.SetRenderDrawColor(renderer; 16; 127; 16; ALPHA_OPAQUE)
+    sdl.SetRenderDrawColor(renderer; 16; 127; 16; sdl.ALPHA_OPAQUE)
     sdl.RenderFillRect(renderer; @r)
     i = i + 1
   }
   r.x = game.snake_p[0].x * (r.w + 2.0)
   r.y = game.snake_p[0].y * (r.h + 2.0)
-  sdl.SetRenderDrawColor(renderer; 127; 127; 16; ALPHA_OPAQUE)
+  sdl.SetRenderDrawColor(renderer; 127; 127; 16; sdl.ALPHA_OPAQUE)
   sdl.RenderFillRect(renderer; @r)
 
 
   sdl.RenderPresent(renderer)
 }
 
-sdl.init(INIT_VIDEO | INIT_EVENTS)
-window:   @Window   = sdl.CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
-renderer: @Renderer = sdl.CreateRenderer(window; @ "\0"[0])
+sdl.init(sdl.INIT_VIDEO | sdl.INIT_EVENTS)
+window:   @sdl.Window   = sdl.CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
+renderer: @sdl.Renderer = sdl.CreateRenderer(window; @ "\0"[0])
 
 game.running = 1
 game.snake_n = 1
