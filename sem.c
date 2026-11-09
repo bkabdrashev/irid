@@ -3004,7 +3004,7 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
           Var* var = &new(irgen.vars);
                var->kind   = Var_Kind_none;
                var->state  = Var_State_unresolved;
-               var->global = irgen.scope_stack.length == 1;
+               var->global = irgen.scope_stack.length == 0;
                var->name   = irgen.str_anon;
                var->declared_ir = two;
 
@@ -3919,7 +3919,7 @@ void sem_ir(Block* block, Ir* ir) {
       Var* var = &new(irgen.vars);
            var->kind   = Var_Kind_pointee;
            var->state  = Var_State_unresolved;
-           var->global = irgen.scope_stack.length == 1;
+           var->global = irgen.scope_stack.length == 0;
            var->name   = irgen.str_anon;
            var->declared_ir = ir->unary;
            var->declared = type_unary;
@@ -4482,7 +4482,7 @@ void sem_funs(Arena* arena, Fun_Pool funs, Diags* diags) {
   sem.scc_stack = arena_push(arena, sizeof(Blocks) + sizeof(Block*)*irgen.blocks.length);
   sem.scc_stack->length = 0;
   sem.type_of_irs = arena_push_zero_type(arena, Type*, 3 * irgen.irs.length);
-  sem.types = pool(arena, Type, irgen.irs.length);
+  sem.types = pool(arena, Type, 3 * irgen.irs.length);
 
   sem.elements = arena_push_type(arena, I32, 3 * irgen.irs.length);
 
@@ -4601,7 +4601,8 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  // test("I32 0", "");
+  // test("foo()", "");
+  test("(a:0..1; b:2..3)","");
   // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");

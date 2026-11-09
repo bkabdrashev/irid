@@ -567,11 +567,7 @@ void llvm_ir(Ir* ir) {
       }
       else if (fun_type->str) {
         assert(type->kind == Type_Kind_fun);
-        result = llvm_of_fun(type->function->fun);
-        LLVMTypeRef llvm_fun_type = llvm_of_type_function(type->function);
-        Cstr name = cstr_from_str(type->function->foreign_name);
-        result = LLVMAddFunction(llvm_gen.module, name, llvm_fun_type);
-        llvm_of_fun_put(type->function->fun, result);
+        result = llvm_of_foreign_fun(type->function->foreign_id);
       }
     }
   } break;

@@ -332,6 +332,7 @@ typedef enum Sym_Kind {
   Sym_Kind_constant  = 1,
   Sym_Kind_variable  = 2,
   Sym_Kind_parameter = 3,
+  Sym_Kind_field     = 4,
 } Sym_Kind;
 
 typedef struct Sym Sym;
@@ -786,7 +787,7 @@ Fun* irgen_fun_top(void) {
 Var* irgen_var_new(void) {
   Fun* fun = irgen_fun_top();
   Var* var = &new(irgen.vars);
-  var->global = irgen.scope_stack.length == 1;
+  var->global = irgen.scope_stack.length == 0;
   fa_extend(irgen.temp_var_arena, fun->vars, var);
   return var;
 }
@@ -1027,6 +1028,29 @@ void irgen_var_declare(Var* var, Ast* node) {
   var->kind = Var_Kind_declared;
 }
 
+Hash_Map* irgen_file_enter(Ast_Block block) {
+}
+
+Hash_Map* irgen_record_enter(Ast_List* list) {
+  Hash_Map* scope = hash_map_new(irgen.perm_arena, list->length);
+  for (I32 i = 0; i < list->length; i++) {
+    Ast* ast = list->base[i];
+    if (ast->kind == Ast_Kind_declare) {
+      Str* str = str_from_loc(ast->declare.lhs);
+      Sym* sym = &new(irgen.syms);
+      sym->loc = ast->declare.lhs;
+      sym->ast = ast->declare.rhs;
+      sym->kind = Sym_Kind_field;
+      hash_map_put(scope, str, sym);
+    }
+    else if (ast->kind == Ast_Kind_use) {
+      irgen_error_text(Diag_Code_unsupported_construct, irgen.ast_loc, "use inside record");
+    }
+  }
+  add(irgen.scope_stack, scope);
+  return scope;
+}
+
 void irgen_scope_enter(Ast_Block block) {
   Ast_List* uses = block.uses;
   Ast_Decls* decls = block.decls;
@@ -1059,7 +1083,7 @@ void irgen_scope_enter(Ast_Block block) {
     Var* var = irgen_var_new();
     var->kind = Var_Kind_declared;
     var->state = Var_State_unresolved;
-    var->global = irgen.scope_stack.length == 1;
+    var->global = irgen.scope_stack.length == 0;
     var->name = key;
 
     sym->kind = Sym_Kind_variable;
@@ -1262,6 +1286,12 @@ Ir* irgen_ast(Ast* ast) {
       else if (sym->kind == Sym_Kind_constant) {
         result = sym->ir;
       }
+      else if (sym->kind == Sym_Kind_field) {
+        if (!sym->ir) {
+          sym->ir = irgen_ast(sym->ast);
+        }
+        result = sym->ir;
+      }
       else {
         irgen_error_name(Diag_Code_undefined_name, ast->loc, str);
       }
@@ -1310,30 +1340,19 @@ Ir* irgen_ast(Ast* ast) {
   } break;
   case Ast_Kind_record: {
     Rec* rec = irgen_record_new(ast->list->length);
-    I32 size = sizeof(Ast_Decls) + ast->list->length * sizeof(Ast_Decl);
-    Ast_Block block = {};
-    block.decls = arena_push(irgen.perm_arena, size);
-    block.uses  = arena_push(irgen.perm_arena, size);
-    for (I32 i = 0; i < ast->list->length; i++) {
-      Ast* field_node = ast->list->base[i];
-      if (field_node->kind == Ast_Kind_declare) {
-        fa_add(block.decls, field_node->declare);
-      }
-      else if (field_node->kind == Ast_Kind_use) {
-        // TODO: inside record uses
-        fa_add(block.uses, field_node->unary);
-      }
-    }
-    irgen_scope_enter(block);
+    Hash_Map* scope = irgen_record_enter(ast->list);
 
     for (I32 i = 0; i < ast->list->length; i++) {
       Ast* field_node = ast->list->base[i];
       if (field_node->kind == Ast_Kind_declare) {
         Str* str = str_from_loc(field_node->declare.lhs);
-        Ir* ir = irgen_ast(field_node->declare.rhs);
+        Sym* sym = hash_map_get(*scope, str);
+        if (!sym->ir) {
+          sym->ir = irgen_ast(field_node->declare.rhs);
+        }
         hash_map_put_i32(&rec->position_from_name, str, i);
         rec->names[i] = str;
-        rec->irs[i]   = ir;
+        rec->irs[i]   = sym->ir;
       }
       else {
         Ir* ir = irgen_ast(field_node);
@@ -1848,7 +1867,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
         irgen_fun_temp();
         Rec* rec = irgen_record_new(ast_block.decls->length);
 
-        irgen_scope_enter(ast_block);
+        irgen_ast_root(sources, arena, ast);
 
         for (I32 j = 0; j < ast_block.decls->length; j++) {
           Ast_Decl decl = ast_block.decls->base[j];
@@ -1909,6 +1928,7 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("(a:0..1; b:2..3)","");
   // test("foo: import \"test2\"; bar: import \"test2\"; foo.hi; bar.hi", "");
   // test("foo:(a:I32) -> a do 1+2", "");
   // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");
