@@ -1028,9 +1028,6 @@ void irgen_var_declare(Var* var, Ast* node) {
   var->kind = Var_Kind_declared;
 }
 
-Hash_Map* irgen_file_enter(Ast_Block block) {
-}
-
 Hash_Map* irgen_record_enter(Ast_List* list) {
   Hash_Map* scope = hash_map_new(irgen.perm_arena, list->length);
   for (I32 i = 0; i < list->length; i++) {
@@ -1064,38 +1061,47 @@ void irgen_scope_enter(Ast_Block block) {
   Hash_Map* scope = hash_map_new(irgen.perm_arena, decls->length);
   for (I32 i = 0; i < decls->length; i++) {
     Ast_Decl decl = decls->base[i];
-    Str* key = str_from_loc(decl.lhs);
+    Str* str = str_from_loc(decl.lhs);
     Sym* sym = &new(irgen.syms);
     sym->loc = decl.lhs;
     sym->ast = decl.rhs;
-    hash_map_put(scope, key, sym);
-    Sym* previous = irgen_sym_get(key);
+    hash_map_put(scope, str, sym);
+    Sym* previous = irgen_sym_get(str);
     if (previous) {
       Diag* diag = irgen_diag(Diag_Code_shadowed_declaration, sym->loc);
       if (diag) {
-        diag->data.name = key;
+        diag->data.name = str;
         I32 parent = (I32)(diag - irgen.diags->base);
         Diag* note = diag_note(irgen.diags, parent, Diag_Code_previous_declaration, previous->loc);
-        if (note) note->data.name = key;
+        if (note) note->data.name = str;
       }
       irgen_fail();
     }
-    Var* var = irgen_var_new();
-    var->kind = Var_Kind_declared;
-    var->state = Var_State_unresolved;
-    var->global = irgen.scope_stack.length == 0;
-    var->name = key;
+    if (sym->ast->kind == Ast_Kind_import) {
+      // TODO: alias names for var
+      sym->kind = Sym_Kind_variable;
+      sym->ir = sym->ast->source->ir_var;
+    }
+    else {
+      Var* var = irgen_var_new();
+      var->kind = Var_Kind_declared;
+      var->state = Var_State_unresolved;
+      var->global = irgen.scope_stack.length == 0;
+      var->name = str;
 
-    sym->kind = Sym_Kind_variable;
-    sym->ir = irgen_push_var(var);
+      sym->kind = Sym_Kind_variable;
+      sym->ir = irgen_push_var(var);
+    }
   }
   add(irgen.scope_stack, scope);
 
   for (I32 i = 0; i < scope->len; i++) {
     Str* key = scope->list[i];
     Sym* sym = hash_map_get(*scope, key);
-    irgen_var_declare(sym->ir->var, sym->ast);
-    irgen_push_declare(sym->ir->var);
+    if (sym->ast->kind != Ast_Kind_import) {
+      irgen_var_declare(sym->ir->var, sym->ast);
+      irgen_push_declare(sym->ir->var);
+    }
   }
 }
 
@@ -1855,40 +1861,40 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
   for (I32 i = 0; i < sources.pool.length; i++) {
     Source* source = &sources.pool.base[i];
     if (source->ast) {
-      Ast_Block ast_block = source->ast->block;
-
-      { // declaring the source var
-        Var* var = irgen_var_new();
-        var->state = Var_State_unresolved;
-        var->global = true;
-        var->name = source->path;
-        source->ir_var = irgen_push_var(var);
-
-        irgen_fun_temp();
-        Rec* rec = irgen_record_new(ast_block.decls->length);
-
-        irgen_ast_root(sources, arena, ast);
-
-        for (I32 j = 0; j < ast_block.decls->length; j++) {
-          Ast_Decl decl = ast_block.decls->base[j];
-          Str* str = str_from_loc(decl.lhs);
-          Ir* ir = irgen_ast(decl.rhs);
-          rec->names[j] = str;
-          rec->irs[j]   = ir;
-          hash_map_put_i32(&rec->position_from_name, str, j);
-        }
-
-        source->decls = irgen_scope_leave();
-        Ir* ir = irgen_push_record(rec);
-        var->blocks = irgen_fun_temp_end();
-        var->declared_ir = ir;
-        var->kind = Var_Kind_declared;
-
-        irgen_push_declare(var);
-      }
-
+      Var* var = irgen_var_new();
+      var->state = Var_State_unresolved;
+      var->global = true;
+      var->name = source->path;
+      source->ir_var = irgen_push_var(var);
     }
   }
+
+  for (I32 i = 0; i < sources.pool.length; i++) {
+    Source* source = &sources.pool.base[i];
+    if (source->ast) {
+      Ast_Block ast_block = source->ast->block;
+      irgen_scope_enter(ast_block);
+      source->decls = irgen_scope_leave();
+
+      irgen_fun_temp();
+
+      Rec* rec = irgen_record_new(source->decls->len);
+      for (I32 j = 0; j < source->decls->len; j++) {
+        Str* str = source->decls->list[j];
+        Sym* sym = hash_map_get(*source->decls, str);
+        rec->names[j] = str;
+        rec->irs[j]   = irgen_push_unary(Ir_Kind_load, sym->ir);
+        hash_map_put_i32(&rec->position_from_name, str, j);
+      }
+
+      source->ir_var->var->declared_ir = irgen_push_record(rec);
+      source->ir_var->var->blocks = irgen_fun_temp_end();
+      source->ir_var->var->kind = Var_Kind_declared;
+
+      irgen_push_declare(source->ir_var->var);
+    }
+  }
+
   irgen_ast(ast);
   irgen_fun_leave();
   // irgen_scope_leave();

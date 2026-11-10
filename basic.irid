@@ -1,101 +1,100 @@
-foo: #foreign.c "putchar" ()->();
-// I64_MAX :  9223372036854775807
-// I64_MIN : -9223372036854775807 - 1
-// I64 : #type 64'#bits(I64_MIN..I64_MAX)
-// U64 : #type 64'#bits(0..I64_MAX)
+I64_MAX :  9223372036854775807
+I64_MIN : -9223372036854775807 - 1
+I64 : #type 64'#bits(I64_MIN..I64_MAX)
+U64 : #type 64'#bits(0..I64_MAX)
 
-// I32_MAX :  2147483647
-// I32_MIN : -2147483647 - 1
-// I32 : #type 32'#bits(I32_MIN..I32_MAX)
-// U32 : #type 32'#bits(0..I32_MAX)
+I32_MAX :  2147483647
+I32_MIN : -2147483647 - 1
+I32 : #type 32'#bits(I32_MIN..I32_MAX)
+U32 : #type 32'#bits(0..I32_MAX)
 
-// I16_MAX :  32767
-// I16_MIN : -32767 - 1
-// I16 : #type 16'#bits(I16_MIN..I16_MAX)
-// U16 : #type 16'#bits(0..I16_MAX)
+I16_MAX :  32767
+I16_MIN : -32767 - 1
+I16 : #type 16'#bits(I16_MIN..I16_MAX)
+U16 : #type 16'#bits(0..I16_MAX)
 
-// I8_MAX :  127
-// I8_MIN : -127 - 1
-// I8 : #type 8'#bits(I8_MIN..I8_MAX)
-// U8 : #type 8'#bits(0..I8_MAX)
+I8_MAX :  127
+I8_MIN : -127 - 1
+I8 : #type 8'#bits(I8_MIN..I8_MAX)
+U8 : #type 8'#bits(0..I8_MAX)
 
-// B8 : #type 8'#bits(0\1)
+B8 : #type 8'#bits(0\1)
 
-// F32 : #type #float(8; 23)
-// F64 : #type #float(11; 52)
+F32 : #type #float(8; 23)
+F64 : #type #float(11; 52)
 
-// Str : #type ([]I8)
+Str : #type ([]I8)
 
-// putchar: #foreign.c "putchar" (char:I32)->I32
-// print_i64:(n:I64) -> {
-//   if n == 0 do {
-//     putchar 48
-//     putchar 10
-//     return
-//   }
-//   if n < 0 do {
-//     putchar 45 // -
-//     n = -1 * n
-//   }
-//   buf: [20](0..9)
-//   i:I8 = 0
-//   while n > 0 do {
-//     digit := n % 10
-//     buf[i] = digit
-//     n = n / 10
-//     i = i + 1
-//   }
-//   while i > 0 do {
-//     i = i - 1
-//     putchar(buf[i] + 48)
-//   }
-//   putchar 10
-// }
+putchar: #foreign.c "putchar" (char:I32)->I32
+print_i64:(n:I64) -> {
+  if n == 0 do {
+    putchar 48
+    putchar 10
+    return
+  }
+  if n < 0 do {
+    putchar 45 // -
+    n = -1 * n
+  }
+  buf: [20](0..9)
+  i:I8 = 0
+  while n > 0 do {
+    digit := n % 10
+    buf[i] = digit
+    n = n / 10
+    i = i + 1
+  }
+  while i > 0 do {
+    i = i - 1
+    putchar(buf[i] + 48)
+  }
+  putchar 10
+}
 
-// print_f32:(n:F32) -> {
-//   if n < 0.0 do {
-//     putchar 45 // -
-//     n = -n
-//   }
+print_f32:(n:F32) -> {
+  if n < 0.0 do {
+    putchar 45 // -
+    n = -n
+  }
 
-//   whole: I64 = I64 n
-//   frac: I32 = I32 ((n - F32 whole) * 1000.0 + 0.5) // three decimal places
-//   if frac >= 1000 do {
-//     frac = 0
-//     whole = whole + 1
-//   }
+  whole: I64 = I64 n
+  frac: I32 = I32 ((n - F32 whole) * 1000.0 + 0.5) // three decimal places
+  if frac >= 1000 do {
+    frac = 0
+    whole = whole + 1
+  }
 
-//   if whole == 0 do
-//     putchar 48
-//   else {
-//     buf: [20](0..9)
-//     i:I8 = 0
-//     while whole > 0 do {
-//       buf[i] = whole % 10
-//       whole = whole / 10
-//       i = i + 1
-//     }
-//     while i > 0 do {
-//       i = i - 1
-//       putchar(buf[i] + 48)
-//     }
-//   }
+  if whole == 0 do
+    putchar 48
+  else {
+    buf: [20](0..9)
+    i:I8 = 0
+    while whole > 0 do {
+      buf[i] = whole % 10
+      whole = whole / 10
+      i = i + 1
+    }
+    while i > 0 do {
+      i = i - 1
+      putchar(buf[i] + 48)
+    }
+  }
 
-//   putchar 46 // .
+  putchar 46 // .
 
-//   div: I32 = 100
-//   while div > 0 do {
-//     putchar(frac / div % 10 + 48)
-//     div = div / 10
-//   }
-//   putchar 10
-// }
+  div: I32 = 100
+  while div > 0 do {
+    putchar(frac / div % 10 + 48)
+    div = div / 10
+  }
+  putchar 10
+}
 
-// print_str:(str: Str) -> {
-//   i:I32 = 0
-//   while i < str.len do {
-//     putchar(str[i])
-//     i = i + 1
-//   }
-//   putchar 10
-// }
+print_str:(str: Str) -> {
+  i:I32 = 0
+  while i < str.len do {
+    putchar(str[i])
+    i = i + 1
+  }
+  putchar 10
+}
