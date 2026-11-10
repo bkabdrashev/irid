@@ -45,7 +45,7 @@ game : (
   food_p : [size]Vec2
   food_n : I32
 
-  running : B8
+  running : I32
   last_tick : F32
   last_time : F32
 )
@@ -98,7 +98,6 @@ new_food : () -> {
 update : () -> {
   now: F32 = F32 sdl.GetTicks()
   dt:  F32 = now - game.last_tick
-  print_f32(dt)
   game.last_tick = now
 
   {
@@ -110,9 +109,6 @@ update : () -> {
   }
 
   game.last_time = game.last_time + dt
-  print_f32(game.last_time)
-  print_f32(game.last_time * BLOCKS_PER_MS)
-  print_i64(game.last_time*BLOCKS_PER_MS >= 1.0)
   if (game.last_time * BLOCKS_PER_MS) >= 1.0 do { // one block is passed
     {
       i: I32 = 0
@@ -214,7 +210,7 @@ sdl.init(sdl.INIT_VIDEO | sdl.INIT_EVENTS)
 window:   @sdl.Window   = sdl.CreateWindow(@ "Title\0"[0]; WINDOW_WIDTH; WINDOW_HEIGHT; 0)
 renderer: @sdl.Renderer = sdl.CreateRenderer(window; @ "\0"[0])
 
-game.running = 1
+game.running = 100 // run for 100 cycles
 game.snake_n = 1
 game.snake_p[0].x = game.width  / 2.0 - 1.0
 game.snake_p[0].y = game.height / 2.0 - 1.0
@@ -264,7 +260,7 @@ while game.running do {
   update()
   draw()
   sdl.Delay(10)
-  // game.running = 0;
+  // game.running = game.running - 1;
 }
 
 sdl.DestroyRenderer(renderer)

@@ -1300,7 +1300,7 @@ Ir* irgen_ast(Ast* ast) {
     result = irgen_push_int(i64);
   } break;
   case Ast_Kind_float: {
-    I64 f64 = f64_from_loc(ast->loc);
+    F64 f64 = f64_from_loc(ast->loc);
     result = irgen_push_float(f64);
   } break;
   case Ast_Kind_str: {
