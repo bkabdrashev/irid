@@ -364,6 +364,7 @@ struct Irgen {
   Rec_Pool    records;
   Ir_Pool     irs;
 
+  Str*        str_begin;
   Str*        str_nil;
   Str*        str_anon;
   Str*        str_len;
@@ -371,14 +372,20 @@ struct Irgen {
   Str*        str_type;
   Str*        str_foreign;
   Str*        str_float;
+  Str*        str_main;
+  Str*        str_end;
+  I32         str_count;
 
   Ir*         irid_none;
   Hash_Map    builtins;
+  Ir*         irid_begin;
   Ir*         irid_len;
   Ir*         irid_bits;
   Ir*         irid_type;
   Ir*         irid_foreign;
   Ir*         irid_float;
+  Ir*         irid_end;
+  I32         irid_count;
 
   Fun_Ref_Pool      fun_stack;
   Blocks*           unresolved_breaks;
@@ -1750,10 +1757,11 @@ Ir* irgen_ast(Ast* ast) {
     irgen_block_return();
   } break;
   case Ast_Kind_break: case Ast_Kind_break_value:
+    irgen_error_text(Diag_Code_unsupported_construct, ast->loc, "break");
+    break;
   case Ast_Kind_none: {
-    irgen_error_text(Diag_Code_unsupported_construct, ast->loc,
-                     ast->kind == Ast_Kind_none ? "an empty expression" : "break");
-  }
+    irgen_error_text(Diag_Code_unsupported_construct, ast->loc, "an empty expression");
+  } break;
   }
   irgen.ast_loc = saved_loc;
   return result;
@@ -1768,21 +1776,32 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
   irgen.temp_var_arena   = temp_var_arena;
   irgen.temp_ir_arena    = temp_ir_arena;
   irgen.diags = &sources.diags;
+
+  {
+    irgen.str_count = (&irgen.str_end - &irgen.str_begin - 1);
+    I32 char_count = irgen.str_count * 32;
+    str_init(sources.char_count + char_count, sources.str_count + irgen.str_count);
+  }
+
+  irgen.str_nil  = str_from_cstr("");
+  irgen.str_anon = str_from_cstr("__anon");
+
+  {
+    irgen.irid_count = (&irgen.irid_end - &irgen.irid_begin - 1);
+    irgen.builtins = hash_map_init(irgen.perm_arena, irgen.irid_count);
+  }
+
   irgen.funs      = pool(irgen.perm_arena, Fun,      sources.ast_count);
   irgen.funs_temp = pool(irgen.perm_arena, Fun,      sources.ast_count);
   irgen.syms    = pool(irgen.perm_arena, Sym,      sources.ast_count);
   irgen.vars    = pool(irgen.perm_arena, Var,      sources.ast_count);
   irgen.blocks  = pool(irgen.perm_arena, Block,    sources.ast_count);
-  irgen.irs     = pool(irgen.perm_arena, Ir,       3*sources.ast_count);
+  irgen.irs     = pool(irgen.perm_arena, Ir,       3*sources.ast_count + irgen.irid_count);
   irgen.records = pool(irgen.perm_arena, Rec,      sources.ast_count);
   irgen.fun_stack   = pool(irgen.temp_block_arena, Fun_Ref,      sources.ast_count);
   irgen.scope_stack = pool(irgen.temp_block_arena, Hash_Map_Ref, sources.ast_count);
   irgen.uses        = 0;
 
-  irgen.str_nil  = str_from_cstr("");
-  irgen.str_anon = str_from_cstr("__anon");
-
-  irgen.builtins = hash_map_init(irgen.perm_arena, 8);
   {
     irgen.irid_len = &new(irgen.irs);
     irgen.irid_len->kind = Ir_Kind_len;
@@ -1835,7 +1854,8 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
 
   {
     Fun* fun = irgen_fun_enter();
-    fun->name = str_from_cstr("main");
+    irgen.str_main = str_from_cstr("main");
+    fun->name = irgen.str_main;
 
     Var* arg_var = irgen_var_new();
     arg_var->name = str_from_cstr("__arg");
@@ -1912,8 +1932,7 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Str_View  source_sv = str_view_from_cstr(source_data);
   Source*   source  = sources_add_str_view(&sources, source_sv);
   Tokens    tokens  = lex_source(source, &sources.diags);
-  Ast* ast     = parse_tokens(&sources, tokens);
-  str_init(sources.char_count, sources.str_count);
+  Ast*   ast   = parse_tokens(&sources, tokens);
   Arena* arena = arena_init(KB(1) * sources.ast_count);
 
   Fun_Pool funs = irgen_ast_root(sources, arena, ast);
@@ -1934,7 +1953,6 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("(a:0..1; b:2..3)","");
   // test("foo: import \"test2\"; bar: import \"test2\"; foo.hi; bar.hi", "");
   // test("foo:(a:I32) -> a do 1+2", "");
   // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");

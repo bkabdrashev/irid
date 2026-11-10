@@ -128,6 +128,9 @@ Str* str_from_cstr(Cstr cstr) {
 }
 
 void str_init(I32 char_count, I32 str_count) {
+  // TODO: builtin stuff should be handled same as keywords
+  str_count  += 128;
+  char_count += KB(1);
   I32 set_cap = hash_set_alloc_size(str_count);
   Arena* arena = arena_init(char_count + str_count * set_cap);
   internal_strs.arena = arena;

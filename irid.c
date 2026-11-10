@@ -22,7 +22,6 @@ I32 irid_run_path(Cstr path) {
   Ast*      ast     = parse_tokens(&sources, tokens);
   // profile_stage_begin("init arena", 0);
   profile_stage_begin("irgen", 0);
-  str_init(sources.char_count, sources.str_count);
   Arena* arena = arena_init(KB(2) * sources.ast_count);
   Fun_Pool funs = irgen_ast_root(sources, arena, ast);
 
