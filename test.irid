@@ -98,6 +98,7 @@ new_food : () -> {
 update : () -> {
   now: F32 = F32 sdl.GetTicks()
   dt:  F32 = now - game.last_tick
+  print_f32(dt)
   game.last_tick = now
 
   {
@@ -109,6 +110,9 @@ update : () -> {
   }
 
   game.last_time = game.last_time + dt
+  print_f32(game.last_time)
+  print_f32(game.last_time * BLOCKS_PER_MS)
+  print_i64(game.last_time*BLOCKS_PER_MS >= 1.0)
   if (game.last_time * BLOCKS_PER_MS) >= 1.0 do { // one block is passed
     {
       i: I32 = 0

@@ -3322,6 +3322,9 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_foreign: {
     result = sem.rec_foreign;
   } break;
+  case Ir_Kind_type: {
+    result = sem.fun_type_type;
+  } break;
   case Ir_Kind_int: {
     I64 i64 = ir->i64;
     result  = type_int(i64);
@@ -3694,6 +3697,21 @@ void sem_ir(Block* block, Ir* ir) {
     else {
       sem_error_unary_operand(ir, "-");
     }
+  } break;
+  case Ir_Kind_group: {
+    Record* new_record  = arena_push_zero(sem.perm_arena, sizeof(Record));
+    new_record->length  = ir->rec->length;
+    new_record->names   = ir->rec->names;
+    new_record->types   = arena_push(sem.perm_arena, new_record->length * sizeof(Type*));
+    new_record->offsets = arena_push(sem.perm_arena, new_record->length * sizeof(I32));
+    for (I32 i = 0; i < ir->rec->length; i++) {
+      Type* type = type_of_ir(ir->rec->irs[i]);
+      new_record->types[i] = type;
+    }
+    new_record->position_from_name   = ir->rec->position_from_name;
+    new_record->position_from_offset = hash_map_init(sem.perm_arena, new_record->length);
+
+    result = type_record(new_record);
   } break;
   case Ir_Kind_record: {
     Record* new_record  = arena_push_zero(sem.perm_arena, sizeof(Record));
@@ -4094,7 +4112,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else {
-      sem_error_operand(ir->loc, "()", fun_type);
+      sem_error_operand(ir->loc, "function call", fun_type);
     }
   } break;
   case Ir_Kind_import: {
@@ -4599,7 +4617,7 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("I32 0","");
+  // test("I32 0; a:(x:I32; y:I32); a.x + a.y","");
   // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");

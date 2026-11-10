@@ -51,7 +51,8 @@ typedef enum Ir_Kind {
 
   Ir_Kind_import = Ast_Kind_import,
 
-  Ir_Kind_record          = 131,
+  Ir_Kind_record          = 130,
+  Ir_Kind_group           = 131,
   Ir_Kind_position_offset = 132,
   Ir_Kind_name_offset     = 134,
   Ir_Kind_maybe_using     = 135,
@@ -629,6 +630,24 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "span_from_array cast ");
     string_builder_push_irid(sb, ir->cast_value);
   break;
+  case Ir_Kind_group:
+    string_builder_push_cstr(sb, "group ");
+    for (I32 i = 0; i < ir->rec->length; i++) {
+      Ir_Field field = irgen_record_get_by_position(ir->rec, i);
+      if (field.name) {
+        string_builder_push_cstr(sb, " ");
+        string_builder_push_str(sb, field.name);
+        if (field.ir) {
+          string_builder_push_cstr(sb, ":");
+          string_builder_push_irid(sb, field.ir);
+        }
+      }
+      else {
+        string_builder_push_cstr(sb, " ");
+        string_builder_push_irid(sb, field.ir);
+      }
+    }
+  break;
   case Ir_Kind_record:
     string_builder_push_cstr(sb, "record");
     for (I32 i = 0; i < ir->rec->length; i++) {
@@ -903,6 +922,11 @@ Ir* irgen_push_binary(Ir_Kind kind, Ir* one, Ir* two) {
 
 Ir* irgen_push_record(Rec* rec) {
   Ir ir = { .kind = Ir_Kind_record, .rec = rec };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_group(Rec* rec) {
+  Ir ir = { .kind = Ir_Kind_group, .rec = rec };
   return irgen_push(ir);
 }
 
@@ -1907,7 +1931,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
         hash_map_put_i32(&rec->position_from_name, str, j);
       }
 
-      source->ir_var->var->declared_ir = irgen_push_record(rec);
+      source->ir_var->var->declared_ir = irgen_push_group(rec);
       source->ir_var->var->blocks = irgen_fun_temp_end();
       source->ir_var->var->kind = Var_Kind_declared;
 

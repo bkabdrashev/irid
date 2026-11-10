@@ -758,6 +758,7 @@ void llvm_ir(Ir* ir) {
 
     result = LLVMConstStructInContext(llvm_gen.context, values, 2, false);
   } break;
+  case Ir_Kind_group:
   case Ir_Kind_record: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
     result = LLVMGetUndef(llvm_type);
