@@ -65,17 +65,17 @@ new_food : () ->
 
     empty: [game.size]Vec2
 
-    e: I32 = 0
+    e = 0
     for i : game.size
       if board[i]
         empty[e].x = F32 (i % game.width)
         empty[e].y = F32 (i / game.height)
-        e = e + 1
+        e++
 
     r := sdl.rand(empty_n)
     game.food_p[game.food_n].x = empty[r].x
     game.food_p[game.food_n].y = empty[r].y
-    game.food_n = game.food_n + 1
+    game.food_n++
 
 update : () ->
   now := F32 sdl.GetTicks()
@@ -110,7 +110,7 @@ update : () ->
       game.running = 0
 
     // is food eaten?
-    for i : game.food_n do
+    for i : game.food_n
       // if intersection(game.snake_p[0] ^ game.food_p[i]) > 0.2
       if intersection(game.snake_p[0].x; game.snake_p[0].y; game.food_p[i].x; game.food_p[i].y) > 0.2
         game.food_p[i].x = game.food_p[game.food_n-1].x
@@ -125,8 +125,8 @@ update : () ->
     game.snake_v[0].y = game.next_v.y
 
     for i : 1..game.snake_n
-      dx: F32 = game.snake_p[i-1].x - game.snake_p[i].x
-      dy: F32 = game.snake_p[i-1].y - game.snake_p[i].y
+      dx := game.snake_p[i-1].x - game.snake_p[i].x
+      dy := game.snake_p[i-1].y - game.snake_p[i].y
       game.snake_v[i].x = BLOCKS_PER_MS * dx
       game.snake_v[i].y = BLOCKS_PER_MS * dy
 
@@ -164,10 +164,10 @@ game.running = 100 // run for 100 cycles
 game.snake_n = 1
 game.snake_p[0].x = game.width  / 2.0 - 1.0
 game.snake_p[0].y = game.height / 2.0 - 1.0
-game.snake_v[0].x = 0.0
-game.snake_v[0].y = 0.0
-game.next_v.x = 0.0
-game.next_v.y = 0.0
+game.snake_v[0].x = 0
+game.snake_v[0].y = 0
+game.next_v.x = 0
+game.next_v.y = 0
 game.last_tick = F32 sdl.GetTicks()
 game.last_time = 0.0
 new_food(); new_food()
@@ -184,23 +184,23 @@ while game.running
       if event.scancode == sdl.SCANCODE_ESCAPE
         print_str("Escape")
         game.running = 0
-      else if event.scancode == sdl.SCANCODE_H && equal(game.snake_v[0].x; 0.0)
+      else if event.scancode == sdl.SCANCODE_H && equal(game.snake_v[0].x; 0)
         game.next_v.x = -BLOCKS_PER_MS
-        game.next_v.y = 0.0
-      else if event.scancode == sdl.SCANCODE_L && equal(game.snake_v[0].x; 0.0)
+        game.next_v.y = 0
+      else if event.scancode == sdl.SCANCODE_L && equal(game.snake_v[0].x; 0)
         game.next_v.x = +BLOCKS_PER_MS
         game.next_v.y = 0
-      else if event.scancode == sdl.SCANCODE_K && equal(game.snake_v[0].y; 0.0)
+      else if event.scancode == sdl.SCANCODE_K && equal(game.snake_v[0].y; 0)
         game.next_v.x = 0
         game.next_v.y = -BLOCKS_PER_MS
-      else if event.scancode == sdl.SCANCODE_J && equal(game.snake_v[0].y; 0.0)
+      else if event.scancode == sdl.SCANCODE_J && equal(game.snake_v[0].y; 0)
         game.next_v.x = 0
         game.next_v.y = +BLOCKS_PER_MS
 
   update()
   draw()
   sdl.Delay(10)
-  // game.running = game.running - 1;
+  // game.running--
 
 sdl.DestroyRenderer(renderer)
 sdl.DestroyWindow(window)

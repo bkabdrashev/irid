@@ -368,6 +368,7 @@ struct Irgen {
   Str*        str_begin;
   Str*        str_nil;
   Str*        str_anon;
+  Str*        str_iter;
   Str*        str_len;
   Str*        str_bits;
   Str*        str_type;
@@ -1694,6 +1695,73 @@ Ir* irgen_ast(Ast* ast) {
     Block* while_exit           = irgen_block_new(); // equal zero
     irgen_block_link_jump_to_block(&branch_from_header->branch.eqz, while_exit);
   } break;
+  case Ast_Kind_for: {
+    Ast* lhs = ast->binary.lhs;
+    Ast* rhs = ast->binary.rhs;
+    Ast* min = 0;
+    Ast* max = 0;
+    Hash_Map* scope = hash_map_new(irgen.perm_arena, 1);
+    add(irgen.scope_stack, scope);
+    Var* var = irgen_var_new();
+    Sym* sym = &new(irgen.syms);
+    sym->kind = Sym_Kind_variable;
+    sym->loc = lhs->loc;
+    sym->ir = irgen_push_var(var);
+    if (lhs->kind == Ast_Kind_declare) {
+      // for name : exp statement
+      var->name = str_from_loc(lhs->declare.lhs);
+
+      if (lhs->declare.rhs->kind == Ast_Kind_range) {
+        // for name : min..max statement
+        min = lhs->declare.rhs->binary.lhs;
+        max = lhs->declare.rhs->binary.rhs;
+      }
+      else {
+        // for name : max statement
+        min = 0;
+        max = lhs->declare.rhs;
+      }
+    }
+    else {
+      // for max statement
+      min = 0;
+      max = lhs;
+      var->name = irgen.str_iter;
+    }
+    irgen_sym_put(var->name, sym);
+    {
+      Ir* ir_min = min ? irgen_ast(min) : irgen_push_int(0);
+      irgen_fun_temp();
+      Ir* ir_max = irgen_ast(max);
+      Ir* range = irgen_push_binary(Ir_Kind_range, ir_min, ir_max);
+      var->blocks = irgen_fun_temp_end();
+      var->declared_ir = range;
+      var->kind = Var_Kind_declared;
+      irgen_push_declare(var);
+      irgen_push_binary(Ir_Kind_store, sym->ir, ir_min);
+    }
+
+    Block* for_entry    = irgen_block_jump();
+    Block* for_header   = irgen_block_new();
+    irgen_block_link_jump_to_block(&for_entry->jump, for_header);
+    Ir* ir_max = irgen_ast(max);
+    Ir* load_var = irgen_push_unary(Ir_Kind_load, sym->ir);
+    Ir* cond_ir = irgen_push_binary(Ir_Kind_lt, load_var, ir_max);
+    Block* branch_from_header = irgen_block_branch(cond_ir);
+    Block* body_entry         = irgen_block_new(); // not equal zero
+    irgen_block_link_jump_to_block(&branch_from_header->branch.nez, body_entry);
+                                irgen_ast(rhs);
+    Ir* load_var_prev = irgen_push_unary(Ir_Kind_load, sym->ir);
+    Ir* ir_one        = irgen_push_int(1);
+    Ir* ir_increment = irgen_push_binary(Ir_Kind_add, load_var_prev, ir_one);
+    irgen_push_binary(Ir_Kind_store, sym->ir, ir_increment);
+    Block* jump_from_body_to_header = irgen_block_jump();
+    irgen_block_link_jump_to_block(&jump_from_body_to_header->jump, for_header);
+    Block* for_exit           = irgen_block_new(); // equal zero
+    irgen_block_link_jump_to_block(&branch_from_header->branch.eqz, for_exit);
+
+    irgen_scope_leave();
+  } break;
   case Ast_Kind_fun: {
     Fun* fun = irgen_fun_enter();
     Var* arg_var = irgen_var_new();
@@ -1809,6 +1877,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
 
   irgen.str_nil  = str_from_cstr("");
   irgen.str_anon = str_from_cstr("__anon");
+  irgen.str_iter = str_from_cstr("__iter");
 
   {
     irgen.irid_count = (&irgen.irid_end - &irgen.irid_begin - 1);
@@ -1977,6 +2046,7 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
+  test("a:I32; for i : 0..a do i + 2", "");
   // test("foo: import \"test2\"; bar: import \"test2\"; foo.hi; bar.hi", "");
   // test("foo:(a:I32) -> a do 1+2", "");
   // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");

@@ -58,6 +58,7 @@ typedef enum Token_Kind {
   Token_Kind_while              = 76,
   Token_Kind_use                = 77,
   Token_Kind_import             = 78,
+  Token_Kind_for                = 79,
 } Token_Kind;
 
 Cstr cstr_from_token_kind(Token_Kind kind) {
@@ -115,6 +116,7 @@ Cstr cstr_from_token_kind(Token_Kind kind) {
   case Token_Kind_while:             return "while";
   case Token_Kind_use:               return "use";
   case Token_Kind_import:            return "import";
+  case Token_Kind_for:               return "for";
   }
   return "token";
 }

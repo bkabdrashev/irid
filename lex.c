@@ -303,7 +303,7 @@ Tokens lex_source(Source* source, Diags* diags) {
       }
       Umi length = lexer.stream - start;
       Str_View sv = { .base = start, .length = length };
-      if (str_view_is_equal(str_view_from_cstr("while"), sv))  token.kind = Token_Kind_while;
+      if (str_view_is_equal(str_view_from_cstr("while"), sv))       token.kind = Token_Kind_while;
       else if (str_view_is_equal(str_view_from_cstr("if"), sv))     token.kind = Token_Kind_if;
       else if (str_view_is_equal(str_view_from_cstr("else"), sv))   token.kind = Token_Kind_else;
       else if (str_view_is_equal(str_view_from_cstr("do"), sv))     token.kind = Token_Kind_do;
@@ -311,6 +311,7 @@ Tokens lex_source(Source* source, Diags* diags) {
       else if (str_view_is_equal(str_view_from_cstr("break"), sv))  token.kind = Token_Kind_break;
       else if (str_view_is_equal(str_view_from_cstr("use"), sv))    token.kind = Token_Kind_use;
       else if (str_view_is_equal(str_view_from_cstr("import"), sv)) token.kind = Token_Kind_import;
+      else if (str_view_is_equal(str_view_from_cstr("for"), sv))    token.kind = Token_Kind_for;
       else {
         token.kind  = Token_Kind_name;
       }
@@ -593,21 +594,48 @@ Cstr cstr_from_tokens(Arena* arena, Tokens tokens) {
     case Token_Kind_sharp:
     case Token_Kind_use:
     case Token_Kind_import:
+    case Token_Kind_for:
     case Token_Kind_name:
     case Token_Kind_int:
     case Token_Kind_str:
+    case Token_Kind_plus:
+    case Token_Kind_minus:
+    case Token_Kind_star:
+    case Token_Kind_slash:
+    case Token_Kind_percent:
+    case Token_Kind_pipe:
+    case Token_Kind_pipe_pipe:
+    case Token_Kind_pike:
+    case Token_Kind_amp:
+    case Token_Kind_amp_amp:
+    case Token_Kind_equal_equal:
+    case Token_Kind_bang_equal:
+    case Token_Kind_less_equal:
+    case Token_Kind_greater_equal:
+    case Token_Kind_less:
+    case Token_Kind_greater:
+    case Token_Kind_equal:
+    case Token_Kind_colon:
+    case Token_Kind_dot:
+    case Token_Kind_dot_dot:
+    case Token_Kind_at:
+    case Token_Kind_arrow:
+    case Token_Kind_brace_open:
+    case Token_Kind_brace_close:
+    case Token_Kind_paren_open:
+    case Token_Kind_paren_close:
+    case Token_Kind_curly_open:
+    case Token_Kind_curly_close:
+    case Token_Kind_semicolon:
+    case Token_Kind_comma:
+    case Token_Kind_quote:
+    case Token_Kind_backslash:
     case Token_Kind_float: {
       Str_View str_view = str_view_from_loc(token->loc);
       string_builder_push_str_view(&sb, str_view);
     } break;
-    case Token_Kind_plus:
-      string_builder_push_cstr(&sb, "+");
-    break;
     case Token_Kind_plus_prefix:
       string_builder_push_cstr(&sb, "p+");
-    break;
-    case Token_Kind_minus:
-      string_builder_push_cstr(&sb, "-");
     break;
     case Token_Kind_minus_prefix:
       string_builder_push_cstr(&sb, "p-");
@@ -615,101 +643,11 @@ Cstr cstr_from_tokens(Arena* arena, Tokens tokens) {
     case Token_Kind_bang:
       string_builder_push_cstr(&sb, "p-");
     break;
-    case Token_Kind_star:
-      string_builder_push_cstr(&sb, "*");
-    break;
-    case Token_Kind_slash:
-      string_builder_push_cstr(&sb, "/");
-    break;
-    case Token_Kind_percent:
-      string_builder_push_cstr(&sb, "%");
-    break;
-    case Token_Kind_pipe:
-      string_builder_push_cstr(&sb, "|");
-    break;
-    case Token_Kind_pipe_pipe:
-      string_builder_push_cstr(&sb, "||");
-    break;
-    case Token_Kind_pike:
-      string_builder_push_cstr(&sb, "^");
-    break;
-    case Token_Kind_amp:
-      string_builder_push_cstr(&sb, "&");
-    break;
-    case Token_Kind_amp_amp:
-      string_builder_push_cstr(&sb, "&&");
-    break;
-    case Token_Kind_equal_equal:
-      string_builder_push_cstr(&sb, "==");
-    break;
-    case Token_Kind_bang_equal:
-      string_builder_push_cstr(&sb, "!=");
-    break;
-    case Token_Kind_less_equal:
-      string_builder_push_cstr(&sb, "<=");
-    break;
-    case Token_Kind_greater_equal:
-      string_builder_push_cstr(&sb, ">=");
-    break;
-    case Token_Kind_less:
-      string_builder_push_cstr(&sb, "<");
-    break;
-    case Token_Kind_greater:
-      string_builder_push_cstr(&sb, ">");
-    break;
-    case Token_Kind_equal:
-      string_builder_push_cstr(&sb, "=");
-    break;
-    case Token_Kind_colon:
-      string_builder_push_cstr(&sb, ":");
-    break;
-    case Token_Kind_dot:
-      string_builder_push_cstr(&sb, ".");
-    break;
-    case Token_Kind_dot_dot:
-      string_builder_push_cstr(&sb, "..");
-    break;
-    case Token_Kind_at:
-      string_builder_push_cstr(&sb, "@");
-    break;
     case Token_Kind_at_prefix:
       string_builder_push_cstr(&sb, "p@");
     break;
-    case Token_Kind_arrow:
-      string_builder_push_cstr(&sb, "->");
-    break;
-    case Token_Kind_brace_open:
-      string_builder_push_cstr(&sb, "[");
-    break;
     case Token_Kind_brace_prefix_open:
       string_builder_push_cstr(&sb, "p[");
-    break;
-    case Token_Kind_brace_close:
-      string_builder_push_cstr(&sb, "]");
-    break;
-    case Token_Kind_paren_open:
-      string_builder_push_cstr(&sb, "(");
-    break;
-    case Token_Kind_paren_close:
-      string_builder_push_cstr(&sb, ")");
-    break;
-    case Token_Kind_curly_open:
-      string_builder_push_cstr(&sb, "{");
-    break;
-    case Token_Kind_curly_close:
-      string_builder_push_cstr(&sb, "}");
-    break;
-    case Token_Kind_semicolon:
-      string_builder_push_cstr(&sb, ";");
-    break;
-    case Token_Kind_comma:
-      string_builder_push_cstr(&sb, ",");
-    break;
-    case Token_Kind_quote:
-      string_builder_push_cstr(&sb, "'");
-    break;
-    case Token_Kind_backslash:
-      string_builder_push_cstr(&sb, "\\");
     break;
     }
     string_builder_push_cstr(&sb, " ");

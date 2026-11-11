@@ -2440,6 +2440,9 @@ void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
+  if (ir->kind == Ir_Kind_int_cast) {
+    sem_type_of_ir_narrow(tasks, ir->cast_value, new_type);
+  }
   if (ir->kind == Ir_Kind_load) {
     Type* ptr_type = type_of_ir(ir->unary);
     Pointer* ptr = ptr_type->pointer;
@@ -4174,18 +4177,13 @@ void sem_ir(Block* block, Ir* ir) {
     }
   } break;
   case Ir_Kind_range: {
-    if (type_kind_of_ir_binary_operands_equal(ir, Type_Kind_scalar)) {
+    Type_Pair types = type_of_ir_binary(ir);
+    if (type_is_int(types.one) && type_is_int(types.two)) {
       Scalar_Pair pair = scalar_pair_of_ir_binary(ir);
-
-      if (scalar_is_single(pair.one) && scalar_is_single(pair.two)) {
-        I64 val_one = scalar_min(pair.one);
-        I64 val_two = scalar_min(pair.two);
-        if (val_one < val_two) {
-          result = type_range(val_one, val_two);
-        }
-        else {
-          sem_error_binary_operand(ir, "..");
-        }
+      I64 val_one = scalar_min(pair.one);
+      I64 val_two = scalar_max(pair.two);
+      if (val_one < val_two) {
+        result = type_range(val_one, val_two);
       }
       else {
         sem_error_binary_operand(ir, "..");
@@ -4617,6 +4615,7 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
+  test("a:I32; for i : 0..a do i + 2", "");
   // test("I32 0; a:(x:I32; y:I32); a.x + a.y","");
   // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");

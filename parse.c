@@ -61,6 +61,7 @@ typedef enum Ast_Kind {
   Ast_Kind_while       = Token_Kind_while,
   Ast_Kind_use         = Token_Kind_use,
   Ast_Kind_import      = Token_Kind_import,
+  Ast_Kind_for         = Token_Kind_for,
   Ast_Kind_record      = Token_Kind_paren_open & 0xff,
   Ast_Kind_call        = 100,
   Ast_Kind_iblock,
@@ -196,6 +197,7 @@ Cstr cstr_from_ast_kind(Ast_Kind ast_kind) {
   case Ast_Kind_return_value: result = "ret_value"; break;
   case Ast_Kind_break:        result = "break"; break;
   case Ast_Kind_while:        result = "while"; break;
+  case Ast_Kind_for:          result = "for"; break;
   case Ast_Kind_record:       result = "record"; break;
   case Ast_Kind_call:         result = "call"; break;
   case Ast_Kind_use:          result = "use"; break;
@@ -219,6 +221,12 @@ void string_builder_push_ast_node(String_Builder* sb, Ast* node) {
   } break;
   case Ast_Kind_while: {
     string_builder_push_cstr(sb, "while ");
+    string_builder_push_ast_node(sb, node->binary.lhs);
+    string_builder_push_cstr(sb, " do ");
+    string_builder_push_ast_node(sb, node->binary.rhs);
+  } break;
+  case Ast_Kind_for: {
+    string_builder_push_cstr(sb, "for ");
     string_builder_push_ast_node(sb, node->binary.lhs);
     string_builder_push_cstr(sb, " do ");
     string_builder_push_ast_node(sb, node->binary.rhs);
@@ -1081,6 +1089,28 @@ Ast* parse_prefix_or_atom(Parser* parser) {
     node->binary.rhs = while_block;
     node->loc = loc_join(token.loc, loc_join(cond->loc, while_block->loc));
   } break;
+  case Token_Kind_for: {
+    Ast* lhs = parse_new_expression(parser, 0);
+    if (parse_match_token(parser, Token_Kind_colon)) {
+      // name : exp
+      Ast* rhs = parse_new_expression(parser, 0);
+      if (lhs->kind == Ast_Kind_name) {
+        Ast* decl = parse_new_node(parser, Ast_Kind_declare);
+        decl->declare.lhs = lhs->loc;
+        decl->declare.rhs = rhs;
+        decl->loc = loc_join(lhs->loc, rhs->loc);
+        lhs = decl;
+        parser->sources->str_count++;
+        parser->sources->char_count += lhs->loc.end - lhs->loc.start;
+      }
+    }
+    parse_match_token(parser, Token_Kind_do);
+    Ast* for_block = parse_indented_block(parser, token.indent);
+    node = parse_new_node(parser, Ast_Kind_for);
+    node->binary.lhs = lhs;
+    node->binary.rhs = for_block;
+    node->loc = loc_join(token.loc, loc_join(lhs->loc, for_block->loc));
+  } break;
   case Token_Kind_paren_open: {
     Ast_List* fa_temp(parser->list_arena, temp);
     B8 is_record = false;
@@ -1299,7 +1329,7 @@ Ast* parse_statement(Parser* parser) {
           else {
             Ast* lhs = node;
             Ast* rhs = parse_new_expression(parser, 0);
-            if (rhs && rhs->kind == Ast_Kind_error) {
+            if (rhs->kind == Ast_Kind_error) {
               node = rhs;
             }
             else {
@@ -1330,7 +1360,7 @@ Ast* parse_statement(Parser* parser) {
               else {
                 Ast* lhs = node;
                 Ast* rhs = parse_new_expression(parser, 0);
-                if (rhs && rhs->kind == Ast_Kind_error) {
+                if (rhs->kind == Ast_Kind_error) {
                   node = rhs;
                 }
                 else {
