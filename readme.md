@@ -31,8 +31,6 @@ print : (param: [str: Str]Any) -> ()
 print("Hello % %"; "World"; 42)
 ```
 
-- [ ] For loop
-
 - [ ] Bits, bytes, align specifiers:
 ```irid
 alignof, align
@@ -198,12 +196,11 @@ vec = { x, y } // (x = x; y = y)
 
 - [ ] named block syntax name={}.
 ```irid
-outer = {
-  inner = {
+outer =
+  inner =
+    print "hi"
     break outer = 10
-  }
-}
-outer + outer
+outer // 10
 ```
 
 - [ ] pointers to named blocks
@@ -287,10 +284,9 @@ free(ptrb)               // error, memory #1 may have been freed
 ```irid
 ptra = malloc(100)       // ptra is a pointer to dynamic memory #1 with size 100
 ptrb = ptra              // ptrb is a pointer to dynamic memory #1
-if () do {
+if ()
   ptra = malloc(200)     // ptra is a pointer to dynamic memory #2 with size 200
   free(ptra)             // memory #2 is freed
-}
 free(ptrb)               // memory #1 is freed
 ```
 
@@ -317,7 +313,7 @@ add:(a:I32; b:I32) -> I32 do
 - [ ] Array, Span, Record
 ```irid
 array: [2]I8 = "ef"
-record: (len: 2) & (I8 #char "c"; I8 #char "d") = "cd"
+record: (len: 2) ^ (I8 #char "c"; I8 #char "d") = "cd"
 span: []I8 = "ab"
 ```
 
@@ -341,6 +337,8 @@ foo:F32->F32
   foo(1)
 }
 ```
+
+- [x] For loop
 
 - [x] Function type return declaration:
 ```irid

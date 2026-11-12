@@ -1080,13 +1080,14 @@ Hash_Map* irgen_record_enter(Ast_List* list) {
   return scope;
 }
 
-void irgen_scope_enter(Ast_Block block) {
-  Ast_List* uses = block.uses;
-  Ast_Decls* decls = block.decls;
+void irgen_scope_enter(Ast* ast) {
+  assert(ast->kind == Ast_Kind_scope);
+  Ast_List* uses = ast->scope.uses;
+  Ast_Decls* decls = ast->scope.decls;
 
   for (I32 i = 0; i < uses->length; i++) {
-    Ast* ast  = uses->base[i];
-    Ir*  base = irgen_ast(ast);
+    Ast* use  = uses->base[i];
+    Ir*  base = irgen_ast(use);
     irgen_use(base);
   }
 
@@ -1376,6 +1377,22 @@ Ir* irgen_ast(Ast* ast) {
     Ir* rhs = irgen_ast(ast->binary.rhs);
     irgen_assign(ast->binary.lhs, rhs);
   } break;
+  case Ast_Kind_group: {
+    irgen_scope_enter(ast->binary.lhs);
+    irgen_ast(ast->binary.rhs);
+
+    Hash_Map* scope = irgen_scope_leave();
+    Rec* rec = irgen_record_new(scope->len);
+    for (I32 j = 0; j < scope->len; j++) {
+      Str* str = scope->list[j];
+      Sym* sym = hash_map_get(*scope, str);
+      rec->names[j] = str;
+      rec->irs[j]   = irgen_push_unary(Ir_Kind_load, sym->ir);
+      hash_map_put_i32(&rec->position_from_name, str, j);
+    }
+
+    result = irgen_push_group(rec);
+  } break;
   case Ast_Kind_record: {
     Rec* rec = irgen_record_new(ast->list->length);
     Hash_Map* scope = irgen_record_enter(ast->list);
@@ -1412,19 +1429,18 @@ Ir* irgen_ast(Ast* ast) {
     result = irgen_push_record(record);
   } break;
 
+  case Ast_Kind_scope: {
+    irgen_scope_enter(ast);
+  } break;
   case Ast_Kind_block_value: {
-    irgen_scope_enter(ast->block);
+    irgen_scope_enter(ast->binary.lhs);
 
     Var* block_var = irgen_var_new();
     block_var->name = str_from_cstr("__block");
     Ir* block_ir = irgen_push_var(block_var);
     irgen_push_binary(Ir_Kind_store, block_ir, irgen.irid_none);
 
-    for (I32 i = 0; i < ast->block.list->length; i++) {
-      Ast* exp = ast->block.list->base[i];
-      irgen_ast(exp);
-    }
-
+    irgen_ast(ast->binary.rhs);
     result = irgen_push_unary(Ir_Kind_load, block_ir);
     block_var->declared_ir = result;
     irgen_push_declare(block_var);
@@ -1433,17 +1449,14 @@ Ir* irgen_ast(Ast* ast) {
     // arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
   } break;
   case Ast_Kind_block: {
-    irgen_scope_enter(ast->block);
-    for (I32 i = 0; i < ast->block.list->length; i++) {
-      Ast* exp = ast->block.list->base[i];
-      irgen_ast(exp);
-    }
+    irgen_scope_enter(ast->binary.lhs);
+    irgen_ast(ast->binary.rhs);
     irgen_scope_leave();
   } break;
-  case Ast_Kind_iblock: {
+  case Ast_Kind_list: {
     for (I32 i = 0; i < ast->list->length; i++) {
-      Ast* exp = ast->list->base[i];
-      irgen_ast(exp);
+      Ast* node = ast->list->base[i];
+      irgen_ast(node);
     }
   } break;
   case Ast_Kind_ptr: {
@@ -1884,13 +1897,13 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
     irgen.builtins = hash_map_init(irgen.perm_arena, irgen.irid_count);
   }
 
-  irgen.funs      = pool(irgen.perm_arena, Fun,      sources.ast_count);
-  irgen.funs_temp = pool(irgen.perm_arena, Fun,      sources.ast_count);
-  irgen.syms    = pool(irgen.perm_arena, Sym,      sources.ast_count);
-  irgen.vars    = pool(irgen.perm_arena, Var,      sources.ast_count);
-  irgen.blocks  = pool(irgen.perm_arena, Block,    sources.ast_count);
-  irgen.irs     = pool(irgen.perm_arena, Ir,       3*sources.ast_count + irgen.irid_count);
-  irgen.records = pool(irgen.perm_arena, Rec,      sources.ast_count);
+  irgen.funs        = pool(irgen.perm_arena, Fun,      sources.ast_count);
+  irgen.funs_temp   = pool(irgen.perm_arena, Fun,      sources.ast_count);
+  irgen.syms        = pool(irgen.perm_arena, Sym,      sources.ast_count);
+  irgen.vars        = pool(irgen.perm_arena, Var,      sources.ast_count);
+  irgen.blocks      = pool(irgen.perm_arena, Block,    sources.ast_count);
+  irgen.irs         = pool(irgen.perm_arena, Ir,       3*sources.ast_count + irgen.irid_count);
+  irgen.records     = pool(irgen.perm_arena, Rec,      sources.ast_count);
   irgen.fun_stack   = pool(irgen.temp_block_arena, Fun_Ref,      sources.ast_count);
   irgen.scope_stack = pool(irgen.temp_block_arena, Hash_Map_Ref, sources.ast_count);
   irgen.uses        = 0;
@@ -1985,24 +1998,24 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
   for (I32 i = 0; i < sources.pool.length; i++) {
     Source* source = &sources.pool.base[i];
     if (source->ast) {
-      Ast_Block ast_block = source->ast->block;
-      irgen_scope_enter(ast_block);
-      source->decls = irgen_scope_leave();
-
+      irgen_scope_enter(source->ast->binary.lhs);
       irgen_fun_temp();
 
-      Rec* rec = irgen_record_new(source->decls->len);
-      for (I32 j = 0; j < source->decls->len; j++) {
-        Str* str = source->decls->list[j];
-        Sym* sym = hash_map_get(*source->decls, str);
+      Hash_Map* scope = irgen_scope_leave();
+      Rec* rec = irgen_record_new(scope->len);
+      for (I32 j = 0; j < scope->len; j++) {
+        Str* str = scope->list[j];
+        Sym* sym = hash_map_get(*scope, str);
         rec->names[j] = str;
         rec->irs[j]   = irgen_push_unary(Ir_Kind_load, sym->ir);
         hash_map_put_i32(&rec->position_from_name, str, j);
       }
 
-      source->ir_var->var->declared_ir = irgen_push_group(rec);
-      source->ir_var->var->blocks = irgen_fun_temp_end();
-      source->ir_var->var->kind = Var_Kind_declared;
+      Ir* ir = irgen_push_group(rec);
+      Var* var = source->ir_var->var;
+           var->blocks = irgen_fun_temp_end();
+           var->declared_ir = ir;
+           var->kind = Var_Kind_declared;
 
       irgen_push_declare(source->ir_var->var);
     }

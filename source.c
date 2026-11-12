@@ -12,7 +12,6 @@ struct Source {
   I32  line_count;
   Ast* ast;
   Ir*       ir_var;
-  Hash_Map* decls; // str->sym
   Type*     type;
 };
 
