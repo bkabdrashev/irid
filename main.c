@@ -13,6 +13,6 @@ int main(int argc, char** argv) {
   irgen_test();
   sem_test();
   llvm_test();
-  // irid_run_path("snake.irid");
+  irid_run_path("snake.irid");
   return 0;
 }

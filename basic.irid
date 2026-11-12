@@ -87,5 +87,4 @@ print_f32:(n:F32) ->
 print_str:(str: Str) ->
   for i: str.len
     putchar(str[i])
-    i = i + 1
   putchar 10

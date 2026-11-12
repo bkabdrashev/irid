@@ -1121,7 +1121,7 @@ Ast* parse_prefix_or_atom(Parser* parser) {
   case Token_Kind_while: {
     Ast* cond = parse_new_expression(parser, 0);
     parse_match_token(parser, Token_Kind_do);
-    Ast* while_block = parse_indented_list(parser, token.indent);
+    Ast* while_block = parse_scope(parser, token);
     node = parse_new_node(parser, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
@@ -1143,7 +1143,7 @@ Ast* parse_prefix_or_atom(Parser* parser) {
       }
     }
     parse_match_token(parser, Token_Kind_do);
-    Ast* for_block = parse_indented_list(parser, token.indent);
+    Ast* for_block = parse_scope(parser, token);
     node = parse_new_node(parser, Ast_Kind_for);
     node->binary.lhs = lhs;
     node->binary.rhs = for_block;
