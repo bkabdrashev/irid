@@ -1474,6 +1474,7 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
   Source*   source  = sources_add_str_view(&sources, (Str_View){source_data, strlen(source_data)});
   Tokens    tokens  = lex_source(source, &sources.diags);
+  printf(cstr_from_tokens(tokens));
   Ast* ast     = parse_tokens(&sources, tokens);
   {
     Arena* arena     = arena_init(128 * sources.ast_count);
@@ -1492,7 +1493,7 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a ->\n b;\n c",        "");
+  test("a+b",        "");
   return;
   test("buf[i] = digit",        "");
   test("f:()->a\n return 1",        "");

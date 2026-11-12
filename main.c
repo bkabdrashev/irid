@@ -1,4 +1,4 @@
-// gcc -g -Wall -Wextra -Wshadow -Wno-unused-parameter -pedantic -fsanitize=address,undefined $(llvm-config --cflags --libs core analysis bitwriter passes native support target) main.c -lm -o build/main && ./build/main
+// gcc -g -Wall -Wextra -Wshadow -Wno-unused-parameter -pedantic -lm -fsanitize=address,undefined $(llvm-config --cflags --libs core analysis bitwriter passes native support target) main.c -o build/main && build/main
 #include "includes.h"
 
 const char *__asan_default_options() {
@@ -13,6 +13,6 @@ int main(int argc, char** argv) {
   irgen_test();
   sem_test();
   llvm_test();
-  irid_run_path("snake.irid");
+  // irid_run_path("snake.irid");
   return 0;
 }

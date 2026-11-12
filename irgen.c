@@ -1484,6 +1484,34 @@ Ir* irgen_ast(Ast* ast) {
       result = irgen_push_unary(Ir_Kind_load, offset);
     }
   } break;
+  case Ast_Kind_pre_inc: {
+    Ir* before = irgen_ast(ast->unary);
+    Ir* one    = irgen_push_int(1);
+    Ir* after  = irgen_push_binary(Ir_Kind_add, before, one);
+    irgen_assign(ast->unary, after);
+    result = after;
+  } break;
+  case Ast_Kind_pre_dec: {
+    Ir* before = irgen_ast(ast->unary);
+    Ir* one    = irgen_push_int(1);
+    Ir* after  = irgen_push_binary(Ir_Kind_sub, before, one);
+    irgen_assign(ast->unary, after);
+    result = after;
+  } break;
+  case Ast_Kind_suf_inc: {
+    Ir* before = irgen_ast(ast->unary);
+    Ir* one    = irgen_push_int(1);
+    Ir* after  = irgen_push_binary(Ir_Kind_add, before, one);
+    irgen_assign(ast->unary, after);
+    result = before;
+  } break;
+  case Ast_Kind_suf_dec: {
+    Ir* before = irgen_ast(ast->unary);
+    Ir* one    = irgen_push_int(1);
+    Ir* after  = irgen_push_binary(Ir_Kind_sub, before, one);
+    irgen_assign(ast->unary, after);
+    result = before;
+  } break;
   case Ast_Kind_span:
   case Ast_Kind_load:
   case Ast_Kind_pos: case Ast_Kind_neg:

@@ -343,10 +343,9 @@ Tokens lex_source(Source* source, Diags* diags) {
         token.kind = Token_Kind_plus_plus;
         lex_advance();
       }
-      if (lexer.wasnewline && !isspace((U8)lex_peek(1))) {
+      if (lexer.wasnewline && !isspace((U8)lex_peek(0))) {
         token.kind |= Token_Kind_Flag_prefix;
       }
-      lex_advance();
     } break;
     case '-': {
       token.kind = Token_Kind_minus;
@@ -356,11 +355,11 @@ Tokens lex_source(Source* source, Diags* diags) {
         lex_advance();
       }
       else {
-        if (*lexer.stream == '+') {
-          token.kind = Token_Kind_plus_plus;
+        if (*lexer.stream == '-') {
+          token.kind = Token_Kind_minus_minus;
           lex_advance();
         }
-        if (lexer.wasnewline && !isspace((U8)lex_peek(1))) {
+        if (lexer.wasnewline && !isspace((U8)lex_peek(0))) {
           token.kind |= Token_Kind_Flag_prefix;
         }
       }
