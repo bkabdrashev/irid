@@ -202,6 +202,14 @@ while game.running
   sdl.Delay(10)
   // game.running--
 
+// TODO: this breaks sdl.DestroyRenderer(renderer)
+a := if 0..1 do
+       2
+     else
+       3;
+
+print_i64(a)
+
 sdl.DestroyRenderer(renderer)
 sdl.DestroyWindow(window)
 sdl.Quit()

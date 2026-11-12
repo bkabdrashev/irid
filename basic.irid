@@ -43,15 +43,15 @@ print_i64:(n:I64) ->
     digit := n % 10
     buf[i] = digit
     n = n / 10
-    i = i + 1
+    i++
 
   while i > 0
-    i = i - 1
+    i--
     putchar(buf[i] + 48)
 
   putchar 10
 
-print_f32:(n:F32) ->
+print_f32 : (n:F32) ->
   if n < 0.0
     putchar 45 // -
     n = -n
@@ -70,9 +70,10 @@ print_f32:(n:F32) ->
     while whole > 0
       buf[i] = whole % 10
       whole = whole / 10
-      i = i + 1
+      i++
+
     while i > 0
-      i = i - 1
+      i--
       putchar(buf[i] + 48)
 
   putchar 46 // .

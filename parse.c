@@ -1286,17 +1286,14 @@ Ast* parse_statement(Parser* parser) {
   } break;
   case Token_Kind_if: {
     Ast* cond = parse_new_expression(parser, 0);
-    parse_match_token(parser, Token_Kind_do);
-    Ast* if_block = parse_indented_list(parser, token.indent);
+    Ast* if_block = parse_scope(parser, token);
     node = parse_new_node(parser, Ast_Kind_if);
     node->binary.lhs = cond;
     node->binary.rhs = if_block;
-    node->loc = loc_join(token.loc,
-                         loc_join(cond->loc,
-                                  if_block->loc));
+    node->loc = loc_join(token.loc, loc_join(cond->loc, if_block->loc));
     if (parse_match_token(parser, Token_Kind_else)) {
       Ast* if_node = node;
-      Ast* else_block = parse_indented_list(parser, token.indent);
+      Ast* else_block = parse_scope(parser, token);
       node = parse_new_node(parser, Ast_Kind_else);
       node->binary.lhs = if_node;
       node->binary.rhs = else_block;
@@ -1305,8 +1302,7 @@ Ast* parse_statement(Parser* parser) {
   } break;
   case Token_Kind_while: {
     Ast* cond = parse_new_expression(parser, 0);
-    parse_match_token(parser, Token_Kind_do);
-    Ast* while_block = parse_indented_list(parser, token.indent);
+    Ast* while_block = parse_scope(parser, token);
     node = parse_new_node(parser, Ast_Kind_while);
     node->binary.lhs = cond;
     node->binary.rhs = while_block;
@@ -1320,19 +1316,19 @@ Ast* parse_statement(Parser* parser) {
     }
     else {
       Ast* unary = parse_new_expression(parser, 0);
-      if (unary && unary->kind == Ast_Kind_error) return unary;
+      if (unary->kind == Ast_Kind_error) return unary;
       node = parse_new_unary(parser, Ast_Kind_return_value, unary);
       node->loc = loc_join(token.loc, unary->loc);
     }
   } break;
   case Token_Kind_break: {
-    if (token.flag & Token_Flag_willnewline) {
+    if (has_flag(token.flag, Token_Flag_willnewline)) {
       node = parse_new_node(parser, Ast_Kind_break);
       node->loc = token.loc;
     }
     else {
       Ast* unary = parse_new_expression(parser, 0);
-      if (unary && unary->kind == Ast_Kind_error) return unary;
+      if (unary->kind == Ast_Kind_error) return unary;
       node = parse_new_unary(parser, Ast_Kind_break_value, unary);
       node->loc = loc_join(token.loc, unary->loc);
     }
@@ -1474,7 +1470,7 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
   Sources   sources = sources_init(16, 256);
   Source*   source  = sources_add_str_view(&sources, (Str_View){source_data, strlen(source_data)});
   Tokens    tokens  = lex_source(source, &sources.diags);
-  printf(cstr_from_tokens(tokens));
+  // printf("%s\n", cstr_from_tokens(tokens));
   Ast* ast     = parse_tokens(&sources, tokens);
   {
     Arena* arena     = arena_init(128 * sources.ast_count);
