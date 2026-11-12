@@ -4615,7 +4615,8 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("a:I32; for i : 0..a do i + 2", "");
+  test("equal : () -> B8\n result := 0..1\n return result", "");
+  // test("a:I32; for i : 0..a do i + 2", "");
   // test("I32 0; a:(x:I32; y:I32); a.x + a.y","");
   // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");

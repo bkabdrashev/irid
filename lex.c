@@ -572,7 +572,8 @@ Tokens lex_source(Source* source, Diags* diags) {
   return tokens;
 }
 
-Cstr cstr_from_tokens(Arena* arena, Tokens tokens) {
+Cstr cstr_from_tokens(Tokens tokens) {
+  Arena* arena = arena_init(32 * tokens.length);
   String_Builder sb = string_builder_begin(arena);
   for (Token* token = tokens.base; token < tokens.base + tokens.length; token++) {
     switch (token->kind) {

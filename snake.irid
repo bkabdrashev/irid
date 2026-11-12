@@ -12,7 +12,7 @@ WINDOW_HEIGHT  : BLOCK_PIXELS * game.height
 min : (a:F32; b:F32) -> if a < b do a else b
 max : (a:F32; b:F32) -> if a > b do a else b
 round : (a: F32) -> if a < 0.0 do F32(I32(a-0.5)) else F32(I32(a+0.5))
-equal : (a: F32; b: F32) -> B8 do
+equal : (a: F32; b: F32) -> B8
   epsilon:F32 = 0.00001
   result := a+epsilon >= b && a-epsilon <= b
   return result
@@ -65,7 +65,7 @@ new_food : () ->
 
     empty: [game.size]Vec2
 
-    e = 0
+    e: I32 = 0
     for i : game.size
       if board[i]
         empty[e].x = F32 (i % game.width)

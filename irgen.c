@@ -2059,7 +2059,9 @@ void _test_ir(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ir(source, expected, __FILE__, __LINE__)
 
 void irgen_test(void) {
-  test("a:I32; for i : 0..a do i + 2", "");
+  // test("equal : (a: F32; b: F32) -> B8\n epsilon:F32 = 0.00001\n result := a+epsilon >= b && a-epsilon <= b\n return result", "");
+  // test("a:I32; for i : 0..a do i + 2", "");
+  // test("a:I32; for i : 0..a do i + 2", "");
   // test("foo: import \"test2\"; bar: import \"test2\"; foo.hi; bar.hi", "");
   // test("foo:(a:I32) -> a do 1+2", "");
   // test("foo:(a:0..1) -> I32\n return a+2; foo(1)", "");

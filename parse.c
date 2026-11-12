@@ -843,7 +843,7 @@ Ast* parse_indented_list(Parser* parser, I16 indent) {
   }
 
   Token next_token = *parse_peek(parser);
-  if ((next_token.flag & Token_Flag_wasnewline) == 0) {
+  if (!has_flag(next_token.flag, Token_Flag_wasnewline)) {
     return parse_statement(parser);
   }
 
@@ -851,11 +851,7 @@ Ast* parse_indented_list(Parser* parser, I16 indent) {
   while (!parse_at_end(parser)) {
     parser->panic = false;
     next_token = *parse_peek(parser);
-    if (has_flag(next_token.flag, Token_Flag_wasnewline)
-        && next_token.indent <= indent) {
-      break;
-    }
-    if (next_token.kind == Token_Kind_curly_close) {
+    if (has_flag(next_token.flag, Token_Flag_wasnewline) && next_token.indent <= indent) {
       break;
     }
     if (next_token.kind == Token_Kind_semicolon) {
@@ -935,21 +931,34 @@ Ast* parse_infix_or_suffix(Parser* parser, Ast* lhs, I32 precedence_to_match) {
       I32 precedence = parse_left_precedence(kind, token.flag);
       if (precedence >= precedence_to_match) {
         lhs = node;
-        Ast* fun_arrow = parse_new_infix(parser, kind, lhs, token.flag);
+        Ast* fun_arrow = 0;
         Ast* fun_block = 0;
-        if (parse_match_token(parser, Token_Kind_do)) {
-          fun_block = parse_indented_list(parser, token.indent);
+        Token body_maybe = *parse_peek(parser);
+        if (body_maybe.indent > token.indent) {
+          // a ->
+          //   c
+          Ast* rhs = parse_scope(parser, token);
+               rhs->kind = Ast_Kind_block_value;
+          fun_arrow = parse_new_node(parser, kind);
+          fun_arrow->binary.lhs = lhs;
+          fun_arrow->binary.rhs = rhs;
+          fun_arrow->loc = loc_join(lhs->loc, rhs->loc);
         }
         else {
-          Token body_maybe = *parse_peek(parser);
-          if (body_maybe.indent > token.indent) {
-            fun_block = parse_indented_list(parser, token.indent);
+          // a -> b
+          fun_arrow = parse_new_infix(parser, kind, lhs, token.flag);
+          Token typed_body_maybe = *parse_peek(parser);
+          if (typed_body_maybe.indent > token.indent) {
+            // a -> b
+            //   c
+            fun_block = parse_scope(parser, token);
+            fun_block->kind = Ast_Kind_block_value;
           }
         }
         Ast* fun = parse_new_node(parser, Ast_Kind_fun);
-        fun->binary.lhs = fun_arrow;
-        fun->binary.rhs = fun_block;
-        fun->loc = fun_arrow->loc;
+             fun->binary.lhs = fun_arrow;
+             fun->binary.rhs = fun_block;
+             fun->loc = fun_arrow->loc;
         node = fun;
       }
       else {
@@ -1425,7 +1434,7 @@ Ast* parse_tokens(Sources* sources, Tokens tokens) {
   parser.uses_arena  = arena_init(tokens.source->arena->capacity);
   parser.decls_arena = arena_init(tokens.source->arena->capacity);
   parser.tokens      = tokens;
-  parser.pool        = pool(parser.perm_arena, Ast, tokens.length);
+  parser.pool        = pool(parser.perm_arena, Ast, 2*tokens.length);
   parser.tok         = 0;
   parser.last_error_tok = -1;
   Ast* result = parse_statement(&parser);
@@ -1468,7 +1477,7 @@ void _test_ast(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_ast(source, expected, __FILE__, __LINE__)
 
 void parse_test(void) {
-  test("a:import \"test2\"",        "");
+  test("a ->\n b;\n c",        "");
   return;
   test("buf[i] = digit",        "");
   test("f:()->a\n return 1",        "");
