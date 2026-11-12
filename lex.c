@@ -338,20 +338,31 @@ Tokens lex_source(Source* source, Diags* diags) {
     } break;
     case '+': {
       token.kind = Token_Kind_plus;
+      lex_advance();
+      if (*lexer.stream == '+') {
+        token.kind = Token_Kind_plus_plus;
+        lex_advance();
+      }
       if (lexer.wasnewline && !isspace((U8)lex_peek(1))) {
-        token.kind = Token_Kind_plus_prefix;
+        token.kind |= Token_Kind_Flag_prefix;
       }
       lex_advance();
     } break;
     case '-': {
       token.kind = Token_Kind_minus;
       lex_advance();
-      if (lexer.wasnewline && !isspace((U8)lex_peek(0))) {
-        token.kind = Token_Kind_minus_prefix;
-      }
-      else if (lexer.stream < lexer.end && *lexer.stream == '>') {
+      if (lexer.stream < lexer.end && *lexer.stream == '>') {
         token.kind = Token_Kind_arrow;
         lex_advance();
+      }
+      else {
+        if (*lexer.stream == '+') {
+          token.kind = Token_Kind_plus_plus;
+          lex_advance();
+        }
+        if (lexer.wasnewline && !isspace((U8)lex_peek(1))) {
+          token.kind |= Token_Kind_Flag_prefix;
+        }
       }
     } break;
     case '*': {
@@ -600,6 +611,8 @@ Cstr cstr_from_tokens(Tokens tokens) {
     case Token_Kind_int:
     case Token_Kind_str:
     case Token_Kind_plus:
+    case Token_Kind_plus_plus:
+    case Token_Kind_minus_minus:
     case Token_Kind_minus:
     case Token_Kind_star:
     case Token_Kind_slash:
@@ -635,6 +648,12 @@ Cstr cstr_from_tokens(Tokens tokens) {
       Str_View str_view = str_view_from_loc(token->loc);
       string_builder_push_str_view(&sb, str_view);
     } break;
+    case Token_Kind_plus_plus_prefix:
+      string_builder_push_cstr(&sb, "p++");
+    break;
+    case Token_Kind_minus_minus_prefix:
+      string_builder_push_cstr(&sb, "p--");
+    break;
     case Token_Kind_plus_prefix:
       string_builder_push_cstr(&sb, "p+");
     break;

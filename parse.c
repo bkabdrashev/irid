@@ -14,6 +14,10 @@ typedef enum Ast_Kind {
   Ast_Kind_str       = Token_Kind_str & 0xff,
 
   Ast_Kind_add       = Token_Kind_plus,
+  Ast_Kind_suf_inc   = Token_Kind_plus_plus,
+  Ast_Kind_pre_inc   = Token_Kind_plus_plus + 1,
+  Ast_Kind_suf_dec   = Token_Kind_minus_minus,
+  Ast_Kind_pre_dec   = Token_Kind_minus_minus + 1,
   Ast_Kind_sub       = Token_Kind_minus,
   Ast_Kind_mul       = Token_Kind_star,
   Ast_Kind_div       = Token_Kind_slash,
@@ -302,12 +306,13 @@ void string_builder_push_ast_node(String_Builder* sb, Ast* node) {
     string_builder_push_ast_node(sb, node->unary);
   break;
   case Ast_Kind_ptr:
-  case Ast_Kind_pos:
-  case Ast_Kind_neg: {
+  case Ast_Kind_pre_inc: case Ast_Kind_pre_dec:
+  case Ast_Kind_pos:     case Ast_Kind_neg: {
     Cstr op_cstr = cstr_from_ast_kind(node->kind);
     string_builder_push_cstr(sb, op_cstr);
     string_builder_push_ast_node(sb, node->unary);
   } break;
+  case Ast_Kind_suf_inc: case Ast_Kind_suf_dec:
   case Ast_Kind_load: {
     Cstr op_cstr = cstr_from_ast_kind(node->kind);
     string_builder_push_ast_node(sb, node->unary);
@@ -453,6 +458,8 @@ I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
   case Ast_Kind_ptr:
   case Ast_Kind_neg:
   case Ast_Kind_pos:
+  case Ast_Kind_pre_inc:
+  case Ast_Kind_pre_dec:
   case Ast_Kind_array:
   case Ast_Kind_span:
     result = 28;
@@ -463,6 +470,8 @@ I32 parse_right_precedence(Ast_Kind kind, I32 token_flags) {
   case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
+  case Ast_Kind_suf_inc:
+  case Ast_Kind_suf_dec:
     result = 32;
   break;
   default :
@@ -523,6 +532,8 @@ I32 parse_left_precedence(Ast_Kind kind, I32 token_flags) {
   case Ast_Kind_run:
   case Ast_Kind_call:
   case Ast_Kind_dot:
+  case Ast_Kind_suf_inc:
+  case Ast_Kind_suf_dec:
     result = 31;
   break;
   default :
@@ -899,9 +910,9 @@ Ast* parse_scope(Parser* parser, Token token) {
 
 Ast* parse_infix_or_suffix(Parser* parser, Ast* lhs, I32 precedence_to_match) {
   Ast* node = lhs;
-  if (node && node->kind == Ast_Kind_error) return node;
+  if (node->kind == Ast_Kind_error) return node;
   while (true) {
-    if (node && node->kind == Ast_Kind_error) return node;
+    if (node->kind == Ast_Kind_error) return node;
     if (parse_at_end(parser)) return node;
     Token token = *parse_peek(parser);
     parse_advance(parser);
@@ -998,8 +1009,10 @@ Ast* parse_infix_or_suffix(Parser* parser, Ast* lhs, I32 precedence_to_match) {
         return node;
       }
     } break;
+    case Token_Kind_plus_plus:
+    case Token_Kind_minus_minus:
     case Token_Kind_at: {
-      Ast_Kind kind = Ast_Kind_load;
+      Ast_Kind kind = (Ast_Kind)token.kind;
       I32 precedence = parse_left_precedence(kind, token.flag);
       if (precedence >= precedence_to_match) {
         lhs = node;
@@ -1067,6 +1080,8 @@ Ast* parse_prefix_or_atom(Parser* parser) {
   } break;
   case Token_Kind_minus_prefix: case Token_Kind_minus:
   case Token_Kind_plus_prefix:  case Token_Kind_plus:
+  case Token_Kind_plus_plus_prefix:   case Token_Kind_plus_plus:
+  case Token_Kind_minus_minus_prefix: case Token_Kind_minus_minus:
   case Token_Kind_at_prefix:    case Token_Kind_at:
   {
     Ast_Kind kind = ((Ast_Kind)token.kind+1) & 0xff;

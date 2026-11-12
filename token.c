@@ -59,6 +59,11 @@ typedef enum Token_Kind {
   Token_Kind_use                = 77,
   Token_Kind_import             = 78,
   Token_Kind_for                = 79,
+
+  Token_Kind_plus_plus          = 90,
+  Token_Kind_plus_plus_prefix   = 90 | Token_Kind_Flag_prefix,
+  Token_Kind_minus_minus        = 92,
+  Token_Kind_minus_minus_prefix = 92 | Token_Kind_Flag_prefix,
 } Token_Kind;
 
 Cstr cstr_from_token_kind(Token_Kind kind) {
@@ -72,6 +77,10 @@ Cstr cstr_from_token_kind(Token_Kind kind) {
   case Token_Kind_plus_prefix:       return "+";
   case Token_Kind_minus:             return "-";
   case Token_Kind_minus_prefix:      return "-";
+  case Token_Kind_plus_plus:         return "++";
+  case Token_Kind_plus_plus_prefix:  return "++";
+  case Token_Kind_minus_minus:       return "--";
+  case Token_Kind_minus_minus_prefix:return "--";
   case Token_Kind_star:              return "*";
   case Token_Kind_at:                return "@";
   case Token_Kind_at_prefix:         return "@";
