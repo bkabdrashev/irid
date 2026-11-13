@@ -1,0 +1,400 @@
+- [ ] System programming language
+
+- [ ] When element sizes in a record are equal then this record is an array:
+```irid
+a = ((U32; U32); U64) // implicit [2]([2] U32\U64)
+```
+
+- [ ] Values that could be assign only to certain type. Example: type bool, values: false/true. Need to think syntax/semantics of it.
+
+- [ ] Flexible arrays
+```irid
+arr = [2]I32(2; 3) // stores (len:2) and @(2, 3)
+for i in arr.len do
+  arr[i] = 1
+```
+
+- [ ] Custom header
+```irid
+arr: [cap: 5; len:I32 = 2]I32 = (1; 2; 3; 0, 0)
+for i in arr.len do
+  arr[i] = i
+arr[arr.len++] = 4
+```
+
+- [ ] Flexible function paramter list
+```irid
+print : (param: [str: Str]Any) -> ()
+print("Hello % %"; "World"; 42)
+```
+
+- [ ] Bits, bytes, align specifiers:
+```irid
+alignof, align
+bitsof, bits
+sizeof, size
+```
+
+- [ ] Arbitrary compiler-time execution
+```irid
+#println("Hello from compiler")
+```
+
+- [ ] Remove char \' syntax, instead:
+```irid
+char : (str : string) -> {
+  str.len is 1
+  return str.0
+}
+# char"a"
+```
+
+- [ ] function return value type checking
+```irid
+foo : () -> I32 { // error since I32 1 and I32 2.0 call different functions
+  if () return 1
+  else  return 2.0
+}
+bar : () -> I32 { // not error since both values are converted via the same I32
+  if () return 1.0
+  else  return 2.0
+}
+baz : () -> (x:I32; y:I32) { // not error
+  if () return (1, 2)
+  else  return (x:3, y:4)
+}
+zap : () -> (x:I32; y:I32) { // error since the second returned value have to swap 3 and 4
+  if () return (1, 2)
+  else  return (y:3, x:4)
+}
+```
+
+- [ ] Function types
+```irid
+// Both are function types
+(@I32) -> I32
+(@I32\nil) -> {
+  re I32
+}
+// Both are function literals
+(ptr:@I32) -> ptr@
+(ptr: @I32\nil) -> {
+  if ptr re ptr@
+  re 0
+}
+// Both are (function type and function literal)
+(@I32) -> 1
+(ptr:@I32) -> {
+  re ptr@ * 0;
+}
+// Both are function literal
+(ptr:@I32) -> {
+  ptr@ = 1
+  re ptr@
+}
+(ptr:@I32\nil) -> {
+  re ptr@ * 0
+}
+```
+
+- [ ] Foreigh functions should be metaprogram instead of #c syntax:
+```irid
+Init : (foreign.c : "SDL_Init") (flags: InitFlags) -> B8
+```
+
+- [ ] Foreigh functions alternative syntax:
+```irid
+Init : (flags: InitFlags) -> B8 do #foreign.c "SDL_Init"
+```
+
+- [ ] Define constants and use them at the same time
+```irid
+[$n]I32 (1,2,3,4) // n: 4
+[$n]$T (1,2,3,4)  // n: 4; T: 1..4
+($T, $S) (1, 2)   // T: 1; S: 2
+````
+
+- [ ] $ syntax for defining templates/variables based on pattern
+```irid
+foo : (a: $T; b: T) -> {
+  return a+b
+}
+size : [$N]$T -> N * sizeof T
+length : [$N]$ -> N;
+length(1, 2) // 2
+$foo(1, 2)
+```
+
+- [ ] Subtypes $:
+```irid
+// here a and b are the same type T that is subtype of U32
+(a: U32 $ T, b: T, c = I32) -> (a+b, c)
+a:$T = I32 1
+b:T = 2
+
+```
+
+- [ ] Implicit casting:
+```irid
+sqrt : F32 -> F32
+a = 12 implicit F32
+sqrt(a) // auto casts a to F32
+```
+
+- [ ] implicit function call:
+```irid
+entity:(
+  object : (position: Vec3; health: U32)
+  length : 1024
+  pool   : [cap: I32 length]object
+  get    : (id: handle) -> @pool[id]
+  handle : U32 implicit get
+  new    : object -> handle
+  udpate : (e: object) -> {}
+)
+
+e = entity.new((1,1,1), 100)
+entity.update(e) // update(get(e))
+entity.get(e)    // doesn't implicit call since expected type is handle
+```
+
+- [ ] static maps based on ad-hoc polymorphism of functions:
+```irid
+foo : (1 -> 2) ^ (3 -> 4)
+foo(1) // 2
+foo(3) // 4
+foo(1\3) // 2\4
+```
+
+- [ ] dynamic pattern matching
+```irid
+foo : (1 -> 2) ^ (3 -> 4)
+1 match foo
+```
+
+- [ ] static assignment pattern resolution
+```irid
+(x:1; y) and (x:2; z) = 1, 2
+y // 2
+z // undefined
+```
+
+- [ ] dynamic assignment pattern resolution
+```irid
+1, 2 match (x:1; y) and (x:2; z)
+```
+
+- [ ] {} syntax for creating records with matching field names. This conflicts with expression block syntax.
+```irid
+x = 1
+y = 2
+vec = { x, y } // (x = x; y = y)
+```
+
+- [ ] named block syntax name={}.
+```irid
+outer =
+  inner =
+    print "hi"
+    break outer = 10
+outer // 10
+```
+
+- [ ] pointers to named blocks
+```irid
+one = {
+  two = {
+    if 1 do ptr = @one else ptr = @two
+    break ptr@
+  }
+  print "after two"
+}
+print "after two"
+```
+
+- [ ] break with if/else/while
+```irid
+while 1 do {
+  a = if 2 do {
+    break // breaks if
+  }
+}
+while 1 do {
+  if 2 do {
+    break // breaks wh
+  }
+}
+a = while 1 do {
+  while 2 do {
+    break // breaks inner wh
+  }
+}
+```
+
+- [ ] {} pattern syntax for extracting members from a record
+```irid
+{ y; x } = vec
+```
+
+- [ ] methods syntax using closures
+```irid
+Vec : (x: I32; y: I32)
+dot : (lhs: Vec) -> (rhs: Vec) -> lhs.x*rhs.x + lhs.y*rhs.y
+a = Vec(1,2)
+b = Vec(3,4)
+c = a'dot b // 1*3 + 2*4
+c = dot a b // 1*3 + 2*4
+c = b'a'dot // 1*3 + 2*4
+```
+
+- [ ] Packages
+```irid
+Vec : #package
+Str : #package
+
+Str : (v: Vec) -> Str do
+  return cat(Str(v.x), " ", Str(v.y))
+```
+
+```irid
+import Vec
+import Str
+
+str:Str = str_from_vec(1, 2)
+```
+
+- [ ] Linear types
+```irid
+ptr = malloc(100) // ptr is pointer to dynamic memory #1 with size 100
+free(ptr)         // dynamic memory #1 that is freed
+ptr@              // compile-time error, memory #1 is freed
+```
+
+```irid
+ptra = malloc(100)       // ptra is a pointer to dynamic memory #1 with size 100
+ptrb = ptra              // ptrb is a pointer to dynamic memory #1
+if () do ptra = malloc(200) // ptra is a pointer to dynamic memory #2 with size 200
+free(ptra)               // dynamic memory #1 or dynamic memory #2 is freed
+free(ptrb)               // error, memory #1 may have been freed
+```
+
+```irid
+ptra = malloc(100)       // ptra is a pointer to dynamic memory #1 with size 100
+ptrb = ptra              // ptrb is a pointer to dynamic memory #1
+if ()
+  ptra = malloc(200)     // ptra is a pointer to dynamic memory #2 with size 200
+  free(ptra)             // memory #2 is freed
+free(ptrb)               // memory #1 is freed
+```
+
+- [ ] Better typing for single argument function
+```irid
+a:(x:1) -> 1
+a(x=1)
+a(1)
+a(1;)
+a(x=1;)
+b:(x:1;) -> 1
+b(x=1)
+b(1)
+b(1;)
+b(x=1;)
+```
+
+- [ ] Function return type
+```irid
+add:(a:I32; b:I32) -> I32 do
+ return a+b
+```
+
+- [ ] Array, Span, Record
+```irid
+array: [2]I8 = "ef"
+record: (len: 2) ^ (I8 #char "c"; I8 #char "d") = "cd"
+span: []I8 = "ab"
+```
+
+- [ ] Function call with ''
+```irid
+'a+b'foo
+```
+
+- [ ] Static single assignment
+```irid
+b = 10 // b is a ssa variable
+// b = 20 // error: b should have a declared type
+```
+
+- [ ] Choose fun overload for that scope
+```irid
+foo:I32->I32
+foo:F32->F32
+{
+  use foo(I32)
+  foo(1)
+}
+```
+
+- [x] For loop
+
+- [x] Function type return declaration:
+```irid
+foo : () -> I32 do 10
+foo : () -> I32 return 10
+```
+
+- [x] Pointer types can incorporate pointer location:
+```irid
+a:I32
+b:I32
+c : @a\@b // can only points to a or b
+```
+
+- [x] Optional do
+```irid
+if 1 do 2
+if 3 do break 4
+if 5 break 6
+```
+
+- [x] Narrow a name for that scope
+```irid
+Vec2 : (x:I32; y:I32)
+sum : Vec2 -> Vec2.x + Vec2.y
+sum(1, 2) // 3
+Vec2 = 3, 4
+Vec2.x + Vec.y // 7
+```
+
+- [x] `foo : (a:1) -> a; foo(a=1)`
+
+- [x] `@I32` defines pointer type to `I32`; `I32@` dereferences pointer
+
+- [x] Python-like identation based if/while blocks, that are not lexical scopes
+```irid
+if () do
+  a = 1
+el
+  a = 3
+a // 1\3
+```
+
+- [x] `use` imports record fields into the current lexical scope as writable aliases.
+```irid
+Vec : (x:I32; y:I32)
+bar : Vec
+use bar
+x = 1 // bar.x = 1
+y = 2 // bar.y = 2
+x + y // 3
+```
+Fields are visible from the `use` statement to the end of the enclosing `{}` block. Existing names keep precedence, and the newest `use` wins when several imported records have the same field.
+
+- [x] Declarations can be used out-of-order.
+```irid
+A : (xy:Vec2)
+b = B(1; 2)
+B : (x:I32; y:I32)
+```
+
+- [x] Ranges `..`

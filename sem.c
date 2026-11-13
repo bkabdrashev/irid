@@ -3079,7 +3079,6 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
   if (var->kind == Var_Kind_none || var->kind == Var_Kind_pointee) {
     var->declared = type_join(var->declared, type);
     var->block_types[block->id] = type;
-    var->block_is_write[block->id] = true;
   }
   else {
     if (type_is_subtype(block, type, var->declared)) {
@@ -3112,7 +3111,6 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
         }
       }
       var->block_types[block->id] = type;
-      var->block_is_write[block->id] = true;
     }
     else {
       sem_error_type_mismatch(sem.current_ir->loc, var->declared, type);
@@ -3144,7 +3142,6 @@ Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
   else {
     blocks_length = sem.current_fun->blocks->length;
   }
-  var->block_is_write = arena_push_zero(sem.perm_arena, blocks_length * sizeof(B8));
   var->block_types    = arena_push_zero(sem.perm_arena, blocks_length * sizeof(Type*));
   sem_record_declare_fields(var, type);
 
