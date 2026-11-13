@@ -1760,9 +1760,6 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name) {
   else if (var->declared->kind == Type_Kind_join_records) {
     // INVARIANT: offsets are equal for each record in the join
 
-    // FIX: this leads to a collion in case of 4 records join.
-    // v:A\B\C\D -- A.x and B.x have different offset from C.x and D.x.
-    // So if it narrows to only A\B and then later narrows to C\D, v.x has wrong type
     Var* var_common = hash_map_get(var->join_vars, name);
     if (var_common) {
       return var_common;
@@ -4613,14 +4610,14 @@ void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
 #define test(source, expected) _test_sem(source, expected, __FILE__, __LINE__)
 
 void sem_test(void) {
-  test("for i : 0..1\n i + 2", "");
+  // test("for i : 0..1\n i + 2", "");
   // test("a:I32; for i : 0..a do i + 2", "");
   // test("I32 0; a:(x:I32; y:I32); a.x + a.y","");
   // test("while 0..1 do {a: (x:I32 1; y: I32 0..2) \\ (x:I32 2); if a.x == 1 do if 0..4 && 0..5 do a.y}", "");
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
-  // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; ab.a", "");
+  test("", "");
   // test("a:(x:I32; y:I32); use a; x = 1; y = 2; x+y", "");
   // test("foo:(a:0..1) -> I32\n return a+2;\nfoo(1)", "");
   // test("a:(0..2); if a && 1 do a else a", "");

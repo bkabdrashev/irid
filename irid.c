@@ -65,4 +65,42 @@ finish:
   return result;
 }
 
-// TODO: add import
+I32 irid_sem_path(Cstr path) {
+  Sources sources = sources_init(16, 256);
+  Str_View data = file_read(path);
+  if (!data.base) {
+    fprintf(stderr, "cannot read '%s'\n", path);
+    return 1;
+  }
+  Source*   source  = sources_add_str_view(&sources, data);
+  Tokens    tokens  = lex_source(source, &sources.diags);
+  Ast*      ast     = parse_tokens(&sources, tokens);
+  Arena* arena = arena_init(KB(2) * sources.ast_count);
+  Fun_Pool funs = irgen_ast_root(sources, arena, ast);
+
+  if (diags_has_errors(&sources.diags)) {
+    fputs(diag_render_all(arena, &sources.diags, false), stdout);
+    goto finish;
+  }
+  {
+    Cstr text = cstr_from_funs(arena, funs);
+    printf("\n%s", text);
+  }
+  sem_funs(arena, funs, &sources.diags);
+  if (diags_has_errors(&sources.diags)) {
+    fputs(diag_render_all(arena, &sources.diags, false), stdout);
+    goto finish;
+  }
+  {
+    Cstr cstr = cstr_from_sem(arena, funs);
+    printf("\n%s", cstr);
+  }
+
+finish:
+  arena_free(arena);
+  str_free();
+  arena_free(source->arena);
+  sources_free(&sources);
+  profile_print(stderr);
+  return 0;
+}
