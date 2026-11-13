@@ -2041,6 +2041,7 @@ Type* type_meet(Type* one, Type* two) {
 }
 
 Type* type_join(Type* one, Type* two) {
+  if (one == two) return one;
   Type* result = 0;
   if (one->kind == Type_Kind_none) {
     result = two;
