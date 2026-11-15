@@ -139,6 +139,23 @@ typedef enum Var_Kind {
   Var_Kind_temporary,
 } Var_Kind;
 
+typedef struct Cell Cell;
+struct Cell {
+  I16 size;
+};
+
+typedef struct Cell_Pool Cell_Pool;
+struct Cell_Pool {
+  I32   length;
+  Cell* base[];
+};
+
+typedef struct Cells Cells;
+struct Cells {
+  I32   length;
+  Cell* base[];
+};
+
 struct Var {
   Var_Kind  kind;
   Var_State state;
@@ -150,6 +167,7 @@ struct Var {
   Blocks* blocks;
   Type*   declared;
   Var**   vars;
+  Cells*  cells;
   Hash_Map join_vars; // common fields of joined records, keyed by name
   Type**   block_types;
 };

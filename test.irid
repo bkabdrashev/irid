@@ -5,7 +5,7 @@ B : (t:I32 2; y: I32 20)
 v: A\B
 p: @I32
 if v.t == 1 do
-  p = @v.x // pointer
+  p = @v.x
 else
   p = @v.y
 

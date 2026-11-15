@@ -2435,6 +2435,16 @@ void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
                 narrowed->next = tasks->narrowed;
   tasks->narrowed = narrowed;
   var->block_types[tasks->block->id] = type;
+  // NOTE: only narrow the target variable parents
+  //       otherwise an unrelated computation would leave them narrowed.
+  B8 var_is_ancestor_of_tasks_var = false;
+  for (Var* v = var; v; v = v->parent) {
+    if (v == tasks->var) {
+      var_is_ancestor_of_tasks_var = true;
+      break;
+    }
+  }
+  // TODO: narrow the join of records (union) based on the common field (tag).
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
@@ -2454,81 +2464,6 @@ void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
             new_type_but_size_as_old->bits_align = old_type->bits_align;
       new_type = type_in_set(new_type_but_size_as_old);
       sem_narrow_var(tasks, var, new_type);
-      // TODO: analyse this slop and simplify
-
-      // NOTE: only narrow the ancestors of the variable whose type is being
-      // computed, otherwise an unrelated computation would leave them narrowed.
-      B8 var_is_ancestor_of_tasks_var = false;
-      for (Var* v = var; v; v = v->parent) {
-        if (v == tasks->var) {
-          var_is_ancestor_of_tasks_var = true;
-          break;
-        }
-      }
-
-      // NOTE: a field may be nested in several joined records (e.g. a.x in
-      // (a:(x:1)) \ (a:(x:2))), so the narrowing is propagated up the whole
-      // parent chain, not just to the direct parent.
-      Var* child = var;
-      for (; var_is_ancestor_of_tasks_var && child != tasks->var && child->parent; child = child->parent) {
-        Var*  parent = child->parent;
-        Type* type_parent_old = parent->block_types[tasks->block->id];
-        if (!type_parent_old || type_parent_old->kind == Type_Kind_none) {
-          type_parent_old = parent->declared;
-        }
-        if (!type_parent_old || type_parent_old->kind != Type_Kind_join_records) {
-          break;
-        }
-
-        Join* join_old = type_parent_old->join;
-        Join* join_new = arena_push(sem.perm_arena, sizeof(Join));
-              join_new->records = hash_set_init(sem.perm_arena, join_old->records.len);
-        for (I32 e = 0; e < join_old->records.len; e++) {
-          Type* element = join_old->records.list[e];
-          Record* record = element->record;
-          I32     pos    = -1;
-          if (record->length != 0) {
-            pos = child->name
-              ? hash_map_get_i32(record->position_from_name, child->name)
-              : hash_map_i32_get_i32(record->position_from_offset, child->index);
-          }
-          Type* meet = pos < 0 ? sem.type_none : sem_type_narrow_meet(new_type, record->types[pos]);
-          if (meet != sem.type_none) {
-            hash_set_put(&join_new->records, element);
-          }
-          else {
-            hash_set_put(&join_new->records, sem.type_empty_record);
-          }
-        }
-        Type* type_parent_new = type_join_records(join_new);
-        sem_narrow_var(tasks, parent, type_parent_new);
-
-        // Keep already cached common fields in sync with the narrowed parent.
-        for (I32 c = 0; c < parent->join_vars.len; c++) {
-          Str* common_name = parent->join_vars.list[c];
-          Var* common = hash_map_get(parent->join_vars, common_name);
-          Type* type_common = sem_join_field_type(type_parent_new->join, common_name);
-          if (type_common->kind == Type_Kind_record && common->declared->kind == Type_Kind_join_records) {
-            // NOTE: a join narrowed down to a single record is still a join
-            // for the purposes of the common field variable.
-            Join* join_common = arena_push(sem.perm_arena, sizeof(Join));
-                  join_common->records = hash_set_init(sem.perm_arena, 1);
-            hash_set_put(&join_common->records, type_common);
-            type_common = type_join_records(join_common);
-          }
-          if (type_common != sem.type_none) {
-            Type* old_common = common->block_types[tasks->block->id];
-            if (old_common) {
-              type_common = sem_type_narrow_meet(type_common, old_common);
-            }
-            if (type_common != sem.type_none && type_common->kind == common->declared->kind) {
-              sem_narrow_var(tasks, common, type_common);
-            }
-          }
-        }
-
-        new_type = type_parent_new;
-      }
     }
   }
 }
