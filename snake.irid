@@ -202,8 +202,6 @@ while game.running
   sdl.Delay(10)
   // game.running--
 
-print_i64(a)
-
 sdl.DestroyRenderer(renderer)
 sdl.DestroyWindow(window)
 sdl.Quit()

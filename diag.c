@@ -64,6 +64,7 @@ union Diag_Data {
   struct { I32  digit;    I32  base; }               invalid_digit;
   struct { Type* expected; Type* found; }            types;
   struct { Cstr op;       Type* type; }              operand;
+  struct { Str* name;     Type* type; }              missing;
 };
 
 typedef struct Diag Diag;
@@ -470,8 +471,9 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_join_field_missing:
     string_builder_push_cstr(sb, "field '");
-    string_builder_push_str(sb, diag->data.name);
-    string_builder_push_cstr(sb, "' is not present in every possible record");
+    string_builder_push_str(sb, diag->data.missing.name);
+    string_builder_push_cstr(sb, "' is not present in every possible record: ");
+    string_builder_push_type(sb, diag->data.missing.type);
   break;
   case Diag_Code_join_field_mismatch:
     string_builder_push_cstr(sb, "field '");

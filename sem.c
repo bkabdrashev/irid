@@ -484,10 +484,18 @@ Diag* sem_diag_impl(Diag_Code code, Loc loc, Cstr compiler_file, I32 compiler_li
   return diag_error_impl(sem.diags, code, loc, compiler_file, compiler_line);
 }
 
-void sem_error_name_impl(Diag_Code code, Loc loc, Str* name,
-                         Cstr compiler_file, I32 compiler_line) {
+void sem_error_name_impl(Diag_Code code, Loc loc, Str* name, Cstr compiler_file, I32 compiler_line) {
   Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) diag->data.name = name;
+  sem_fail();
+}
+
+void sem_error_name_type_impl(Diag_Code code, Loc loc, Str* name, Type* type, Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
+  if (diag) {
+    diag->data.missing.name = name;
+    diag->data.missing.type = type;
+  }
   sem_fail();
 }
 
@@ -534,6 +542,8 @@ void sem_error_call_mismatch_impl(Loc loc, Type* expected, Type* found, Cstr com
   sem_diag_impl((code), (loc), __FILE__, __LINE__)
 #define sem_error_name(code, loc, name) \
   sem_error_name_impl((code), (loc), (name), __FILE__, __LINE__)
+#define sem_error_name_type(code, loc, name, type) \
+  sem_error_name_type_impl((code), (loc), (name), (type), __FILE__, __LINE__)
 #define sem_error_text(code, loc, text) \
   sem_error_text_impl((code), (loc), (text), __FILE__, __LINE__)
 #define sem_error_types(code, loc, expected, found) \
@@ -1847,7 +1857,7 @@ I32 sem_get_offset_by_name(Block* block, Ir* ir, Var* var, Str* name) {
       if (record->length > 0) {
         I32 position = hash_map_get_i32(record->position_from_name, name);
         if (position < 0) {
-          sem_error_name(Diag_Code_join_field_missing, sem.current_ir->loc, name);
+          sem_error_name_type(Diag_Code_join_field_missing, sem.current_ir->loc, name, element);
         }
         if (result < 0) {
           result = record->offsets[position];
@@ -2389,39 +2399,6 @@ Type* sem_join_field_type(Join* join, Str* name) {
   return result;
 }
 
-Type* sem_type_narrow_meet(Type* narrowed, Type* field) {
-  Type* result;
-  if (narrowed->kind == Type_Kind_join_records) {
-    if (field->kind == Type_Kind_join_records) {
-      Join* join = arena_push(sem.perm_arena, sizeof(Join));
-            join->records = hash_set_init(sem.perm_arena, field->join->records.len);
-      for (I32 i = 0; i < field->join->records.len; i++) {
-        Type* element = field->join->records.list[i];
-        if (hash_set_exists(&narrowed->join->records, element)) {
-          hash_set_put(&join->records, element);
-        }
-      }
-      result = type_join_records(join);
-    }
-    else if (field->kind == Type_Kind_record) {
-      result = hash_set_exists(&narrowed->join->records, field) ? field : sem.type_none;
-    }
-    else {
-      result = type_meet(narrowed, field);
-    }
-  }
-  else if (field->kind == Type_Kind_join_records) {
-    result = sem_type_narrow_meet(field, narrowed);
-  }
-  else if (narrowed->kind == Type_Kind_record && field->kind == Type_Kind_record) {
-    result = type_is_same(narrowed, field) ? field : sem.type_none;
-  }
-  else {
-    result = type_meet(narrowed, field);
-  }
-  return result;
-}
-
 void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
   Sem_Narrowed* narrowed = arena_push(sem.temp_arena, sizeof(Sem_Narrowed));
                 narrowed->var  = var;
@@ -2445,6 +2422,12 @@ void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
         if (type_field_new != sem.type_none) {
           hash_set_put(&new_join->records, element);
         }
+        else {
+          hash_set_put(&new_join->records, sem.type_empty_record);
+        }
+      }
+      else {
+        hash_set_put(&new_join->records, element);
       }
     }
     if (new_join->records.len != old_join->records.len) {
