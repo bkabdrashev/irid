@@ -1745,9 +1745,16 @@ void sem_var_kind(Var* var) {
   }
 }
 
+I64 sem_name_offset_combine(Str* name, I32 offset) {
+  I64 strid  = str_id(name);
+  I64 result = strid << 32 | offset;
+  return result;
+}
+
 Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type);
 void sem_record_declare_fields(Var* var, Type* type);
-Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name) {
+
+Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) {
   sem_var_declare(var);
   if (var->declared->kind == Type_Kind_record) {
     Record* record = var->declared->record;
@@ -1759,18 +1766,16 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name) {
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     // INVARIANT: offsets are equal for each record in the join
-
-    Var* var_common = hash_map_get(var->join_vars, name);
+    I64 key = sem_name_offset_combine(name, offset);
+    Var* var_common = hash_map_get(var->join_vars, (void*)key);
     if (var_common) {
       return var_common;
     }
     Type* var_type = type_of_var(block, var);
     Join* join = var_type->join;
-    B8    is_first    = true;
     Type* type_joined = sem.type_none;
-    I16   bits_size   = 0;
-    I32   offset_join = -1;
     B8    is_size_defined = false;
+    I32   bits_size = -1;
     for (I32 i = 0; i < join->records.len; i++) {
       Type*   element = join->records.list[i];
       Record* record  = element->record;
@@ -1780,15 +1785,8 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name) {
           sem_error_name(Diag_Code_join_field_missing, sem.current_ir->loc, name);
         }
         Type* type = record->types[position];
-        if (is_first) {
-          offset_join = record->offsets[position];
-          bits_size   = type->bits_size;
-          is_first    = false;
-        }
-        else if (offset_join != record->offsets[position]) {
-          sem_error_name(Diag_Code_join_field_mismatch, sem.current_ir->loc, name);
-        }
-        if (type_joined == sem.type_none) {
+        if (bits_size < 0) {
+          bits_size = type->bits_size;
         }
         else if (bits_size != type->bits_size) {
           sem_error_name(Diag_Code_join_field_mismatch, sem.current_ir->loc, name);
@@ -1799,15 +1797,11 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name) {
       }
     }
 
-    if (is_first) {
-      sem_error_name(Diag_Code_empty_narrowed_record, sem.current_ir->loc, name);
-    }
-
     if (is_size_defined) {
       type_joined = type_define_size(bits_size, type_joined);
     }
 
-    var_common = sem_var_init(offset_join, name, var, type_joined);
+    var_common = sem_var_init(0, name, var, type_joined);
     hash_map_put(&var->join_vars, name, var_common);
     return var_common;
   }
@@ -2435,16 +2429,29 @@ void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
                 narrowed->next = tasks->narrowed;
   tasks->narrowed = narrowed;
   var->block_types[tasks->block->id] = type;
-  // NOTE: only narrow the target variable parents
-  //       otherwise an unrelated computation would leave them narrowed.
-  B8 var_is_ancestor_of_tasks_var = false;
-  for (Var* v = var; v; v = v->parent) {
-    if (v == tasks->var) {
-      var_is_ancestor_of_tasks_var = true;
-      break;
+  if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
+    Type* old_type = type_of_var(tasks->block, var->parent);
+    Join* old_join = old_type->join;
+    Join* new_join = arena_push(sem.perm_arena, sizeof(Join));
+    new_join->records = hash_set_init(sem.perm_arena, old_join->records.len);
+
+    for (I32 i = 0; i < old_join->records.len; i++) {
+      Type* element = old_join->records.list[i];
+      Record* record = element->record;
+      if (record->length > 0) {
+        I32 position = hash_map_i32_get_i32(record->position_from_offset, var->index);
+        Type* type_field = record->types[position];
+        Type* type_field_new = type_meet(type_field, type);
+        if (type_field_new != sem.type_none) {
+          hash_set_put(&new_join->records, element);
+        }
+      }
+    }
+    if (new_join->records.len != old_join->records.len) {
+      Type* new_type = type_join_records(new_join);
+      sem_narrow_var(tasks, var->parent, new_type);
     }
   }
-  // TODO: narrow the join of records (union) based on the common field (tag).
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
@@ -3186,7 +3193,7 @@ Type* sem_name_offset(Block* block, Ir* ir) {
     if (of_type->pointer->stack_vars.len > 0) {
       Var* first_var = of_type->pointer->stack_vars.list[0];
       I32  first_offset = sem_get_offset_by_name(block, ir, first_var, ir->name_offset.at);
-      Var* first_var_field = sem_get_var_by_name(block, ir, first_var, ir->name_offset.at);
+      Var* first_var_field = sem_get_var_by_name(block, ir, first_var, ir->name_offset.at, first_offset);
       for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
         Var* var = of_type->pointer->stack_vars.list[i];
         I32  offset = sem_get_offset_by_name(block, ir, var, ir->name_offset.at);
@@ -3202,7 +3209,7 @@ Type* sem_name_offset(Block* block, Ir* ir) {
 
       for (I32 i = 1; i < of_type->pointer->stack_vars.len; i++) {
         Var* var = of_type->pointer->stack_vars.list[i];
-        Var* field_var = sem_get_var_by_name(block, ir, var, ir->name_offset.at);
+        Var* field_var = sem_get_var_by_name(block, ir, var, ir->name_offset.at, first_offset);
         pointer->declared = type_meet(pointer->declared, field_var->declared);
         hash_set_put(&pointer->stack_vars, field_var);
       }
@@ -4552,7 +4559,6 @@ void sem_test(void) {
   // test("a: (x:I32 1; y: I32 2) \\ (x:I32 2; z: I32 3); if a.x == 1 do a.x + a.y else a.x + a.z", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c else ab.b", "");
   // test("A:(a:I32 0; b:I32 5); B:(a:I32 1; c:I32 4); ab: A\\B; if ab.a == 1 do ab.c", "");
-  test("", "");
   // test("a:(x:I32; y:I32); use a; x = 1; y = 2; x+y", "");
   // test("foo:(a:0..1) -> I32\n return a+2;\nfoo(1)", "");
   // test("a:(0..2); if a && 1 do a else a", "");

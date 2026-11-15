@@ -7,7 +7,7 @@ struct Str {
 typedef struct Internal Internal;
 struct Internal {
   Arena* arena;
-  Hash_Set set;
+  Hash_Map map;
 };
 
 typedef struct String_Builder String_Builder;
@@ -68,24 +68,28 @@ Cstr cstr_from_str(Str* str) {
 Internal internal_init(Arena* arena, Umi capacity) {
   Internal internal = {};
   internal.arena = arena;
-  internal.set = hash_set_init(arena, capacity);
+  internal.map = hash_map_init(arena, capacity);
   return internal;
 }
 
-Str* internal_from_range(Internal internal, Cstr begin, Cstr end) {
+Str* internal_from_range(Internal* internal, Cstr begin, Cstr end) {
   I32 len = end - begin;
   I32 i = hash_bytes(begin, len);
   for (;;) {
-    i &= internal.set.cap - 1;
-    Str* str = internal.set.keys[i];
+    i &= internal->map.cap - 1;
+    Str* str = internal->map.keys[i];
     if (!str) {
-      Str* new_str = arena_push(internal.arena, sizeof(Str) + (len+1) * sizeof(C8));
+      Str* new_str = arena_push(internal->arena, sizeof(Str) + (len+1) * sizeof(C8));
       new_str->length = len;
       for (I32 j = 0; j < len; j++) {
         new_str->base[j] = begin[j];
       }
       new_str->base[len] = '\0';
-      internal.set.keys[i] = new_str;
+      internal->map.keys[i] = new_str;
+      internal->map.list[internal->map.len] = new_str;
+      I32 strid = internal->map.len;
+      internal->map.vals[i] = (void*)(Umi)strid;
+      internal->map.len++;
       return new_str;
     }
     else {
@@ -104,17 +108,17 @@ Str* internal_from_range(Internal internal, Cstr begin, Cstr end) {
 }
 
 Str* str_from_range(Cstr begin, Cstr end) {
-  return internal_from_range(internal_strs, begin, end);
+  return internal_from_range(&internal_strs, begin, end);
 }
 
 Str* internal_from_cstr(Internal internal, Cstr cstr) {
   I32 len = strlen(cstr);
   Cstr end = cstr + len;
-  return internal_from_range(internal, cstr, end);
+  return internal_from_range(&internal, cstr, end);
 }
 
 Str* internal_from_str_view(Internal internal, Str_View str_view) {
-  return internal_from_range(internal, str_view.base, str_view.base + str_view.length);
+  return internal_from_range(&internal, str_view.base, str_view.base + str_view.length);
 }
 
 Str* str_from_str_view(Str_View str_view) {
@@ -127,14 +131,19 @@ Str* str_from_cstr(Cstr cstr) {
   return str_from_range(cstr, end);
 }
 
+I32 str_id(Str* str) {
+  I32 result = hash_map_get_i32(internal_strs.map, str);
+  return result;
+}
+
 void str_init(I32 char_count, I32 str_count) {
   // TODO: builtin stuff should be handled same as keywords
   str_count  += 128;
   char_count += KB(1);
-  I32 set_cap = hash_set_alloc_size(str_count);
+  I32 set_cap = hash_map_alloc_size(str_count);
   Arena* arena = arena_init(char_count + str_count * set_cap);
   internal_strs.arena = arena;
-  internal_strs.set = hash_set_init(arena, str_count);
+  internal_strs.map = hash_map_init(arena, str_count);
 }
 
 void str_free() {

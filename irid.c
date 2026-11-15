@@ -70,6 +70,7 @@ I32 irid_sem_path(Cstr path) {
   Str_View data = file_read(path);
   if (!data.base) {
     fprintf(stderr, "cannot read '%s'\n", path);
+    sources_free(&sources);
     return 1;
   }
   Source*   source  = sources_add_str_view(&sources, data);
