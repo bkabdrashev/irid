@@ -150,7 +150,7 @@ struct Var {
   Blocks* blocks;
   Type*   declared;
   Var**   vars;
-  Hash_Map join_vars; // common fields of joined records, keyed by name
+  Hash_Map join_vars; // common fields of joined records, keyed by name + offset
   Type**   block_types;
 };
 
@@ -829,6 +829,7 @@ Ir* irgen_push(Ir ir) {
   Ir* new_ir = &new(irgen.irs);
   *new_ir = ir;
   new_ir->loc = irgen.ast_loc;
+  assert(irgen.ast_loc.source);
   fa_extend(irgen.temp_ir_arena, block->irs, new_ir);
   return new_ir;
 }
@@ -1285,6 +1286,7 @@ void irgen_assign(Ast* lhs, Ir* rhs) {
 Ir* irgen_ast(Ast* ast) {
   Loc saved_loc = irgen.ast_loc;
   irgen.ast_loc = ast->loc;
+  assert(ast->loc.source);
   Ir* result = 0;
   switch (ast->kind) {
   case Ast_Kind_error: {
@@ -1984,17 +1986,19 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
   }
 
   {
-    Fun* fun = irgen_fun_enter();
     irgen.str_main = str_from_cstr("main");
-    fun->name = irgen.str_main;
+    irgen.ast_loc  = ast->loc;
+    Fun* fun = irgen_fun_enter();
+         fun->name = irgen.str_main;
 
     Var* arg_var = irgen_var_new();
-    arg_var->name = str_from_cstr("__arg");
+         arg_var->name = str_from_cstr("__arg");
     fun->arg_var = irgen_push_arg(arg_var);
 
     Ast* node = arena_push(irgen.perm_arena, sizeof(Ast));
-    node->kind = Ast_Kind_record;
-    node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
+         node->kind = Ast_Kind_record;
+         node->loc  = ast->loc;
+         node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
     irgen_var_declare(arg_var, node);
     irgen_push_declare(arg_var);
   }

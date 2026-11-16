@@ -102,8 +102,9 @@ typedef enum Type_Kind {
 } Type_Kind;
 
 typedef enum Type_Flag {
-  Type_Flag_size_defined    = 1 << 0,
-  Type_Flag_comptime_const  = 1 << 1,
+  Type_Flag_size_defined   = 1 << 0,
+  Type_Flag_comptime_const = 1 << 1,
+  Type_Flag_undefined      = 1 << 2,
 } Type_Flag;
 
 struct Type {
@@ -208,7 +209,7 @@ Type* type_of_var(Block* block, Var* var);
 Type* type_of_ir(Ir* ir);
 Type* type_join(Type* one, Type* two);
 Type* type_meet(Type* one, Type* two);
-Type* type_define_size(I32 bits_size, Type* bits_of);
+Type* type_size_defined(I32 bits_size, Type* bits_of);
 Type* type_pointer_declared(Pointer* pointer);
 Type* sem_var_declare(Var* var);
 B8 scalar_is_single(Scalar* scalar);
@@ -253,6 +254,9 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
   }
   else {
     string_builder_push_cstr(sb, " ");
+  }
+  if (has_flag(type->flag, Type_Flag_undefined)) {
+    string_builder_push_cstr(sb, "?");
   }
   if (type->kind == Type_Kind_scalar && type->scalar->kind == Scalar_Kind_float) {
     string_builder_push_cstr(sb, "float ");
@@ -1551,12 +1555,18 @@ Type* type_of_ir_unary(Ir* ir) {
   return result;
 }
 
-Type* type_define_size(I32 bits_size, Type* bits_of) {
+Type* type_size_defined(I32 bits_size, Type* bits_of) {
   Type* type = &new(sem.types);
        *type = *bits_of;
         type->flag |= Type_Flag_size_defined;
-        type->bits_size    = bits_size;
-        // type->bits_align   = align_up(bits_size, 8);
+        type->bits_size = bits_size;
+  return type_in_set(type);
+}
+
+Type* type_undefined(Type* of_type) {
+  Type* type = &new(sem.types);
+       *type = *of_type;
+        type->flag |= Type_Flag_undefined;
   return type_in_set(type);
 }
 
@@ -1591,7 +1601,7 @@ Type* sem_scalar_reflow_binary(Block* block, Ir* ir, Range range, Type_Pair type
     }
     Scalar* scalar = scalar_reflow(range, res_bits_size);
     Type* unsized = type_int_scalar(scalar);
-    result = type_define_size(res_bits_size, unsized);
+    result = type_size_defined(res_bits_size, unsized);
   }
   else {
     if (types.two->bits_size > types.one->bits_size) {
@@ -1809,7 +1819,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     }
 
     if (is_size_defined) {
-      type_joined = type_define_size(bits_size, type_joined);
+      type_joined = type_size_defined(bits_size, type_joined);
     }
 
     var_common = sem_var_init(0, name, var, type_joined);
@@ -2064,7 +2074,7 @@ Type* type_join(Type* one, Type* two) {
         I16 bits_size = max(one->bits_size, two->bits_size);
         Type* merged = type_int_scalar(scalar);
         if (merged->bits_size <= bits_size) {
-          result = type_define_size(bits_size, merged);
+          result = type_size_defined(bits_size, merged);
         }
         else {
           result = merged;
@@ -2767,6 +2777,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   var->block_types[block->id] = type;
 
+  B8 is_undefined = false;
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];
     if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
@@ -2783,11 +2794,17 @@ Type* type_of_var_rec(Block* block, Var* var) {
           sem_narrow_nez_ir(&tasks, pred->branch.cond);
           Type* pred_type = type_of_var_rec(pred, var);
           type = type_join(type, pred_type);
+          if (has_flag(pred_type->flag, Type_Flag_undefined)) {
+            is_undefined = true;
+          }
           sem_unnarrow(&tasks);
         }
-        if (pred->branch.eqz.to_block == block) {
+        else if (pred->branch.eqz.to_block == block) {
           sem_narrow_eqz_ir(&tasks, pred->branch.cond);
           Type* pred_type = type_of_var_rec(pred, var);
+          if (has_flag(pred_type->flag, Type_Flag_undefined)) {
+            is_undefined = true;
+          }
           type = type_join(type, pred_type);
           sem_unnarrow(&tasks);
         }
@@ -2795,9 +2812,15 @@ Type* type_of_var_rec(Block* block, Var* var) {
       }
       else if (pred->kind == Block_Kind_jump) {
         Type* pred_type = type_of_var_rec(pred, var);
+        if (has_flag(pred_type->flag, Type_Flag_undefined)) {
+          is_undefined = true;
+        }
         type = type_join(type, pred_type);
       }
     }
+  }
+  if (is_undefined) {
+    type = type_undefined(type);
   }
 
   var->block_types[block->id] = type;
@@ -2812,6 +2835,14 @@ Type* type_of_var(Block* block, Var* var) {
     var->block_types[block->id] = type;
   }
   arena_release_mark(sem.temp_arena, temp_arena_mark);
+  return type;
+}
+
+Type* type_of_var_defined(Block* block, Var* var, Loc loc) {
+  Type* type = type_of_var(block, var);
+  if (has_flag(type->flag, Type_Flag_undefined)) {
+    sem_diag(Diag_Code_undefined_value, loc);
+  }
   return type;
 }
 
@@ -2914,7 +2945,7 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
   else if (to->kind == Type_Kind_span) {
     if (from->kind == Type_Kind_array) {
       Span* span = arena_push(sem.perm_arena, sizeof(Span));
-      span->length = type_define_size(64, type_int(from->array->length));
+      span->length = type_size_defined(64, type_int(from->array->length));
       span->of_type = from->array->of_type;
       result = type_span(span);
 
@@ -3303,7 +3334,7 @@ void sem_ir(Block* block, Ir* ir) {
         val = raw;
       }
       Type* int_type = type_int(val);
-      str_array->types[length++] = type_define_size(8, int_type);
+      str_array->types[length++] = type_size_defined(8, int_type);
     }
 
     str_array->length = length;
@@ -3311,6 +3342,7 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_declare: {
     result = sem_var_declare(ir->declare.var);
+    ir->declare.var->block_types[block->id] = type_undefined(result);
   } break;
   case Ir_Kind_arg: {
     result = type_pointer_var(ir->var);
@@ -3613,7 +3645,7 @@ void sem_ir(Block* block, Ir* ir) {
       }
       Type* unsized = type_range(-limits.hi, -limits.lo);
       if (has_flag(one->flag, Type_Flag_size_defined)) {
-        result = type_define_size(one->bits_size, unsized);
+        result = type_size_defined(one->bits_size, unsized);
       }
       else {
         result = unsized;
@@ -3793,9 +3825,9 @@ void sem_ir(Block* block, Ir* ir) {
         for (I32 i = 0; i < stack_vars.len; i++) {
           sem_var_declare(stack_vars.list[i]);
         }
-        result = type_of_var(block, stack_vars.list[0]);
+        result = type_of_var_defined(block, stack_vars.list[0], ir->loc);
         for (I32 i = 1; i < stack_vars.len; i++) {
-          Type* type = type_of_var(block, stack_vars.list[i]);
+          Type* type = type_of_var_defined(block, stack_vars.list[i], ir->loc);
           result = type_join(result, type);
         }
       }
@@ -4022,7 +4054,7 @@ void sem_ir(Block* block, Ir* ir) {
         if (arg_type->kind == Type_Kind_type) {
           arg_type = arg_type->type;
         }
-        result = type_define_size(fun_type->bits_size, arg_type);
+        result = type_size_defined(fun_type->bits_size, arg_type);
       }
       else if (fun_type->str) {
         if (arg_type->kind == Type_Kind_fun) { // NOTE: foreign.c "c_name"
@@ -4475,7 +4507,7 @@ void sem_funs(Arena* arena, Fun_Pool funs, Diags* diags) {
 
   sem.bytes_range = type_range(I8_MIN, I8_MAX);
 
-  sem.type_len      = type_define_size(64, type_range(0, I64_MAX));
+  sem.type_len      = type_size_defined(64, type_range(0, I64_MAX));
   sem.type_zero     = type_int(0);
   sem.type_one      = type_int(1);
   sem.type_zero_one = type_range(0, 1);

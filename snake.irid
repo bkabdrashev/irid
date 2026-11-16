@@ -70,7 +70,7 @@ new_food : () ->
       k := i_from_xy game.food_p[i]
       board[k] = 0
 
-    selected   : I32 = -1
+    selected   : I32 // undefined
     best_score : I32 = -1
     for i : game.size
       if board[i]

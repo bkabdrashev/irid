@@ -34,6 +34,7 @@ typedef enum  Diag_Code {
 
   Diag_Code_type_mismatch,
   Diag_Code_unknown_field,
+  Diag_Code_undefined_value,
   Diag_Code_join_field_missing,
   Diag_Code_join_field_mismatch,
   Diag_Code_empty_narrowed_record,
@@ -313,6 +314,7 @@ Cstr cstr_from_diag_code(Diag_Code code) {
   case Diag_Code_invalid_array_length:   return "S015";
   case Diag_Code_invalid_field_base:     return "S016";
   case Diag_Code_join_layout_mismatch:   return "S017";
+  case Diag_Code_undefined_value:        return "S018";
   case Diag_Code_opened_here:            return "N001";
   case Diag_Code_previous_declaration:   return "N002";
   default:                               return "????";
@@ -468,6 +470,9 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_cstr(sb, "record has no field named '");
     string_builder_push_str(sb, diag->data.name);
     string_builder_push_cstr(sb, "'");
+  break;
+  case Diag_Code_undefined_value:
+    string_builder_push_cstr(sb, "value is undefined at this location");
   break;
   case Diag_Code_join_field_missing:
     string_builder_push_cstr(sb, "field '");
@@ -632,9 +637,7 @@ void diag_render_snippet(String_Builder* sb, Loc loc, Cstr label, Cstr caret_col
 
   I32 shown_caret_start = caret_start;
   if (shown_caret_start < window_start) shown_caret_start = window_start;
-  if (shown_caret_start >= window_end
-  &&  window_end < line_width
-  &&  window_end > window_start) {
+  if (shown_caret_start >= window_end && window_end < line_width && window_end > window_start) {
     shown_caret_start = window_end - 1;
   }
   I32 shown_caret_end = caret_end;
