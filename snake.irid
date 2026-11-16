@@ -17,6 +17,13 @@ equal : (a: F32; b: F32) -> B8
   result := a+epsilon >= b && a-epsilon <= b
   return result
 
+xy_from_i : (i:I32) ->
+  t := i / game.width
+  h := i % game.width
+  return (x:F32 h; y:F32 t)
+
+i_from_xy : (x:F32; y:F32) -> x'I32 + y'I32 * game.width
+
 
 intersection : (x0: F32; y0: F32; x1: F32; y1: F32) ->
   xa := 1.0 + min(x0; x1) - max(x0; x1)
@@ -56,25 +63,24 @@ new_food : () ->
       board[i] = 1
 
     for i : game.snake_n
-      k := game.snake_p[i].x'I32 + game.snake_p[i].y'I32 * game.width
+      k := i_from_xy game.snake_p[i]
       board[k] = 0
 
     for i : game.food_n
-      k := game.food_p[i].x'I32 + game.food_p[i].y'I32 * game.width
+      k := i_from_xy game.food_p[i]
       board[k] = 0
 
-    empty: [game.size]Vec2
-
-    e: I32 = 0
+    selected   : I32 = -1
+    best_score : I32 = -1
     for i : game.size
       if board[i]
-        empty[e].x = F32 (i % game.width)
-        empty[e].y = F32 (i / game.height)
-        e++
+        score := sdl.rand(empty_n)
+        if score > best_score
+          best_score = score
+          selected   = i
 
-    r := sdl.rand(empty_n)
-    game.food_p[game.food_n].x = empty[r].x
-    game.food_p[game.food_n].y = empty[r].y
+    r := xy_from_i(selected)
+    game.food_p[game.food_n] = r
     game.food_n++
 
 update : () ->
