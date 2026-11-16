@@ -23,6 +23,7 @@ typedef size_t    Umi; // unsigned memory index
 typedef ssize_t   Smi; //   signed memory index
 typedef uintptr_t Ump; // unsigned memory pointer
 typedef intptr_t  Smp; //   signed memory pointer
+typedef off_t     Off; /* Type of file sizes and offsets.  */
 
 typedef  char       C8;
 typedef const char* Cstr;
@@ -789,20 +790,40 @@ Str_View file_read(Cstr path) {
   }
   Umi size = st.st_size;
 
-  U64 pagesz = sysconf(_SC_PAGESIZE);
-  Umi map_len = ((size + 1 + pagesz - 1) / pagesz) * pagesz;
+  Str_View result = { .base = "", .length = size };
+  if (size > 0) {
+    U64 pagesz = sysconf(_SC_PAGESIZE);
+    Umi map_len = ((size + 1 + pagesz - 1) / pagesz) * pagesz;
 
-  C8* data = mmap(NULL, size,
-            PROT_READ,
-            MAP_PRIVATE,
-            fd, 0);
-  close(fd);
-  if (data == MAP_FAILED) return (Str_View){0, 0};
+    result.base = mmap(NULL, size,
+              PROT_READ,
+              MAP_PRIVATE,
+              fd, 0);
+    close(fd);
+    if (result.base == MAP_FAILED) return (Str_View){0, 0};
 
-  // data[size] = '\0';
-  if (mprotect(data, map_len, PROT_READ) != 0) {
-    perror("mprotect");
+    if (mprotect((void*)result.base, map_len, PROT_READ) != 0) {
+      perror("mprotect");
+    }
   }
-  Str_View str_view = { data, size };
-  return str_view;
+  return result;
+}
+
+B8 file_write(Cstr path, Str_View data) {
+  I32 fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) return false;
+
+  if (ftruncate(fd, (Off)data.length) < 0) { close(fd); return false; }
+
+  if (data.length == 0) return close(fd) == 0;
+
+  void* p = mmap(NULL, data.length, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
+  if (p == MAP_FAILED) { close(fd); return false; }
+
+  memcpy(p, data.base, data.length);
+
+  B8 ok = (msync(p, data.length, MS_SYNC) == 0);
+  munmap(p, data.length);
+  close(fd);
+  return ok;
 }

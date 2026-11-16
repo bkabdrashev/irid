@@ -160,10 +160,11 @@ String_Builder string_builder_begin(Arena* arena) {
   return sb;
 }
 
-Cstr string_builder_end(String_Builder* sb) {
+Str_View string_builder_end(String_Builder* sb) {
   string_builder_reserve(sb, 1);
   sb->base[sb->size] = '\0';
-  return sb->base;
+  Str_View result = { sb->base, sb->size };
+  return result;
 }
 
 void string_builder_push_cstr(String_Builder* sb, Cstr str) {

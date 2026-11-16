@@ -84,17 +84,17 @@ I32 irid_sem_path(Cstr path) {
     goto finish;
   }
   {
-    Cstr text = cstr_from_funs(arena, funs);
-    printf("\n%s", text);
+    Str_View str_view = str_view_from_funs(arena, funs);
+    file_write("build/out.irgen", str_view);
   }
   sem_funs(arena, funs, &sources.diags);
   if (diags_has_errors(&sources.diags)) {
     fputs(diag_render_all(arena, &sources.diags, false), stdout);
-    goto finish;
+    // goto finish;
   }
   {
-    Cstr cstr = cstr_from_sem(arena, funs);
-    printf("\n%s", cstr);
+    Str_View str_view = str_view_from_sem(arena, funs);
+    file_write("build/out.sem", str_view);
   }
 
 finish:

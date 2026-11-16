@@ -405,7 +405,7 @@ void string_builder_push_ast_node(String_Builder* sb, Ast* node) {
 Cstr cstr_from_ast(Arena* arena, Ast* ast) {
   String_Builder sb = string_builder_begin(arena);
   string_builder_push_ast_node(&sb, ast);
-  Cstr result = string_builder_end(&sb);
+  Cstr result = string_builder_end(&sb).base;
   return result;
 }
 

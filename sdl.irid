@@ -2,18 +2,18 @@ use import "basic"
 
 INIT_VIDEO     : 0x00000020
 INIT_EVENTS    : 0x00004000
-InitFlags      : U32
-WindowFlags    : I64
+InitFlags      : #type U32
+WindowFlags    : #type I64
 Window         : #type 64'#bits(opaque:"SDL_Window")
 Renderer       : #type 64'#bits(opaque:"SDL_Renderer")
 QUIT           : 0x100
 KEY_DOWN       : 0x300
 MOUSE_MOTION   : 0x400
 Event          : #type (128*8)'#bits(QuitEvent \ KeyboardEvent \ MouseMotionEvent \ UnknownEvent)
-WindowID       : U32
-KeyboardID     : U32
-Keycode        : U32
-Keymod         : U16
+WindowID       : #type U32
+KeyboardID     : #type U32
+Keycode        : #type U32
+Keymod         : #type U16
 
 SCANCODE_RETURN    : 40
 SCANCODE_ESCAPE    : 41
@@ -47,7 +47,7 @@ SCANCODE_X : 27
 SCANCODE_Y : 28
 SCANCODE_Z : 29
 
-Scancode : U16 // TODO: enum
+Scancode : #type U16 // TODO: enum
 
 UnknownEvent : #type (
   type      : U32 0
@@ -73,8 +73,8 @@ KeyboardEvent : #type (
   repeat    : B8           /**< true if this is a key repeat */
 )
 
-MouseButtonFlags: U32
-MouseID: U32
+MouseButtonFlags: #type U32
+MouseID: #type U32
 
 MouseMotionEvent : #type (
   type:      U32 MOUSE_MOTION       /**< SDL_EVENT_MOUSE_MOTION */

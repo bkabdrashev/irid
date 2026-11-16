@@ -372,7 +372,7 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
   }
 }
 
-Cstr cstr_from_sem(Arena* arena, Fun_Pool funs) {
+Str_View str_view_from_sem(Arena* arena, Fun_Pool funs) {
   String_Builder sb = string_builder_begin(arena);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
@@ -458,14 +458,19 @@ Cstr cstr_from_sem(Arena* arena, Fun_Pool funs) {
       string_builder_push_cstr(&sb, "}\n");
     }
   }
-  Cstr result = string_builder_end(&sb);
+  Str_View result = string_builder_end(&sb);
+  return result;
+}
+
+Cstr cstr_from_sem(Arena* arena, Fun_Pool funs) {
+  Cstr result = str_view_from_sem(arena, funs).base;
   return result;
 }
 
 Cstr cstr_from_type(Type* type) {
   String_Builder sb = string_builder_begin(sem.perm_arena);
   string_builder_push_type(&sb, type);
-  Cstr result = string_builder_end(&sb);
+  Cstr result = string_builder_end(&sb).base;
   return result;
 }
 
@@ -1566,7 +1571,12 @@ Type* type_size_defined(I32 bits_size, Type* bits_of) {
 Type* type_undefined(Type* of_type) {
   Type* type = &new(sem.types);
        *type = *of_type;
-        type->flag |= Type_Flag_undefined;
+   if (!has_flag(type->flag, Type_Flag_comptime_const)) {
+     if (of_type->kind == Type_Kind_type) {
+       assert(0);
+     }
+     type->flag |= Type_Flag_undefined;
+   }
   return type_in_set(type);
 }
 
@@ -3344,6 +3354,9 @@ void sem_ir(Block* block, Ir* ir) {
     result = sem_var_declare(ir->declare.var);
     ir->declare.var->block_types[block->id] = type_undefined(result);
   } break;
+  case Ir_Kind_arg_declare: {
+    result = sem_var_declare(ir->declare.var);
+  } break;
   case Ir_Kind_arg: {
     result = type_pointer_var(ir->var);
   } break;
@@ -3904,11 +3917,11 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_fun: {
     if (ir->fun->kind == Fun_Kind_macro) {
       Function* function = arena_push(sem.perm_arena, sizeof(Function));
-      function->fun = ir->fun;
-      function->foreign_name = irgen.str_nil;
-      function->foreign_id   = 0;
-      function->arg = sem.type_none;
-      function->ret = sem.type_none;
+                function->fun = ir->fun;
+                function->foreign_name = irgen.str_nil;
+                function->foreign_id   = 0;
+                function->arg = sem.type_none;
+                function->ret = sem.type_none;
       // ir->fun->type = type_fun(function);
       result = type_function(function);
     }
@@ -4402,11 +4415,11 @@ Type* sem_fun(Fun* fun) {
     sem_block(block);
   }
   Function* function = arena_push(sem.perm_arena, sizeof(Function));
-  function->foreign_name = irgen.str_nil;
-  function->foreign_id   = 0;
-  function->fun = fun;
-  function->arg = fun->arg_var->var->declared;
-  function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+            function->foreign_name = irgen.str_nil;
+            function->foreign_id   = 0;
+            function->fun = fun;
+            function->arg = fun->arg_var->var->declared;
+            function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
 
   if (function->ret->kind == Type_Kind_type) {
     function->ret = function->ret->type;
@@ -4429,8 +4442,8 @@ Type* sem_fun(Fun* fun) {
 
   {
     Type* type = function->arg;
-    Var* var = fun->arg_var->var;
-    var->declared = type;
+    Var*  var  = fun->arg_var->var;
+          var->declared = type;
     sem_var_kind(var);
     sem_record_declare_fields(var, type);
   }

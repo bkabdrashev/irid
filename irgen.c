@@ -59,7 +59,8 @@ typedef enum Ir_Kind {
 
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
-  Ir_Kind_macro_par  = 138,
+  Ir_Kind_arg_declare = 138,
+  Ir_Kind_macro_par  = 139,
 
   Ir_Kind_int_cast  = 140,
   Ir_Kind_record_cast = 141,
@@ -560,6 +561,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "maybe using ");
     string_builder_push_str(sb, ir->maybe_using.name);
   break;
+  case Ir_Kind_arg_declare:
   case Ir_Kind_declare: {
     Var* var = ir->declare.var;
     string_builder_push_cstr(sb, "declare ");
@@ -754,7 +756,7 @@ void string_builder_push_block(String_Builder* sb, Block* block, I32 indent) {
   }
 }
 
-Cstr cstr_from_funs(Arena* arena, Fun_Pool funs) {
+Str_View str_view_from_funs(Arena* arena, Fun_Pool funs) {
   String_Builder sb = string_builder_begin(arena);
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &irgen.funs.base[f];
@@ -773,7 +775,12 @@ Cstr cstr_from_funs(Arena* arena, Fun_Pool funs) {
     string_builder_push_cstr(&sb, "ret");
     string_builder_push_cstr(&sb, "\n}\n");
   }
-  Cstr result = string_builder_end(&sb);
+  Str_View result = string_builder_end(&sb);
+  return result;
+}
+
+Cstr cstr_from_funs(Arena* arena, Fun_Pool funs) {
+  Cstr result = str_view_from_funs(arena, funs).base;
   return result;
 }
 
@@ -829,7 +836,6 @@ Ir* irgen_push(Ir ir) {
   Ir* new_ir = &new(irgen.irs);
   *new_ir = ir;
   new_ir->loc = irgen.ast_loc;
-  assert(irgen.ast_loc.source);
   fa_extend(irgen.temp_ir_arena, block->irs, new_ir);
   return new_ir;
 }
@@ -908,6 +914,11 @@ Ir* irgen_push_import(Source* source) {
 
 Ir* irgen_push_declare(Var* var) {
   Ir ir = { .kind = Ir_Kind_declare, .declare = { .var = var }};
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_arg_declare(Var* var) {
+  Ir ir = { .kind = Ir_Kind_arg_declare, .declare = { .var = var }};
   return irgen_push(ir);
 }
 
@@ -1815,7 +1826,7 @@ Ir* irgen_ast(Ast* ast) {
         arg_var->name = str_from_cstr("__arg");
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
-        irgen_push_declare(arg_var);
+        irgen_push_arg_declare(arg_var);
         Rec* rec = fun->arg_var->var->declared_ir->rec;
         for (I32 i = 0; i < rec->length; i++) {
           Str* name = rec->names[i];
@@ -1838,7 +1849,7 @@ Ir* irgen_ast(Ast* ast) {
         sym->ir = irgen_push_arg(arg_var);
         fun->arg_var = sym->ir;
         irgen_var_declare(arg_var, lhs->declare.rhs);
-        irgen_push_declare(arg_var);
+        irgen_push_arg_declare(arg_var);
         irgen_sym_put(arg_var->name, sym);
       }
       else if (lhs->kind == Ast_Kind_name) {
@@ -2000,7 +2011,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
          node->loc  = ast->loc;
          node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
     irgen_var_declare(arg_var, node);
-    irgen_push_declare(arg_var);
+    irgen_push_arg_declare(arg_var);
   }
   irgen.irid_none = irgen_push_none();
 
@@ -2030,15 +2041,18 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
       irgen_scope_enter(source->ast->binary.lhs);
       irgen_fun_temp();
 
+      Loc saved = irgen.ast_loc;
       Hash_Map* scope = irgen_scope_leave();
       Rec* rec = irgen_record_new(scope->len);
       for (I32 j = 0; j < scope->len; j++) {
         Str* str = scope->list[j];
         Sym* sym = hash_map_get(*scope, str);
+        irgen.ast_loc = sym->ast->loc;
         rec->names[j] = str;
         rec->irs[j]   = irgen_push_unary(Ir_Kind_load, sym->ir);
         hash_map_put_i32(&rec->position_from_name, str, j);
       }
+      irgen.ast_loc = saved;
 
       Ir* ir = irgen_push_group(rec);
       Var* var = source->ir_var->var;

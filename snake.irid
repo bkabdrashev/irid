@@ -206,7 +206,7 @@ while game.running
   update()
   draw()
   sdl.Delay(10)
-  // game.running--
+  game.running--
 
 sdl.DestroyRenderer(renderer)
 sdl.DestroyWindow(window)

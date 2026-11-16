@@ -775,5 +775,5 @@ Cstr diag_render_all(Arena* arena, Diags* diags, B8 color) {
     string_builder_push_i64(&sb, diags->warning_count);
     string_builder_push_cstr(&sb, diags->warning_count == 1 ? " warning\n" : " warnings\n");
   }
-  return string_builder_end(&sb);
+  return string_builder_end(&sb).base;
 }

@@ -671,6 +671,6 @@ Cstr cstr_from_tokens(Tokens tokens) {
     }
     string_builder_push_cstr(&sb, " ");
   }
-  Cstr str = string_builder_end(&sb);
+  Cstr str = string_builder_end(&sb).base;
   return str;
 }
