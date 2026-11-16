@@ -1776,6 +1776,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     // INVARIANT: offsets are equal for each record in the join
+    // BUG: this ignores bits_size
     I64 key = sem_name_offset_combine(name, offset);
     Var* var_common = hash_map_get(var->join_vars, (void*)key);
     if (var_common) {
@@ -1812,7 +1813,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     }
 
     var_common = sem_var_init(0, name, var, type_joined);
-    hash_map_put(&var->join_vars, name, var_common);
+    hash_map_put(&var->join_vars, (void*)key, var_common);
     return var_common;
   }
   else if (var->declared->kind == Type_Kind_array) {
