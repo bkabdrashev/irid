@@ -1,15 +1,16 @@
+I16_MAX :  32767
+I16_MIN : -32767 - 1
+I16 : #type 16'#bits(I16_MIN..I16_MAX)
+
 I32_MAX :  2147483647
 I32_MIN : -2147483647 - 1
 I32 : #type 32'#bits(I32_MIN..I32_MAX)
 
 A : (t:I32 1; x: I32 10)
-B : (t:I32 2; y: I32 20)
+B : (t:I32 2; x: I16 20)
 
 v: A\B
-p: @I32
 if v.t == 1 do
-  p = @v.x
+  v.x
 else
-  p = @v.y
-
-p@
+  v.x

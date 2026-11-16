@@ -87,7 +87,7 @@ Str* internal_from_range(Internal* internal, Cstr begin, Cstr end) {
       new_str->base[len] = '\0';
       internal->map.keys[i] = new_str;
       internal->map.list[internal->map.len] = new_str;
-      I32 strid = internal->map.len;
+      I32 strid = internal->map.len + 1; // hash_map_get_i32 treats 0 as -1
       internal->map.vals[i] = (void*)(Umi)strid;
       internal->map.len++;
       return new_str;

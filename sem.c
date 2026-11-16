@@ -2430,11 +2430,12 @@ void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
         hash_set_put(&new_join->records, element);
       }
     }
-    if (new_join->records.len != old_join->records.len) {
-      Type* new_type = type_join_records(new_join);
+    Type* new_type = type_join_records(new_join);
+    if (new_type != old_type) {
       sem_narrow_var(tasks, var->parent, new_type);
     }
   }
+
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
