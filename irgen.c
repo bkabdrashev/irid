@@ -1199,6 +1199,7 @@ Fun* irgen_fun_leave(void) {
   block->kind = Block_Kind_jump;
   irgen_block_link_jump_to_block(&block->jump, fun->ret_block);
   irgen_block_leave();
+  fun->ret_block->id = fun->blocks->length;
   fa_extend(irgen.temp_block_arena, fun->blocks, fun->ret_block);
    // NOTE: it is not needed to generate load for return variable
   // fa_temp(irgen.temp_ir_arena, fun->ret_block->irs);
@@ -1487,6 +1488,11 @@ Ir* irgen_ast(Ast* ast) {
   } break;
   case Ast_Kind_ptr: {
     Ir* unary = irgen_ast(ast->unary);
+
+    if (unary->kind == Ir_Kind_load) {
+      unary->kind = Ir_Kind_typeof_load;
+    }
+
     result = irgen_push_unary(Ir_Kind_ptr, unary);
   } break;
   case Ast_Kind_subscript: {

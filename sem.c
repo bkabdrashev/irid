@@ -104,7 +104,7 @@ typedef enum Type_Kind {
 typedef enum Type_Flag {
   Type_Flag_size_defined   = 1 << 0,
   Type_Flag_comptime_const = 1 << 1,
-  Type_Flag_undefined      = 1 << 2,
+  Type_Flag_not_assigned   = 1 << 2,
 } Type_Flag;
 
 struct Type {
@@ -255,7 +255,7 @@ void string_builder_push_type(String_Builder* sb, Type* type) {
   else {
     string_builder_push_cstr(sb, " ");
   }
-  if (has_flag(type->flag, Type_Flag_undefined)) {
+  if (has_flag(type->flag, Type_Flag_not_assigned)) {
     string_builder_push_cstr(sb, "?");
   }
   if (type->kind == Type_Kind_scalar && type->scalar->kind == Scalar_Kind_float) {
@@ -499,6 +499,12 @@ void sem_error_name_impl(Diag_Code code, Loc loc, Str* name, Cstr compiler_file,
   sem_fail();
 }
 
+void sem_error_var_impl(Diag_Code code, Loc loc, Var* var, Cstr compiler_file, I32 compiler_line) {
+  Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
+  if (diag) diag->data.var = var;
+  sem_fail();
+}
+
 void sem_error_name_type_impl(Diag_Code code, Loc loc, Str* name, Type* type, Cstr compiler_file, I32 compiler_line) {
   Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) {
@@ -549,6 +555,8 @@ void sem_error_call_mismatch_impl(Loc loc, Type* expected, Type* found, Cstr com
 
 #define sem_diag(code, loc) \
   sem_diag_impl((code), (loc), __FILE__, __LINE__)
+#define sem_error_var(code, loc, var) \
+  sem_error_var_impl((code), (loc), (var), __FILE__, __LINE__)
 #define sem_error_name(code, loc, name) \
   sem_error_name_impl((code), (loc), (name), __FILE__, __LINE__)
 #define sem_error_name_type(code, loc, name, type) \
@@ -1574,11 +1582,11 @@ Type* type_size_defined(I32 bits_size, Type* bits_of) {
   return type_in_set(type);
 }
 
-Type* type_undefined(Type* of_type) {
+Type* type_not_assigned(Type* of_type) {
   Type* type = &new(sem.types);
        *type = *of_type;
    if (!has_flag(type->flag, Type_Flag_comptime_const)) {
-     type->flag |= Type_Flag_undefined;
+     type->flag |= Type_Flag_not_assigned;
    }
   return type_in_set(type);
 }
@@ -2787,22 +2795,22 @@ Type* type_of_var_rec(Block* block, Var* var) {
     type = var->declared;
     var->block_types[block->id] = type;
 
-    B8 is_undefined = false;
+    B8 is_not_assigned = false;
     for (I32 i = 0; i < block->preds.length; i++) {
       Block* pred = block->preds.base[i];
       if (!sem_dominates(block, pred)) {
         if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
           Type* pred_type = type_of_var_rec(pred, var);
-          if (has_flag(pred_type->flag, Type_Flag_undefined)) {
-            is_undefined = true;
+          if (has_flag(pred_type->flag, Type_Flag_not_assigned)) {
+            is_not_assigned = true;
             break;
           }
         }
       }
     }
 
-    if (is_undefined) {
-      type = type_undefined(type);
+    if (is_not_assigned) {
+      type = type_not_assigned(type);
     }
 
     var->block_types[block->id] = type;
@@ -2811,7 +2819,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   var->block_types[block->id] = type;
 
-  B8 is_undefined = false;
+  B8 is_not_assigned = false;
   for (I32 i = 0; i < block->preds.length; i++) {
     Block* pred = block->preds.base[i];
     if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
@@ -2828,16 +2836,16 @@ Type* type_of_var_rec(Block* block, Var* var) {
           sem_narrow_nez_ir(&tasks, pred->branch.cond);
           Type* pred_type = type_of_var_rec(pred, var);
           type = type_join(type, pred_type);
-          if (has_flag(pred_type->flag, Type_Flag_undefined)) {
-            is_undefined = true;
+          if (has_flag(pred_type->flag, Type_Flag_not_assigned)) {
+            is_not_assigned = true;
           }
           sem_unnarrow(&tasks);
         }
         else if (pred->branch.eqz.to_block == block) {
           sem_narrow_eqz_ir(&tasks, pred->branch.cond);
           Type* pred_type = type_of_var_rec(pred, var);
-          if (has_flag(pred_type->flag, Type_Flag_undefined)) {
-            is_undefined = true;
+          if (has_flag(pred_type->flag, Type_Flag_not_assigned)) {
+            is_not_assigned = true;
           }
           type = type_join(type, pred_type);
           sem_unnarrow(&tasks);
@@ -2846,15 +2854,15 @@ Type* type_of_var_rec(Block* block, Var* var) {
       }
       else if (pred->kind == Block_Kind_jump) {
         Type* pred_type = type_of_var_rec(pred, var);
-        if (has_flag(pred_type->flag, Type_Flag_undefined)) {
-          is_undefined = true;
+        if (has_flag(pred_type->flag, Type_Flag_not_assigned)) {
+          is_not_assigned = true;
         }
         type = type_join(type, pred_type);
       }
     }
   }
-  if (is_undefined) {
-    type = type_undefined(type);
+  if (is_not_assigned) {
+    type = type_not_assigned(type);
   }
 
   var->block_types[block->id] = type;
@@ -2873,11 +2881,36 @@ Type* type_of_var(Block* block, Var* var) {
 }
 
 Type* type_of_var_defined(Block* block, Var* var, Loc loc) {
-  Type* type = type_of_var(block, var);
-  if (has_flag(type->flag, Type_Flag_undefined)) {
-    sem_diag(Diag_Code_undefined_value, loc);
+  Type* result = var->declared;
+  if (var->declared->kind == Type_Kind_record) {
+    Record* record = var->declared->record;
+    Record* new_record = arena_push(sem.perm_arena, sizeof(Record));
+            new_record->types   = arena_push_type(sem.perm_arena, Type, record->length);
+            new_record->length  = record->length;
+            new_record->offsets = record->offsets;
+            new_record->names   = record->names;
+            new_record->position_from_name   = record->position_from_name;
+            new_record->position_from_offset = record->position_from_offset;
+    for (I32 i = 0; i < record->length; i++) {
+      Type* type = type_of_var(block, var->vars[i]);
+      if (has_flag(type->flag, Type_Flag_not_assigned)) {
+        sem_error_var(Diag_Code_not_assigned, loc, var->vars[i]);
+      }
+      new_record->types[i] = type;
+    }
+    result = type_record(new_record);
   }
-  return type;
+  else {
+    if (var->name == str_from_cstr("snake_n")) {
+      printf("break!");
+    }
+    result = type_of_var(block, var);
+    if (has_flag(result->flag, Type_Flag_not_assigned)) {
+      assert(0);
+      sem_error_var(Diag_Code_not_assigned, loc, var);
+    }
+  }
+  return result;
 }
 
 Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
@@ -3112,7 +3145,7 @@ Type* type_of_fun(Fun* fun) {
 }
 
 void sem_block(Block* block);
-void sem_init_block_preds(Block* block);
+void sem_block_preds_init(Block* block);
 
 Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
   Var* var = &new(irgen.vars);
@@ -3190,7 +3223,7 @@ Type* sem_var_declare(Var* var) {
   if (var->blocks) {
     for (I32 i = 0; i < var->blocks->length; i++) {
       Block* block = var->blocks->base[i];
-      sem_init_block_preds(block);
+      sem_block_preds_init(block);
       sem_block(block);
     }
   }
@@ -3206,6 +3239,17 @@ Type* sem_var_declare(Var* var) {
 
   var->state = Var_State_resolved;
   return type;
+}
+
+void sem_var_not_assigned(Block* block, Var* var) {
+  if (var->declared->kind == Type_Kind_record) {
+    for (I32 i = 0; i < var->declared->record->length; i++) {
+      sem_var_not_assigned(block, var->vars[i]);
+    }
+  }
+  else {
+    var->block_types[block->id] = type_not_assigned(var->declared);
+  }
 }
 
 Type* sem_fun(Fun* fun);
@@ -3376,10 +3420,7 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_declare: {
     result = sem_var_declare(ir->declare.var);
-    if (ir->declare.var->name == str_from_cstr("BLOCKS_PER_MS")) {
-      printf("hi\n");
-    }
-    ir->declare.var->block_types[block->id] = type_undefined(result);
+    sem_var_not_assigned(block, ir->declare.var);
   } break;
   case Ir_Kind_def_declare: {
     result = sem_var_declare(ir->declare.var);
@@ -3954,7 +3995,7 @@ void sem_ir(Block* block, Ir* ir) {
     if (type_unary->kind == Type_Kind_type) {
       result = type_pointer_to(type_unary->type);
     }
-    else if (ir->unary->kind == Ir_Kind_load) {
+    else if (ir->unary->kind == Ir_Kind_typeof_load) {
       Type* ptr_type = type_of_ir(ir->unary->unary);
       assert(ptr_type->kind == Type_Kind_ptr);
       result = ptr_type;
@@ -4340,7 +4381,7 @@ void sem_scc_block(Block* block) {
   }
 }
 
-void sem_init_block_preds(Block* block) {
+void sem_block_preds_init(Block* block) {
   if (block->preds.base) return;
 
   block->preds.base = arena_push(sem.perm_arena, block->preds.length * sizeof(Block*));
@@ -4348,18 +4389,18 @@ void sem_init_block_preds(Block* block) {
 
   if (block->kind == Block_Kind_jump) {
     Block* to_block = block->jump.to_block;
-    sem_init_block_preds(to_block);
+    sem_block_preds_init(to_block);
     add(to_block->preds, block);
   }
   else if (block->kind == Block_Kind_branch) {
     {
       Block* to_block = block->branch.nez.to_block;
-      sem_init_block_preds(to_block);
+      sem_block_preds_init(to_block);
       add(to_block->preds, block);
     }
     {
       Block* to_block = block->branch.eqz.to_block;
-      sem_init_block_preds(to_block);
+      sem_block_preds_init(to_block);
       add(to_block->preds, block);
     }
   }
@@ -4452,13 +4493,9 @@ Type* sem_fun(Fun* fun) {
   fun->worklist->length = 0;
   printf("fun: %s\n", fun->name->base);
 
-  if (fun->kind != Fun_Kind_macro) {
-    sem_var_declare(fun->arg_var->var);
-  }
-
   for (I32 b = 0; b < fun->blocks->length; b++) {
     Block* block = fun->blocks->base[b];
-    sem_init_block_preds(block);
+    sem_block_preds_init(block);
   }
 
   Blocks*  rpo = sem_cfg_rpo(fun);
@@ -4476,6 +4513,10 @@ Type* sem_fun(Fun* fun) {
   Block* entry_block = fun->blocks->base[0];
   sem_scc_block(entry_block);
   entry_block->state = Block_State_reachable;
+
+  if (fun->kind != Fun_Kind_macro) {
+    sem_var_declare(fun->arg_var->var);
+  }
 
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();
@@ -4618,14 +4659,14 @@ void sem_funs(Arena* arena, Fun_Pool funs, Diags* diags) {
 }
 
 void _test_sem(Cstr source_data, Cstr expected, Cstr file_name, I32 line) {
-  Sources   sources = sources_init(16, 256);
-  Str_View  prepend = str_view_from_cstr("use import \"basic\"\n");
-  Str_View  source_sv = str_view_from_cstr(source_data);
-  Str_View  combined = str_view_cat(prepend, source_sv);
-  Source*   source  = sources_add_str_view(&sources, combined);
-  Tokens    tokens  = lex_source(source, &sources.diags);
-  Ast*      ast     = parse_tokens(&sources, tokens);
-  Arena* arena = arena_init(KB(2) * sources.ast_count);
+  Sources   sources   = sources_init(16, 256);
+  Str_View  prepend   = str_view_from_cstr("use import \"basic\"\n");
+  Str_View  sv_source = str_view_from_cstr(source_data);
+  Str_View  combined  = str_view_cat(prepend, sv_source);
+  Source*   source    = sources_add_str_view(&sources, combined);
+  Tokens    tokens    = lex_source(source, &sources.diags);
+  Ast*      ast       = parse_tokens(&sources, tokens);
+  Arena*    arena     = arena_init(KB(2) * sources.ast_count);
 
   Fun_Pool funs = irgen_ast_root(sources, arena, ast);
   {

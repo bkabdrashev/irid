@@ -34,7 +34,7 @@ typedef enum  Diag_Code {
 
   Diag_Code_type_mismatch,
   Diag_Code_unknown_field,
-  Diag_Code_undefined_value,
+  Diag_Code_not_assigned,
   Diag_Code_join_field_missing,
   Diag_Code_join_field_mismatch,
   Diag_Code_empty_narrowed_record,
@@ -55,9 +55,11 @@ typedef enum  Diag_Code {
   Diag_Code_previous_declaration,
 } Diag_Code;
 
+typedef struct Var Var;
 typedef union Diag_Data Diag_Data;
 union Diag_Data {
   Str* name;
+  Var* var;
   Cstr text;
   U32  unknown_char;
   struct { Token_Kind expected; Token_Kind found; B8 end_of_line; } expected;
@@ -314,7 +316,7 @@ Cstr cstr_from_diag_code(Diag_Code code) {
   case Diag_Code_invalid_array_length:   return "S015";
   case Diag_Code_invalid_field_base:     return "S016";
   case Diag_Code_join_layout_mismatch:   return "S017";
-  case Diag_Code_undefined_value:        return "S018";
+  case Diag_Code_not_assigned:           return "S018";
   case Diag_Code_opened_here:            return "N001";
   case Diag_Code_previous_declaration:   return "N002";
   default:                               return "????";
@@ -328,6 +330,7 @@ static Cstr diag_color_dim(void)   { return "\033[2m"; }
 static Cstr diag_color_reset(void) { return "\033[0m"; }
 
 void string_builder_push_type(String_Builder* sb, Type* type);
+void string_builder_push_var (String_Builder* sb, Var* var);
 void diag_render_found(String_Builder* sb, Token_Kind kind, Loc loc) {
   if (kind == Token_Kind_source_leave) {
     string_builder_push_cstr(sb, "end of file");
@@ -471,8 +474,10 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_str(sb, diag->data.name);
     string_builder_push_cstr(sb, "'");
   break;
-  case Diag_Code_undefined_value:
-    string_builder_push_cstr(sb, "value is undefined at this location");
+  case Diag_Code_not_assigned:
+    string_builder_push_cstr(sb, "'");
+    string_builder_push_var(sb, diag->data.var);
+    string_builder_push_cstr(sb, "' may be not assigned at this location");
   break;
   case Diag_Code_join_field_missing:
     string_builder_push_cstr(sb, "field '");
@@ -661,7 +666,12 @@ void diag_render_snippet(String_Builder* sb, Loc loc, Cstr label, Cstr caret_col
   string_builder_push_cstr(sb, "-->");
   string_builder_push_cstr(sb, reset);
   string_builder_push_cstr(sb, " ");
-  string_builder_push_cstr(sb, source->path ? source->path->base : "<anonymous>");
+  if (source->path) {
+    string_builder_push_str(sb, source->path);
+  }
+  else {
+    string_builder_push_cstr(sb, "<anonymous>");
+  }
   string_builder_push_cstr(sb, ":");
   string_builder_push_i64(sb, line + 1);
   string_builder_push_cstr(sb, ":");
