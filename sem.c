@@ -2434,20 +2434,20 @@ Type* sem_join_field_type(Join* join, Str* name) {
 }
 
 void sem_var_at_block_init(Block* block, Var* var) {
-  if (var->current_fun != sem.current_fun) {
-    I32 length = sem.current_fun->blocks->length;
-    if (var->global) {
-      length = irgen.block_length_max;
-      if (var->block_types) {
-        memset_zero_type(var->block_types, Type*, length);
-      }
-      else {
-        var->block_types = arena_push_zero_type(sem.perm_arena, Type*, length);
-      }
-    }
-    else {
+  if (var->global) {
+    I32 length = irgen.block_length_max;
+    if (!var->block_types) {
       var->block_types = arena_push_zero_type(sem.perm_arena, Type*, length);
+      var->current_fun = sem.current_fun;
     }
+    else if (var->current_fun != sem.current_fun) {
+      memset_zero_type(var->block_types, Type*, length);
+      var->current_fun = sem.current_fun;
+    }
+  }
+  else if (!var->block_types) {
+    I32 length = sem.current_fun->blocks->length;
+    var->block_types = arena_push_zero_type(sem.perm_arena, Type*, length);
     var->current_fun = sem.current_fun;
   }
 }
