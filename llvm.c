@@ -34,6 +34,7 @@ struct LLVM_Gen {
   LLVMValueRef       function;
 
   LLVMValueRef       none;
+  LLVMTypeRef        type_none;
 };
 
 LLVM_Gen llvm_gen;
@@ -82,15 +83,18 @@ LLVMTypeRef llvm_of_type(Type* type) {
   }
   // else if (has_flag(type->flag, Type_Flag_comptime_const)) {
   //   // TODO: introduces asan crashes
-  //   result = LLVMIntTypeInContext(llvm_gen.context, 0);
+  //   result = llvm_gen.type_none;
   // }
   else {
-    switch (type->kind) {
+    if (type->bits_size == 0) {
+      result = llvm_gen.type_none;
+    }
+    else switch (type->kind) {
     case Type_Kind_none: {
-      result = LLVMIntTypeInContext(llvm_gen.context, 1);
+      result = llvm_gen.type_none;
     } break;
     case Type_Kind_type: {
-      result = LLVMIntTypeInContext(llvm_gen.context, 0);
+      result = llvm_gen.type_none;
     } break;
     case Type_Kind_scalar: {
       if (type_is_float(type)) {
@@ -217,14 +221,15 @@ void llvm_block(Block* block);
 
 LLVMValueRef llvm_default_of_type(Type* type) {
   LLVMValueRef result = 0;
-  switch (type->kind) {
+  if (type->bits_size == 0) {
+    result = llvm_gen.none;
+  }
+  else switch (type->kind) {
   case Type_Kind_none: {
-    LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, 1);
-    result = LLVMConstInt(llvm_type, 0, false);
+    result = llvm_gen.none;
   } break;
   case Type_Kind_type: {
-    LLVMTypeRef llvm_type = LLVMIntTypeInContext(llvm_gen.context, type->bits_size);
-    result = LLVMConstInt(llvm_type, 0, false);
+    result = llvm_gen.none;
   } break;
   case Type_Kind_join_records: {
     LLVMTypeRef llvm_type = llvm_of_type(type);
@@ -417,7 +422,6 @@ void llvm_ir(Ir* ir) {
     else {
       LLVMTypeRef llvm_var_type = llvm_of_type(ir->var->declared);
       result = LLVMBuildAlloca(llvm_gen.builder, llvm_var_type, ir->var->name->base);
-      // LLVMBuildStore(llvm_gen.builder, llvm_var_init, result);
     }
     llvm_of_var_put(ir->var, result);
   } break;
@@ -888,7 +892,8 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
   llvm_gen.module  = LLVMModuleCreateWithNameInContext("contex_name", llvm_gen.context);
   llvm_gen.builder = LLVMCreateBuilderInContext(llvm_gen.context);
 
-  llvm_gen.none = llvm_default_of_type(sem.type_none);
+  llvm_gen.type_none = LLVMStructTypeInContext(llvm_gen.context, NULL, 0, false);
+  llvm_gen.none      = LLVMConstNull(llvm_gen.type_none);
 
   for (I32 f = 0; f < funs.length; f++) {
     Fun* fun = &funs.base[f];
