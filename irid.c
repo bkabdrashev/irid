@@ -32,8 +32,8 @@ I32 irid_run_path(Cstr path) {
   }
   profile_stage_begin("print ir", 0);
   {
-    Cstr text            = cstr_from_funs(arena, funs);
-    printf("\n%s", text);
+    Str_View str_view = str_view_from_funs(arena, funs);
+    file_write("build/irgen.out", str_view);
   }
   profile_stage_begin("sem", 0);
   sem_funs(arena, funs, &sources.diags);
@@ -44,8 +44,8 @@ I32 irid_run_path(Cstr path) {
   }
   profile_stage_begin("print sem", 0);
   {
-    Cstr cstr = cstr_from_sem(arena, funs);
-    printf("\n%s", cstr);
+    Str_View str_view = str_view_from_sem(arena, funs);
+    file_write("build/sem.out", str_view);
   }
 
   if (diags_has_errors(&sources.diags)) {

@@ -61,7 +61,7 @@ typedef enum Ir_Kind {
   Ir_Kind_arg  = 137,
   Ir_Kind_def_declare = 138,
   Ir_Kind_macro_par   = 139,
-  Ir_Kind_typeof_load = 140,
+  Ir_Kind_typeof_load = 140 | Ir_Flag_unary,
 
   Ir_Kind_int_cast             = 141,
   Ir_Kind_record_cast          = 142,
@@ -698,6 +698,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
   case Ir_Kind_neg: string_builder_push_cstr(sb, "neg "); break;
   case Ir_Kind_pos: string_builder_push_cstr(sb, "pos "); break;
   case Ir_Kind_load: string_builder_push_cstr(sb, "load "); break;
+  case Ir_Kind_typeof_load: string_builder_push_cstr(sb, "typeof load "); break;
   case Ir_Kind_ptr:  string_builder_push_cstr(sb, "ptr "); break;
   case Ir_Kind_store: string_builder_push_cstr(sb, "store "); break;
   case Ir_Kind_eq: string_builder_push_cstr(sb, "eq "); break;

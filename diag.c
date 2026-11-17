@@ -498,6 +498,8 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   case Diag_Code_call_argument_mismatch:
     string_builder_push_cstr(sb, "invalid argument: ");
     string_builder_push_type(sb, diag->data.types.found);
+    string_builder_push_cstr(sb, "\nexpected: ");
+    string_builder_push_type(sb, diag->data.types.expected);
   break;
   case Diag_Code_invalid_operand:
     string_builder_push_cstr(sb, "invalid operand of type ");

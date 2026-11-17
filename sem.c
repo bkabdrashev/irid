@@ -1312,11 +1312,17 @@ Type* type_float_scalar(I16 bits_exp, I16 bits_man, Scalar* scalar) {
   I16 bits_size = bits_exp + bits_man + 1;
   scalar = sem_scalar_intern(scalar);
   Type* new_type = &new(sem.types);
-  new_type->kind = Type_Kind_scalar;
-  new_type->bits_align = bits_size;
-  new_type->bits_size  = bits_size;
-  new_type->flag = Type_Flag_size_defined;
-  new_type->scalar = scalar;
+        new_type->kind = Type_Kind_scalar;
+        new_type->bits_align = bits_size;
+        new_type->bits_size  = bits_size;
+        new_type->flag = Type_Flag_size_defined;
+        new_type->scalar = scalar;
+  I64 min = scalar_min(scalar);
+  I64 max = scalar_max(scalar);
+  if (min == max) {
+    new_type->flag |= Type_Flag_comptime_const;
+  }
+
   return type_in_set(new_type);
 }
 
@@ -1572,9 +1578,6 @@ Type* type_undefined(Type* of_type) {
   Type* type = &new(sem.types);
        *type = *of_type;
    if (!has_flag(type->flag, Type_Flag_comptime_const)) {
-     if (of_type->kind == Type_Kind_type) {
-       assert(0);
-     }
      type->flag |= Type_Flag_undefined;
    }
   return type_in_set(type);
@@ -2768,6 +2771,7 @@ void sem_unnarrow(Sem_Tasks* tasks) {
   var->block_types[tasks->block->id] = old;
 }
 
+B8 sem_dominates(Block* one, Block* two);
 Type* type_of_var_rec(Block* block, Var* var) {
   if (var->kind == Var_Kind_constant) {
     return var->declared;
@@ -2781,6 +2785,26 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   if (block->is_loop_head) {
     type = var->declared;
+    var->block_types[block->id] = type;
+
+    B8 is_undefined = false;
+    for (I32 i = 0; i < block->preds.length; i++) {
+      Block* pred = block->preds.base[i];
+      if (!sem_dominates(block, pred)) {
+        if (pred->state == Block_State_reachable || block->state < Block_State_reachable) {
+          Type* pred_type = type_of_var_rec(pred, var);
+          if (has_flag(pred_type->flag, Type_Flag_undefined)) {
+            is_undefined = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (is_undefined) {
+      type = type_undefined(type);
+    }
+
     var->block_types[block->id] = type;
     return type;
   }
@@ -2851,7 +2875,6 @@ Type* type_of_var(Block* block, Var* var) {
 Type* type_of_var_defined(Block* block, Var* var, Loc loc) {
   Type* type = type_of_var(block, var);
   if (has_flag(type->flag, Type_Flag_undefined)) {
-    assert(0);
     sem_diag(Diag_Code_undefined_value, loc);
   }
   return type;
@@ -3353,6 +3376,9 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_declare: {
     result = sem_var_declare(ir->declare.var);
+    if (ir->declare.var->name == str_from_cstr("BLOCKS_PER_MS")) {
+      printf("hi\n");
+    }
     ir->declare.var->block_types[block->id] = type_undefined(result);
   } break;
   case Ir_Kind_def_declare: {
@@ -4059,6 +4085,9 @@ void sem_ir(Block* block, Ir* ir) {
       }
     }
     else if (fun_type == sem.fun_type_type) {
+      if (arg_type->kind == Type_Kind_type) {
+        arg_type = arg_type->type;
+      }
       result = type_type(type_type(arg_type));
     }
     else if (fun_type->kind == Type_Kind_type) {
@@ -4270,6 +4299,8 @@ I32 sem_scc_block_jump(Block* parent, Block* kid) {
 }
 
 void sem_scc_block(Block* block) {
+  I32 scc_stack_base = sem.scc_stack->length;
+
   block->is_scc_visited = true;
   I32 sccid = sem.sccid++;
   block->sccid = sccid;
@@ -4286,6 +4317,16 @@ void sem_scc_block(Block* block) {
   }
 
   if (block->sccid == sccid) {
+    for (I32 i = scc_stack_base + 1; i < sem.scc_stack->length; i++) {
+      Block* key = sem.scc_stack->base[i];
+      I32 j = i - 1;
+      while (j >= scc_stack_base && sem.scc_stack->base[j]->rpo > key->rpo) {
+        sem.scc_stack->base[j + 1] = sem.scc_stack->base[j];
+        j--;
+      }
+      sem.scc_stack->base[j + 1] = key;
+    }
+
     Block* pop_block;
     do {
       pop_block = fa_pop(sem.scc_stack);
@@ -4419,9 +4460,6 @@ Type* sem_fun(Fun* fun) {
     Block* block = fun->blocks->base[b];
     sem_init_block_preds(block);
   }
-  Block* entry_block = fun->blocks->base[0];
-  sem_scc_block(entry_block);
-  entry_block->state = Block_State_reachable;
 
   Blocks*  rpo = sem_cfg_rpo(fun);
                  sem_cfg_doms(fun, rpo);
@@ -4434,6 +4472,10 @@ Type* sem_fun(Fun* fun) {
       }
     }
   }
+
+  Block* entry_block = fun->blocks->base[0];
+  sem_scc_block(entry_block);
+  entry_block->state = Block_State_reachable;
 
   while (sem_worklist_is_not_empty()) {
     Block* block = sem_worklist_pop();

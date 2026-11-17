@@ -665,6 +665,7 @@ void llvm_ir(Ir* ir) {
       result = LLVMBuildExtractValue(llvm_gen.builder, of, ir->position.at, "");
     }
   } break;
+  case Ir_Kind_typeof_load:
   case Ir_Kind_load: {
     if (type_is_const(type)) {
       result = llvm_default_of_type(type);
@@ -785,7 +786,8 @@ void llvm_ir(Ir* ir) {
     }
   } break;
 
-  case Ir_Kind_declare: result = llvm_gen.none; break;
+  case Ir_Kind_declare:     result = llvm_gen.none; break;
+  case Ir_Kind_def_declare: result = llvm_gen.none; break;
   case Ir_Kind_none:    result = llvm_gen.none; break;
   case Ir_Kind_type:    result = llvm_gen.none; break;
   case Ir_Kind_str: case Ir_Kind_span: case Ir_Kind_array:
@@ -938,8 +940,12 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
   }
 
   profile_stage_begin("llvm dump", 0);
-  printf("Generated LLVM IR:\n");
-  LLVMDumpModule(llvm_gen.module);
+  {
+    Str_View str_view = str_view_from_cstr(LLVMPrintModuleToString(llvm_gen.module));
+    file_write("build/llvm.out", str_view);
+    LLVMDisposeMessage((C8*)str_view.base);
+  }
+
 
   profile_stage_begin("llvm verify", 0);
   char *verify_error = NULL;

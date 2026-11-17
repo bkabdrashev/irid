@@ -1,6 +1,7 @@
 I32_MAX :  2147483647
 I32_MIN : -2147483647 - 1
 I32 : #type 32'#bits(I32_MIN..I32_MAX)
+F : #type I32
 
-v: I32
-v
+foo:(x:I32; f: F)->()
+foo(0; 1);
