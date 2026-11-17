@@ -330,6 +330,7 @@ Arena* arena_init(Umi capacity) {
 
 #define arena_push_type(arena, type, length) arena_push((arena), sizeof(type) * (length))
 #define arena_push_zero_type(arena, type, length) arena_push_zero((arena), sizeof(type) * (length))
+#define memset_zero_type(ptr, type, length) memset((ptr), 0, sizeof(type) * (length))
 
 void arena_reserve(Arena* arena, void* base, Umi size) {
   assert(arena->base <= (C8*)base);

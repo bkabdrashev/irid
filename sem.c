@@ -445,13 +445,15 @@ Str_View str_view_from_sem(Arena* arena, Fun_Pool funs) {
       string_builder_push_cstr(&sb, " = { ");
       for (I32 b = 0; b < fun->blocks->length; b++) {
         Block* block = fun->blocks->base[b];
-        Type* type = var->block_types[block->id];
-        if (type) {
-          string_builder_push_blockid(&sb, block);
-          string_builder_push_cstr(&sb, ": ");
-          string_builder_push_type(&sb, type);
-          if (b + 1 < fun->blocks->length) {
-            string_builder_push_cstr(&sb, ", ");
+        if (var->block_types) {
+          Type* type = var->block_types[block->id];
+          if (type) {
+            string_builder_push_blockid(&sb, block);
+            string_builder_push_cstr(&sb, ": ");
+            string_builder_push_type(&sb, type);
+            if (b + 1 < fun->blocks->length) {
+              string_builder_push_cstr(&sb, ", ");
+            }
           }
         }
       }
@@ -2431,13 +2433,42 @@ Type* sem_join_field_type(Join* join, Str* name) {
   return result;
 }
 
+void sem_var_at_block_init(Block* block, Var* var) {
+  if (var->current_fun != sem.current_fun) {
+    I32 length = sem.current_fun->blocks->length;
+    if (var->global) {
+      length = irgen.block_length_max;
+      if (var->block_types) {
+        memset_zero_type(var->block_types, Type*, length);
+      }
+      else {
+        var->block_types = arena_push_zero_type(sem.perm_arena, Type*, length);
+      }
+    }
+    else {
+      var->block_types = arena_push_zero_type(sem.perm_arena, Type*, length);
+    }
+    var->current_fun = sem.current_fun;
+  }
+}
+
+void sem_var_at_block_put(Block* block, Var* var, Type* type) {
+  sem_var_at_block_init(block, var);
+  var->block_types[block->id] = type;
+}
+
+Type* sem_var_at_block(Block* block, Var* var) {
+  sem_var_at_block_init(block, var);
+  return var->block_types[block->id];
+}
+
 void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
   Sem_Narrowed* narrowed = arena_push(sem.temp_arena, sizeof(Sem_Narrowed));
                 narrowed->var  = var;
-                narrowed->type = var->block_types[tasks->block->id];
+                narrowed->type = sem_var_at_block(tasks->block, var);
                 narrowed->next = tasks->narrowed;
   tasks->narrowed = narrowed;
-  var->block_types[tasks->block->id] = type;
+  sem_var_at_block_put(tasks->block, var, type);
   if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
     Type* old_type = type_of_var(tasks->block, var->parent);
     Join* old_join = old_type->join;
@@ -2771,12 +2802,10 @@ void sem_narrow_eqz_ir(Sem_Tasks* tasks, Ir* cond_ir) {
 void sem_unnarrow(Sem_Tasks* tasks) {
   while (tasks->narrowed) {
     Sem_Narrowed* narrowed = tasks->narrowed;
-    narrowed->var->block_types[tasks->block->id] = narrowed->type;
+    sem_var_at_block_put(tasks->block, narrowed->var, narrowed->type);
     tasks->narrowed = narrowed->next;
   }
-  Var*  var = tasks->var;
-  Type* old = tasks->type;
-  var->block_types[tasks->block->id] = old;
+  sem_var_at_block_put(tasks->block, tasks->var, tasks->type);
 }
 
 B8 sem_dominates(Block* one, Block* two);
@@ -2785,7 +2814,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
     return var->declared;
   }
   {
-    Type* type = var->block_types[block->id];
+    Type* type = sem_var_at_block(block, var);
     if (type) return type;
   }
 
@@ -2793,7 +2822,7 @@ Type* type_of_var_rec(Block* block, Var* var) {
 
   if (block->is_loop_head) {
     type = var->declared;
-    var->block_types[block->id] = type;
+    sem_var_at_block_put(block, var, type);
 
     B8 is_not_assigned = false;
     for (I32 i = 0; i < block->preds.length; i++) {
@@ -2813,11 +2842,11 @@ Type* type_of_var_rec(Block* block, Var* var) {
       type = type_not_assigned(type);
     }
 
-    var->block_types[block->id] = type;
+    sem_var_at_block_put(block, var, type);
     return type;
   }
 
-  var->block_types[block->id] = type;
+  sem_var_at_block_put(block, var, type);
 
   B8 is_not_assigned = false;
   for (I32 i = 0; i < block->preds.length; i++) {
@@ -2865,17 +2894,13 @@ Type* type_of_var_rec(Block* block, Var* var) {
     type = type_not_assigned(type);
   }
 
-  var->block_types[block->id] = type;
+  sem_var_at_block_put(block, var, type);
   return type;
 }
 
 Type* type_of_var(Block* block, Var* var) {
   void* temp_arena_mark = arena_mark(sem.temp_arena);
   Type* type = type_of_var_rec(block, var);
-  if (type->kind == Type_Kind_none) {
-    type = var->declared ? var->declared : sem.type_none;
-    var->block_types[block->id] = type;
-  }
   arena_release_mark(sem.temp_arena, temp_arena_mark);
   return type;
 }
@@ -2901,12 +2926,8 @@ Type* type_of_var_defined(Block* block, Var* var, Loc loc) {
     result = type_record(new_record);
   }
   else {
-    if (var->name == str_from_cstr("snake_n")) {
-      printf("break!");
-    }
     result = type_of_var(block, var);
     if (has_flag(result->flag, Type_Flag_not_assigned)) {
-      assert(0);
       sem_error_var(Diag_Code_not_assigned, loc, var);
     }
   }
@@ -3100,7 +3121,7 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
   }
   if (var->kind == Var_Kind_none || var->kind == Var_Kind_pointee) {
     var->declared = type_join(var->declared, type);
-    var->block_types[block->id] = type;
+    sem_var_at_block_put(block, var, type);
   }
   else {
     if (type_is_subtype(block, type, var->declared)) {
@@ -3132,7 +3153,7 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
           type_of_var_put(block, 0, var->vars[i], array->types[i]);
         }
       }
-      var->block_types[block->id] = type;
+      sem_var_at_block_put(block, var, type);
     }
     else {
       sem_error_type_mismatch(sem.current_ir->loc, var->declared, type);
@@ -3157,14 +3178,6 @@ Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
        var->state    = Var_State_resolved;
        var->kind     = Var_Kind_declared;
   sem_var_kind(var);
-  I32 blocks_length = 0;
-  if (var->global) {
-    blocks_length = irgen.block_length_max;
-  }
-  else {
-    blocks_length = sem.current_fun->blocks->length;
-  }
-  var->block_types    = arena_push_zero(sem.perm_arena, blocks_length * sizeof(Type*));
   sem_record_declare_fields(var, type);
 
   return var;
@@ -3248,7 +3261,7 @@ void sem_var_not_assigned(Block* block, Var* var) {
     }
   }
   else {
-    var->block_types[block->id] = type_not_assigned(var->declared);
+    sem_var_at_block_put(block, var, type_not_assigned(var->declared));
   }
 }
 

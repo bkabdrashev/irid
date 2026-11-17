@@ -153,6 +153,7 @@ struct Var {
   Type*   declared;
   Var**   vars;
   Hash_Map join_vars; // common fields of joined records, keyed by name + offset
+  Fun*     current_fun;
   Type**   block_types;
 };
 
