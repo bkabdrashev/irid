@@ -59,16 +59,17 @@ typedef enum Ir_Kind {
 
   Ir_Kind_fun  = 136,
   Ir_Kind_arg  = 137,
-  Ir_Kind_arg_declare = 138,
-  Ir_Kind_macro_par  = 139,
+  Ir_Kind_def_declare = 138,
+  Ir_Kind_macro_par   = 139,
+  Ir_Kind_typeof_load = 140,
 
-  Ir_Kind_int_cast  = 140,
-  Ir_Kind_record_cast = 141,
-  Ir_Kind_array_cast  = 142,
-  Ir_Kind_span_from_array_cast = 143,
-  Ir_Kind_float_cast          = 144,
-  Ir_Kind_float_from_int_cast = 145,
-  Ir_Kind_int_from_float_cast = 146,
+  Ir_Kind_int_cast             = 141,
+  Ir_Kind_record_cast          = 142,
+  Ir_Kind_array_cast           = 143,
+  Ir_Kind_span_from_array_cast = 144,
+  Ir_Kind_float_cast           = 145,
+  Ir_Kind_float_from_int_cast  = 146,
+  Ir_Kind_int_from_float_cast  = 147,
 
   Ir_Kind_foreign = 150,
   Ir_Kind_bits    = 151,
@@ -307,6 +308,7 @@ typedef enum Fun_Kind {
   Fun_Kind_none  = 0,
   Fun_Kind_macro = 1,
   Fun_Kind_type  = 2,
+  Fun_Kind_temp  = 3,
 } Fun_Kind;
 
 struct Fun {
@@ -466,6 +468,9 @@ void string_builder_push_irid(String_Builder* sb, Ir* ir) {
   else if (ir->kind == Ir_Kind_load && ir->unary->kind == Ir_Kind_var) {
     string_builder_push_var(sb, ir->unary->var);
   }
+  else if (ir->kind == Ir_Kind_typeof_load && ir->unary->kind == Ir_Kind_var) {
+    string_builder_push_var(sb, ir->unary->var);
+  }
   else if (ir == irgen.irid_len) {
     string_builder_push_cstr(sb, "len");
   }
@@ -561,7 +566,7 @@ void string_builder_push_ir(String_Builder* sb, Ir* ir) {
     string_builder_push_cstr(sb, "maybe using ");
     string_builder_push_str(sb, ir->maybe_using.name);
   break;
-  case Ir_Kind_arg_declare:
+  case Ir_Kind_def_declare:
   case Ir_Kind_declare: {
     Var* var = ir->declare.var;
     string_builder_push_cstr(sb, "declare ");
@@ -917,13 +922,22 @@ Ir* irgen_push_declare(Var* var) {
   return irgen_push(ir);
 }
 
-Ir* irgen_push_arg_declare(Var* var) {
-  Ir ir = { .kind = Ir_Kind_arg_declare, .declare = { .var = var }};
+Ir* irgen_push_def_declare(Var* var) {
+  Ir ir = { .kind = Ir_Kind_def_declare, .declare = { .var = var }};
   return irgen_push(ir);
 }
 
 Ir* irgen_push_unary(Ir_Kind kind, Ir* one) {
   Ir ir = { .kind = kind, .unary = one };
+  return irgen_push(ir);
+}
+
+Ir* irgen_push_load(Ir* one) {
+  Fun* fun = irgen_fun_top();
+  Ir ir = { .kind = Ir_Kind_load, .unary = one };
+  if (fun->kind == Fun_Kind_temp) {
+    ir.kind = Ir_Kind_typeof_load;
+  }
   return irgen_push(ir);
 }
 
@@ -1032,6 +1046,7 @@ Sym* irgen_sym_get(Str* str) {
 
 Fun* irgen_fun_temp(void) {
   Fun* fun = &new(irgen.funs_temp);
+  fun->kind = Fun_Kind_temp;
   add(irgen.fun_stack, fun);
   fun->name = 0;
   {
@@ -1268,7 +1283,7 @@ void irgen_assign(Ast* lhs, Ir* rhs) {
     }
   } break;
   case Ast_Kind_record: {
-    if (rhs->kind == Ir_Kind_load) {
+    if (rhs->kind == Ir_Kind_load || rhs->kind == Ir_Kind_typeof_load) {
       rhs = rhs->unary;
     }
     for (I32 i = 0; i < lhs->list->length; i++) {
@@ -1283,7 +1298,7 @@ void irgen_assign(Ast* lhs, Ir* rhs) {
   } break;
   default : {
     Ir* lhs_ir = irgen_ast(lhs);
-    if (lhs_ir->kind == Ir_Kind_load) {
+    if (lhs_ir->kind == Ir_Kind_load || lhs_ir->kind == Ir_Kind_typeof_load) {
       lhs_ir->kind = Ir_Kind_store;
       lhs_ir->binary.two = rhs;
     }
@@ -1327,7 +1342,7 @@ Ir* irgen_ast(Ast* ast) {
     Sym* sym = irgen_sym_get(str);
     if (sym) {
       if (sym->kind == Sym_Kind_variable) {
-        result = irgen_push_unary(Ir_Kind_load, sym->ir);
+        result = irgen_push_load(sym->ir);
       }
       else if (sym->kind == Sym_Kind_parameter) {
         result = sym->ir;
@@ -1347,7 +1362,7 @@ Ir* irgen_ast(Ast* ast) {
     }
     else {
       Ir* maybe = irgen_push_maybe_using(str, irgen.uses);
-      result = irgen_push_unary(Ir_Kind_load, maybe);
+      result = irgen_push_load(maybe);
     }
   } break;
   case Ast_Kind_import: {
@@ -1357,11 +1372,11 @@ Ir* irgen_ast(Ast* ast) {
     Ir* lhs = irgen_ast(ast->binary.lhs);
     if (ast->binary.rhs->kind == Ast_Kind_name) {
       Str* str = str_from_loc(ast->binary.rhs->loc);
-      if (lhs->kind == Ir_Kind_load) {
+      if (lhs->kind == Ir_Kind_load || lhs->kind == Ir_Kind_typeof_load) {
         lhs->kind = Ir_Kind_name_offset;
         lhs->name_offset.of = lhs->unary;
         lhs->name_offset.at = str;
-        result = irgen_push_unary(Ir_Kind_load, lhs);
+        result = irgen_push_load(lhs);
       }
       else {
         result = irgen_push_name_offset(lhs, str);
@@ -1369,11 +1384,11 @@ Ir* irgen_ast(Ast* ast) {
     }
     else if (ast->binary.rhs->kind == Ast_Kind_int) {
       I64 i64 = i64_from_loc(ast->binary.rhs->loc);
-      if (lhs->kind == Ir_Kind_load) {
+      if (lhs->kind == Ir_Kind_load || lhs->kind == Ir_Kind_typeof_load) {
         lhs->kind = Ir_Kind_position_offset;
         lhs->position.of = lhs->unary;
         lhs->position.at = i64;
-        result = irgen_push_unary(Ir_Kind_load, lhs);
+        result = irgen_push_load(lhs);
       }
       else {
         result = irgen_push_position_offset(lhs, i64);
@@ -1397,7 +1412,7 @@ Ir* irgen_ast(Ast* ast) {
       Str* str = scope->list[j];
       Sym* sym = hash_map_get(*scope, str);
       rec->names[j] = str;
-      rec->irs[j]   = irgen_push_unary(Ir_Kind_load, sym->ir);
+      rec->irs[j]   = irgen_push_load(sym->ir);
       hash_map_put_i32(&rec->position_from_name, str, j);
     }
 
@@ -1451,9 +1466,9 @@ Ir* irgen_ast(Ast* ast) {
     irgen_push_binary(Ir_Kind_store, block_ir, irgen.irid_none);
 
     irgen_ast(ast->binary.rhs);
-    result = irgen_push_unary(Ir_Kind_load, block_ir);
+    result = irgen_push_load(block_ir);
     block_var->declared_ir = result;
-    irgen_push_declare(block_var);
+    irgen_push_def_declare(block_var);
 
     irgen_scope_leave();
     // arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
@@ -1476,7 +1491,7 @@ Ir* irgen_ast(Ast* ast) {
   case Ast_Kind_subscript: {
     Ir* rhs = irgen_ast(ast->binary.rhs);
     Ir* lhs = irgen_ast(ast->binary.lhs);
-    if (lhs->kind == Ir_Kind_load) {
+    if (lhs->kind == Ir_Kind_load || lhs->kind == Ir_Kind_typeof_load) {
       Ir* ptr_loaded = lhs->unary;
       irgen_pop();
       Ir* offset = irgen_push_binary(Ir_Kind_ptr_offset, ptr_loaded, rhs);
@@ -1569,7 +1584,7 @@ Ir* irgen_ast(Ast* ast) {
     Ir* false_value = irgen_push_int(0);
     Ir* true_value = irgen_push_int(1);
     or_var->declared_ir = irgen_push_binary(Ir_Kind_range, false_value, true_value);
-    irgen_push_declare(or_var);
+    irgen_push_def_declare(or_var);
 
     Ast* lhs = ast->binary.lhs;
     Ir* lhs_ir = irgen_ast(lhs);
@@ -1726,7 +1741,7 @@ Ir* irgen_ast(Ast* ast) {
 
     result = irgen_push_unary(Ir_Kind_load, else_ir);
     else_var->declared_ir = result;
-    irgen_push_declare(else_var);
+    irgen_push_def_declare(else_var);
 
   } break;
 
@@ -1826,7 +1841,7 @@ Ir* irgen_ast(Ast* ast) {
         arg_var->name = str_from_cstr("__arg");
         fun->arg_var = irgen_push_arg(arg_var);
         irgen_var_declare(arg_var, lhs);
-        irgen_push_arg_declare(arg_var);
+        irgen_push_def_declare(arg_var);
         Rec* rec = fun->arg_var->var->declared_ir->rec;
         for (I32 i = 0; i < rec->length; i++) {
           Str* name = rec->names[i];
@@ -1849,7 +1864,7 @@ Ir* irgen_ast(Ast* ast) {
         sym->ir = irgen_push_arg(arg_var);
         fun->arg_var = sym->ir;
         irgen_var_declare(arg_var, lhs->declare.rhs);
-        irgen_push_arg_declare(arg_var);
+        irgen_push_def_declare(arg_var);
         irgen_sym_put(arg_var->name, sym);
       }
       else if (lhs->kind == Ast_Kind_name) {
@@ -2011,7 +2026,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
          node->loc  = ast->loc;
          node->list = arena_push_zero(irgen.perm_arena, sizeof(Ast_List));
     irgen_var_declare(arg_var, node);
-    irgen_push_arg_declare(arg_var);
+    irgen_push_def_declare(arg_var);
   }
   irgen.irid_none = irgen_push_none();
 

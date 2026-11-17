@@ -2851,6 +2851,7 @@ Type* type_of_var(Block* block, Var* var) {
 Type* type_of_var_defined(Block* block, Var* var, Loc loc) {
   Type* type = type_of_var(block, var);
   if (has_flag(type->flag, Type_Flag_undefined)) {
+    assert(0);
     sem_diag(Diag_Code_undefined_value, loc);
   }
   return type;
@@ -3354,7 +3355,7 @@ void sem_ir(Block* block, Ir* ir) {
     result = sem_var_declare(ir->declare.var);
     ir->declare.var->block_types[block->id] = type_undefined(result);
   } break;
-  case Ir_Kind_arg_declare: {
+  case Ir_Kind_def_declare: {
     result = sem_var_declare(ir->declare.var);
   } break;
   case Ir_Kind_arg: {
@@ -3828,6 +3829,36 @@ void sem_ir(Block* block, Ir* ir) {
   } break;
   case Ir_Kind_name_offset: {
     result = sem_name_offset(block, ir);
+  } break;
+  case Ir_Kind_typeof_load: {
+    Type* ptr_type = type_of_ir(ir->unary);
+    if (ptr_type->kind == Type_Kind_ptr) {
+      Pointer* pointer = ptr_type->pointer;
+      Hash_Set stack_vars = pointer->stack_vars;
+      if (stack_vars.len >= 1) {
+        for (I32 i = 0; i < stack_vars.len; i++) {
+          sem_var_declare(stack_vars.list[i]);
+        }
+        Var* var = stack_vars.list[0];
+        result = var->declared;
+        for (I32 i = 1; i < stack_vars.len; i++) {
+          var = stack_vars.list[i];
+          result = type_join(result, var->declared);
+        }
+      }
+      if (result == sem.type_none) {
+        result = type_pointer_declared(ptr_type->pointer);
+      }
+    }
+    else if (ptr_type->kind == Type_Kind_array) {
+      if (ptr_type->array->length == 0) {
+        sem_error_type(Diag_Code_invalid_dereference, ir->loc, ptr_type);
+      }
+      result = ptr_type->array->types[0];
+    }
+    else {
+      sem_error_type(Diag_Code_invalid_dereference, ir->loc, ptr_type);
+    }
   } break;
   case Ir_Kind_load: {
     Type* ptr_type = type_of_ir(ir->unary);
