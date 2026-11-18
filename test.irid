@@ -2,6 +2,6 @@ I32_MAX :  2147483647
 I32_MIN : -2147483647 - 1
 I32 : #type 32'#bits(I32_MIN..I32_MAX)
 
-a:(x:I32; y:I32);
-while 0..1
-  a.x
+v:(t:I32 0; a:I32)\(t:I32 1; b:I32);
+if (v.t == 1)
+  v.b
