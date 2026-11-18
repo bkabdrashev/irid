@@ -14,12 +14,13 @@
 #include <string.h>
 #include <ctype.h>
 
-#include "profile.c"
 #include "common.c"
 #include "str.c"
 #include "source.c"
 #include "token.c"
 #include "diag.c"
+#include "profile.c"
+
 #include "lex.c"
 #include "parse.c"
 #include "irgen.c"

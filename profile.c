@@ -15,7 +15,6 @@
 
 typedef struct {
   const char* name;
-  uint64_t    lines;
   uint64_t    time_start_ns;
   uint64_t    time_ns;
   uint64_t    alloc_bytes;
@@ -35,10 +34,9 @@ static uint64_t profile_peak_live_bytes;
 static uint64_t profile_run_start_ns;
 static uint64_t profile_run_end_ns;
 static uint64_t profile_end_live_bytes;
-static uint64_t profile_default_lines;
 
-static const char* profile_source_path;
-static uint64_t    profile_source_lines;
+static Sources* profile_sources;
+static uint64_t profile_source_lines;
 
 static int profile_is_enabled(void) {
   static int enabled = -1;
@@ -68,15 +66,11 @@ void profile_run_begin(void) {
   profile_run_start_ns    = profile_now_ns();
   profile_run_end_ns      = 0;
   profile_end_live_bytes  = 0;
-  profile_default_lines   = 0;
-  profile_source_path     = NULL;
-  profile_source_lines    = 0;
+  profile_sources         = NULL;
 }
 
-void profile_set_input(const char* source_path, uint64_t source_lines) {
-  profile_source_path   = source_path;
-  profile_source_lines  = source_lines;
-  profile_default_lines = source_lines;
+void profile_set_input(Sources* sources) {
+  profile_sources = sources;
 }
 
 static void profile_stage_close(int32_t index) {
@@ -88,7 +82,7 @@ static void profile_stage_close(int32_t index) {
   }
 }
 
-void profile_stage_begin(const char* name, uint64_t lines) {
+void profile_stage_begin(const char* name) {
   if (!profile_active) return;
   if (profile_current >= 0) {
     profile_stage_close(profile_current);
@@ -99,7 +93,6 @@ void profile_stage_begin(const char* name, uint64_t lines) {
   Profile_Stage* stage = &profile_stages[profile_stage_count++];
   memset(stage, 0, sizeof(*stage));
   stage->name          = name;
-  stage->lines         = lines;
   stage->time_start_ns = profile_now_ns();
   stage->live_start    = profile_live_bytes;
   stage->live_peak     = profile_live_bytes;
@@ -120,7 +113,7 @@ void profile_run_end(void) {
   profile_active         = 0;
 }
 
-void profile_arena_push(uint64_t requested_bytes, uint64_t arena_bytes) {
+void profile_arena_push(Umi requested_bytes, Umi arena_bytes) {
   if (!profile_active) return;
   profile_live_bytes += arena_bytes;
   if (profile_live_bytes > profile_peak_live_bytes) {
@@ -135,7 +128,7 @@ void profile_arena_push(uint64_t requested_bytes, uint64_t arena_bytes) {
   }
 }
 
-void profile_arena_extend(int64_t arena_delta, uint64_t requested_bytes) {
+void profile_arena_extend(Smi arena_delta, Umi requested_bytes) {
   if (!profile_active) return;
   if (arena_delta > 0) {
     profile_live_bytes += (uint64_t)arena_delta;
@@ -156,7 +149,7 @@ void profile_arena_extend(int64_t arena_delta, uint64_t requested_bytes) {
   }
 }
 
-void profile_arena_release(uint64_t bytes) {
+void profile_arena_release(Umi bytes) {
   if (!profile_active) return;
   profile_live_bytes = profile_live_bytes >= bytes ? profile_live_bytes - bytes : 0;
 }
@@ -251,11 +244,13 @@ void profile_print(FILE* out) {
   }
 
   fprintf(out, "\nIrid compiler statistics\n");
-  if (profile_source_path) {
-    fprintf(out, "  source : %s (%llu lines)\n",
-            profile_source_path, (unsigned long long)profile_source_lines);
+  uint64_t lines = 0;
+  if (profile_sources) {
+    for (I32 i = 0; i < profile_sources->pool.length; i++) {
+      lines += source_line_count(&profile_sources->pool.base[i]);
+    }
+    fprintf(out, "  total lines parsed: %lu\n", lines);
   }
-  fprintf(out, "  total  : %llu lines\n", (unsigned long long)profile_default_lines);
   fprintf(out, "  memory : arena only; allocated = requested bytes,\n");
   fprintf(out, "           used = live arena bytes incl. guard space; LLVM excluded\n\n");
 
@@ -268,7 +263,6 @@ void profile_print(FILE* out) {
 
   for (int32_t i = 0; i < profile_stage_count; i++) {
     Profile_Stage* stage = &profile_stages[i];
-    uint64_t lines = stage->lines ? stage->lines : profile_default_lines;
     double share = total_time ? 100.0 * (double)stage->time_ns / (double)total_time : 0.0;
     int64_t growth = (int64_t)stage->live_end - (int64_t)stage->live_start;
     fprintf(out, "%-20s %9s %5.1f%% %10s %7llu %10s %10s %10s %10s %11s %10s\n",
@@ -289,7 +283,6 @@ void profile_print(FILE* out) {
           "--------------------", "---------", "------", "----------", "-------",
           "----------", "----------", "----------", "----------", "-----------", "----------");
   {
-    uint64_t lines = profile_default_lines;
     int64_t growth = (int64_t)profile_end_live_bytes;
     fprintf(out, "%-20s %9s %5.1f%% %10s %7llu %10s %10s %10s %10s %11s %10s\n",
             "total",
@@ -307,10 +300,10 @@ void profile_print(FILE* out) {
 
   if (profile_source_lines) {
     fprintf(out, "\nper input line (%llu):  %s allocated   %s peak used   throughput %s\n",
-            (unsigned long long)profile_default_lines,
-            profile_fmt_per_line(total_alloc, profile_default_lines),
-            profile_fmt_per_line(profile_peak_live_bytes, profile_default_lines),
-            profile_fmt_lines_per_time(profile_default_lines, total_time));
+            (unsigned long long)lines,
+            profile_fmt_per_line(total_alloc, lines),
+            profile_fmt_per_line(profile_peak_live_bytes, lines),
+            profile_fmt_lines_per_time(lines, total_time));
     fprintf(out, "per source line (%llu): %s allocated   %s peak used   throughput %s\n",
             (unsigned long long)profile_source_lines,
             profile_fmt_per_line(total_alloc, profile_source_lines),

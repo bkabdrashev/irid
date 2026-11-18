@@ -944,7 +944,7 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
     }
   }
 
-  profile_stage_begin("llvm dump", 0);
+  profile_stage_begin("llvm dump");
   {
     Str_View str_view = str_view_from_cstr(LLVMPrintModuleToString(llvm_gen.module));
     file_write("build/llvm.out", str_view);
@@ -952,7 +952,7 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
   }
 
 
-  profile_stage_begin("llvm verify", 0);
+  profile_stage_begin("llvm verify");
   char *verify_error = NULL;
   if (LLVMVerifyModule(llvm_gen.module, LLVMAbortProcessAction, &verify_error)) {
     fprintf(stderr, "Error verifying module: %s\n", verify_error);
@@ -963,7 +963,7 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
     LLVMDisposeMessage(verify_error);
   }
 
-  profile_stage_begin("jit setup", 0);
+  profile_stage_begin("jit setup");
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   LLVMInitializeNativeAsmParser();
@@ -1020,10 +1020,10 @@ I32 llvm_funs(Arena* arena, Fun_Pool funs) {
   }
 
   void (*jit_main)() = (void (*)())addr;
-  profile_stage_begin("execute (jit)", 0);
+  profile_stage_begin("execute (jit)");
   jit_main();
 
-  profile_stage_begin("jit cleanup", 0);
+  profile_stage_begin("jit cleanup");
   // LLVMOrcDisposeDefinitionGenerator(sdl_generator);
   LLVMDisposeMessage(triple);
   LLVMOrcDisposeLLJIT(jit);
