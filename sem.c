@@ -3257,6 +3257,32 @@ Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
   return var;
 }
 
+Cell* sem_cell_find(Cells* cells, I32 offset) {
+  for (I32 i = 0; i < cells->length; i++) {
+    if (cells->base[i].offset == offset) {
+      return &cells->base[i];
+    }
+  }
+  return 0;
+}
+
+Cell* sem_cell_get_or_add(Cells* cells, I32 offset) {
+  Cell* cell = sem_cell_find(cells, offset);
+  if (cell) {
+    return cell;
+  }
+
+  I32 i = cells->length;
+  while (i > 0 && cells->base[i-1].offset > offset) {
+    cells->base[i] = cells->base[i-1];
+    i--;
+  }
+  cells->base[i].offset      = offset;
+  cells->base[i].block_types = 0;
+  cells->length++;
+  return &cells->base[i];
+}
+
 void sem_record_declare_fields(Var* var, Type* type) {
   if (type->kind == Type_Kind_record) {
     var->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
@@ -3273,12 +3299,33 @@ void sem_record_declare_fields(Var* var, Type* type) {
     }
     var->vars = arena_push(sem.perm_arena, join->records.len*sizeof(Var*));
     var->join_vars = hash_map_init(sem.perm_arena, max(total_length, 1));
-    fa_init(sem.perm_arena, var->cells, total_length);
+    fa_init(sem.perm_arena, var->cells, max(total_length, 1));
+
     // v:(t:I8; a:I32) \ (t:I8; b:I16; c:I16)
-    // [0, 16, 32]
+    // cells: [0, 16, 32]
+    for (I32 i = 0; i < join->records.len; i++) {
+      Type* element = join->records.list[i];
+      Record* record = element->record;
+      for (I32 j = 0; j < record->length; j++) {
+        I32 offset = record->offsets[j];
+        if (offset >= 0) {
+          sem_cell_get_or_add(var->cells, offset);
+        }
+      }
+    }
 
     for (I32 i = 0; i < join->records.len; i++) {
-      var->vars[i] = sem_var_init(i, irgen.str_nil, var, join->records.list[i]);
+      Type* element = join->records.list[i];
+      var->vars[i] = sem_var_init(i, irgen.str_nil, var, element);
+
+      Record* record = element->record;
+      for (I32 j = 0; j < record->length; j++) {
+        I32 offset = record->offsets[j];
+        if (offset >= 0) {
+          Cell* cell = sem_cell_find(var->cells, offset);
+          var->vars[i]->vars[j]->cell = cell;
+        }
+      }
     }
   }
   else if (type->kind == Type_Kind_array) {
