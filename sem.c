@@ -1846,7 +1846,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     if (is_size_defined) {
       type_joined = type_size_defined(bits_size, type_joined);
     }
-    var_common = sem_var_init(0, name, var, type_joined);
+    var_common = sem_var_init(offset, name, var, type_joined);
 
     if (has_flag(var_type->flag, Type_Flag_not_assigned)) {
       sem_var_not_assigned(block, var_common);
@@ -2478,43 +2478,52 @@ Type* sem_var_at_block(Block* block, Var* var) {
   return var->block_types[block->id];
 }
 
+void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type);
+Type* sem_narrow_var_parent_join_records(Var* var, Type* old_type, Type* type_kid) {
+  Join* old_join = old_type->join;
+  Join* new_join = arena_push(sem.perm_arena, sizeof(Join));
+  new_join->records = hash_set_init(sem.perm_arena, old_join->records.len);
+
+  for (I32 i = 0; i < old_join->records.len; i++) {
+    Type* element = old_join->records.list[i];
+    Record* record = element->record;
+    if (record->length > 0) {
+      I32 position = hash_map_i32_get_i32(record->position_from_offset, var->index);
+      Type* type_field = record->types[position];
+      Type* type_field_new = type_meet(type_field, type_kid);
+      if (type_field_new != sem.type_none) {
+        hash_set_put(&new_join->records, element);
+      }
+      else {
+        hash_set_put(&new_join->records, sem.type_empty_record);
+      }
+    }
+    else {
+      hash_set_put(&new_join->records, element);
+    }
+  }
+  Type* new_type = type_join_records(new_join);
+  return new_type;
+}
+
 void sem_narrow_var(Sem_Tasks* tasks, Var* var, Type* type) {
   Sem_Narrowed* narrowed = arena_push(sem.temp_arena, sizeof(Sem_Narrowed));
                 narrowed->var  = var;
                 narrowed->type = sem_var_at_block(tasks->block, var);
                 narrowed->next = tasks->narrowed;
   tasks->narrowed = narrowed;
-  sem_var_at_block_put(tasks->block, var, type);
-  if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
-    Type* old_type = type_of_var(tasks->block, var->parent);
-    Join* old_join = old_type->join;
-    Join* new_join = arena_push(sem.perm_arena, sizeof(Join));
-    new_join->records = hash_set_init(sem.perm_arena, old_join->records.len);
 
-    for (I32 i = 0; i < old_join->records.len; i++) {
-      Type* element = old_join->records.list[i];
-      Record* record = element->record;
-      if (record->length > 0) {
-        I32 position = hash_map_i32_get_i32(record->position_from_offset, var->index);
-        Type* type_field = record->types[position];
-        Type* type_field_new = type_meet(type_field, type);
-        if (type_field_new != sem.type_none) {
-          hash_set_put(&new_join->records, element);
-        }
-        else {
-          hash_set_put(&new_join->records, sem.type_empty_record);
-        }
-      }
-      else {
-        hash_set_put(&new_join->records, element);
-      }
+  if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
+    Type* old_type_parent = type_of_var(tasks->block, var->parent);
+    Type* new_type_parent = sem_narrow_var_parent_join_records(var, old_type_parent, type);
+    if (has_flag(old_type_parent->flag, Type_Flag_not_assigned)) {
+      new_type_parent = type_not_assigned(new_type_parent);
     }
-    Type* new_type = type_join_records(new_join);
-    if (new_type != old_type) {
-      sem_narrow_var(tasks, var->parent, new_type);
+    if (new_type_parent != old_type_parent) {
+      sem_narrow_var(tasks, var->parent, new_type_parent);
     }
   }
-
+  sem_var_at_block_put(tasks->block, var, type);
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
@@ -2949,19 +2958,41 @@ Type* type_of_var_defined(Block* block, Var* var, Loc loc) {
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     Type* type = type_of_var(block, var);
-    assert(type->kind == Type_Kind_join_records);
     Join* join = type->join;
-    Join* new_join = arena_push(sem.perm_arena, sizeof(Join));
-          new_join->records = hash_set_init(sem.perm_arena, join->records.len);
-    for (I32 i = 0; i < join->records.len; i++) {
-      Var*  var_rec = var->vars[i];
-      Type* element = join->records.list[i];
+
+    Record* first = 0;
+    for (I32 e = 0; e < join->records.len; e++) {
+      Type* element = join->records.list[e];
       if (element->record->length > 0) {
-        Type* new_element = type_of_var_record(block, var_rec, loc);
-        hash_set_put(&new_join->records, new_element);
+        first = element->record;
+        break;
       }
     }
-    result = type_join_records(new_join);
+
+    if (first) {
+      for (I32 i = 0; i < first->length; i++) {
+        Str* name = first->names[i];
+        if (!name) continue;
+
+        // A join field is only addressable if every non-empty variant has it.
+        B8 common = true;
+        for (I32 e = 0; e < join->records.len; e++) {
+          Type*  element = join->records.list[e];
+          Record* record = element->record;
+          if (record->length == 0) continue;
+          if (hash_map_get_i32(record->position_from_name, name) < 0) {
+            common = false;
+            break;
+          }
+        }
+        if (!common) continue;
+
+        Var* field = sem_get_var_by_name(block, sem.current_ir, var, name, first->offsets[i]);
+        type_of_var_defined(block, field, loc);
+      }
+    }
+
+    result = type;
   }
   else {
     result = type_of_var(block, var);
@@ -3191,6 +3222,11 @@ void type_of_var_put(Block* block, Ir** ir, Var* var, Type* type) {
           type_of_var_put(block, 0, var->vars[i], array->types[i]);
         }
       }
+
+      if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
+        Type* new_type_parent = sem_narrow_var_parent_join_records(var, var->parent->declared, type);
+        sem_var_at_block_put(block, var->parent, new_type_parent);
+      }
       sem_var_at_block_put(block, var, type);
     }
     else {
@@ -3297,13 +3333,6 @@ void sem_var_not_assigned(Block* block, Var* var) {
     for (I32 i = 0; i < var->declared->record->length; i++) {
       sem_var_not_assigned(block, var->vars[i]);
     }
-  }
-  else if (var->declared->kind == Type_Kind_join_records) {
-    Join* join = var->declared->join;
-    for (I32 i = 0; i < join->records.len; i++) {
-      sem_var_not_assigned(block, var->vars[i]);
-    }
-    sem_var_at_block_put(block, var, type_not_assigned(var->declared));
   }
   else {
     sem_var_at_block_put(block, var, type_not_assigned(var->declared));
