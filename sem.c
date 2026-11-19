@@ -3273,6 +3273,10 @@ void sem_record_declare_fields(Var* var, Type* type) {
     }
     var->vars = arena_push(sem.perm_arena, join->records.len*sizeof(Var*));
     var->join_vars = hash_map_init(sem.perm_arena, max(total_length, 1));
+    fa_init(sem.perm_arena, var->cells, total_length);
+    // v:(t:I8; a:I32) \ (t:I8; b:I16; c:I16)
+    // [0, 16, 32]
+
     for (I32 i = 0; i < join->records.len; i++) {
       var->vars[i] = sem_var_init(i, irgen.str_nil, var, join->records.list[i]);
     }

@@ -126,6 +126,18 @@ typedef struct Type Type;
 typedef struct Var Var;
 typedef struct Blocks Blocks;
 
+typedef struct Cell Cell;
+struct Cell {
+  I32    offset;
+  Type** block_types;
+};
+
+typedef struct Cells Cells;
+struct Cells {
+  I32   length;
+  Cell  base[];
+};
+
 typedef enum Var_State {
   Var_State_unresolved,
   Var_State_resolving,
@@ -152,6 +164,8 @@ struct Var {
   Blocks* blocks;
   Type*   declared;
   Var**   vars;
+  Cell*   cell;
+  Cells*  cells;
   Hash_Map join_vars; // common fields of joined records, keyed by name + offset
   Fun*     current_fun;
   Type**   block_types;
