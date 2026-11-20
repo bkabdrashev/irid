@@ -1789,7 +1789,8 @@ void sem_var_kind(Var* var) {
 }
 
 I64 sem_name_offset_combine(Str* name, I32 offset) {
-  I64 strid  = str_id(name);
+  I64 strid  = name->id;
+  assert(strid > 0);
   I64 result = strid << 32 | offset;
   return result;
 }

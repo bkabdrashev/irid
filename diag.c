@@ -208,7 +208,7 @@ Source* sources_add(Sources* sources, Str_View path) {
     path.length += extension.length+1;
   }
 
-  Str* internal_path = internal_from_str_view(sources->paths, path);
+  Str* internal_path = internal_from_str_view(&sources->paths, path);
   Str_View file_view = file_read(internal_path->base);
   if (file_view.length >= INT32_MAX) assert(0);
 
