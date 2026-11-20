@@ -127,12 +127,15 @@ typedef struct Var Var;
 typedef struct Blocks Blocks;
 
 typedef struct Cell Cell;
+typedef struct Cells Cells;
 struct Cell {
   I32    offset;
+  B8     global;
   Type** block_types;
+  Fun*   current_fun;
+  Cell** cells;
 };
 
-typedef struct Cells Cells;
 struct Cells {
   I32   length;
   Cell  base[];
@@ -157,7 +160,6 @@ struct Var {
   Var_Kind  kind;
   Var_State state;
   I32   index;
-  B8    global;
   Var*  parent;
   Str*  name;
   Ir*     declared_ir;
@@ -167,8 +169,6 @@ struct Var {
   Cell*   cell;
   Cells*  cells;
   Hash_Map join_vars; // common fields of joined records, keyed by name + offset
-  Fun*     current_fun;
-  Type**   block_types;
 };
 
 struct Ir {
@@ -841,7 +841,8 @@ Fun* irgen_fun_top(void) {
 Var* irgen_var_new(void) {
   Fun* fun = irgen_fun_top();
   Var* var = &new(irgen.vars);
-  var->global = irgen.scope_stack.length == 0;
+  var->cell = arena_push_zero_type(irgen.perm_arena, Cell, 1);
+  var->cell->global = irgen.scope_stack.length == 0;
   fa_extend(irgen.temp_var_arena, fun->vars, var);
   return var;
 }
@@ -1082,7 +1083,8 @@ Blocks* irgen_fun_temp_end() {
   Blocks* blocks = irgen_blocks_perm(fun->blocks);
   for (I32 i = 0; i < fun->vars->length; i++) {
     Var* temp_var = fun->vars->base[i];
-    temp_var->block_types = arena_push_zero(irgen.perm_arena, blocks->length * sizeof(Type*));
+    temp_var->cell = arena_push_zero_type(irgen.perm_arena, Cell, 1);
+    temp_var->cell->block_types = arena_push_zero(irgen.perm_arena, blocks->length * sizeof(Type*));
   }
 
   del(irgen.fun_stack);
@@ -1160,7 +1162,6 @@ void irgen_scope_enter(Ast* ast) {
       Var* var = irgen_var_new();
       var->kind = Var_Kind_declared;
       var->state = Var_State_unresolved;
-      var->global = irgen.scope_stack.length == 0;
       var->name = str;
 
       sym->kind = Sym_Kind_variable;
@@ -2055,7 +2056,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
     if (source->ast) {
       Var* var = irgen_var_new();
       var->state = Var_State_unresolved;
-      var->global = true;
+      var->cell->global = true;
       var->name = source->path;
       source->ir_var = irgen_push_var(var);
     }
