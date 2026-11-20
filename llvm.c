@@ -408,7 +408,7 @@ void llvm_ir(Ir* ir) {
     if (ir->var->kind == Var_Kind_constant) {
       result = llvm_var_init;
     }
-    else if (ir->var->global) {
+    else if (ir->var->cell->global) {
       if (ir->var->declared->kind == Type_Kind_fun) {
         result = llvm_of_fun(ir->var->declared->function->fun);
       }

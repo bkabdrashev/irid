@@ -1823,7 +1823,7 @@ I64 sem_name_offset_combine(Str* name, I32 offset) {
 
 Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type);
 void sem_record_declare_fields(Var* var, Type* type);
-void sem_var_not_assigned(Block* block, Var* var);
+void sem_cell_not_assigned(Block* block, Cell* cell, Type* declared);
 
 
 Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) {
@@ -1876,7 +1876,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     var_common->cell = sem_cell_find(var->cells, offset);
 
     if (has_flag(var_type->flag, Type_Flag_not_assigned)) {
-      sem_var_not_assigned(block, var_common);
+      sem_cell_not_assigned(block, var_common->cell, var_common->declared);
     }
 
     // for (I32 i = 0; i < join->records.len; i++) {
@@ -3107,7 +3107,7 @@ Type* type_auto_cast(Block* block, Ir** ir, Type* from, Type* to) {
                var->kind   = Var_Kind_none;
                var->state  = Var_State_unresolved;
                var->cell   = arena_push_zero_type(sem.perm_arena, Cell, 1);
-               var->cell->global = irgen.scope_stack.length == 0;
+               var->cell->global = sem.current_fun->global;
                var->name   = irgen.str_anon;
                var->declared_ir = two;
 
@@ -3212,14 +3212,14 @@ void type_of_cell_put(Block* block, Ir** ir, Cell* cell, Type* declared, Type* t
         }
       }
 
-      if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
-        Type* new_type_parent = sem_narrow_var_parent_join_records(var, var->parent->declared, type);
-        sem_cell_at_block_put(block, var->parent, new_type_parent);
-      }
-      sem_cell_at_block_put(block, var, type);
+      // if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
+      //   Type* new_type_parent = sem_narrow_var_parent_join_records(var, var->parent->declared, type);
+      //   sem_cell_at_block_put(block, var->parent, new_type_parent);
+      // }
+      sem_cell_at_block_put(block, cell, type);
     }
     else {
-      sem_error_type_mismatch(sem.current_ir->loc, var->declared, type);
+      sem_error_type_mismatch(sem.current_ir->loc, declared, type);
     }
   }
 }
@@ -3233,10 +3233,8 @@ void sem_block_preds_init(Block* block);
 
 Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
   Var* var = &new(irgen.vars);
-       var->global   = parent->global;
        var->index    = index;
        var->name     = name;
-       var->cell     = arena_push_zero_type(sem.perm_arena, Cell, 1);
        var->parent   = parent;
        var->declared = type;
        var->state    = Var_State_resolved;
@@ -3250,6 +3248,7 @@ Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
 Var* sem_var_cell_init(I32 index, Str* name, Var* parent, Type* type) {
   Var* var = sem_var_init(index, name, parent, type);
        var->cell = arena_push_zero_type(sem.perm_arena, Cell, 1);
+       var->cell->global  = parent->cell->global;
   return var;
 }
 
@@ -3349,14 +3348,14 @@ Type* sem_var_declare(Var* var) {
   return type;
 }
 
-void sem_var_not_assigned(Block* block, Var* var) {
-  if (var->declared->kind == Type_Kind_record) {
-    for (I32 i = 0; i < var->declared->record->length; i++) {
-      sem_var_not_assigned(block, var->vars[i]);
+void sem_cell_not_assigned(Block* block, Cell* cell, Type* declared) {
+  if (declared->kind == Type_Kind_record) {
+    for (I32 i = 0; i < declared->record->length; i++) {
+      sem_cell_not_assigned(block, cell->cells[i], declared->record->types[i]);
     }
   }
   else {
-    sem_cell_at_block_put(block, var, type_not_assigned(var->declared));
+    sem_cell_at_block_put(block, cell, type_not_assigned(declared));
   }
 }
 
@@ -3527,8 +3526,9 @@ void sem_ir(Block* block, Ir* ir) {
     result = type_array(str_array);
   } break;
   case Ir_Kind_declare: {
-    result = sem_var_declare(ir->declare.var);
-    sem_var_not_assigned(block, ir->declare.var);
+    Var* var = ir->declare.var;
+    result = sem_var_declare(var);
+    sem_cell_not_assigned(block, var->cell, var->declared);
   } break;
   case Ir_Kind_def_declare: {
     result = sem_var_declare(ir->declare.var);
@@ -4044,9 +4044,11 @@ void sem_ir(Block* block, Ir* ir) {
         for (I32 i = 0; i < stack_vars.len; i++) {
           sem_var_declare(stack_vars.list[i]);
         }
-        result = type_of_var_defined(block, stack_vars.list[0], ir->loc);
+        Var* var = stack_vars.list[0];
+        result = type_of_cell_defined(block, var->cell, var->declared, ir->loc);
         for (I32 i = 1; i < stack_vars.len; i++) {
-          Type* type = type_of_var_defined(block, stack_vars.list[i], ir->loc);
+          var = stack_vars.list[i];
+          Type* type = type_of_cell_defined(block, var->cell, var->declared, ir->loc);
           result = type_join(result, type);
         }
       }
@@ -4072,14 +4074,14 @@ void sem_ir(Block* block, Ir* ir) {
       Hash_Set stack_vars = pointer->stack_vars;
       if (stack_vars.len == 1) {
         Var* var = stack_vars.list[0];
-        type_of_cell_put(block, &ir->binary.two, var, rhs);
+        type_of_cell_put(block, &ir->binary.two, var->cell, var->declared, rhs);
       }
       else if (stack_vars.len > 1) {
         for (I32 i = 0; i < stack_vars.len; i++) {
           Var* var = stack_vars.list[i];
-          Type* old_type = type_of_var(block, var);
+          Type* old_type = type_of_cell(block, var->cell, var->declared);
           Type* new_type = type_join(old_type, rhs);
-          type_of_cell_put(block, &ir->binary.two, var, new_type);
+          type_of_cell_put(block, &ir->binary.two, var->cell, var->declared, new_type);
         }
       }
       else {
@@ -4109,15 +4111,11 @@ void sem_ir(Block* block, Ir* ir) {
       result = ptr_type;
     }
     else {
-      Var* var = &new(irgen.vars);
-           var->kind   = Var_Kind_pointee;
-           var->state  = Var_State_unresolved;
-           var->global = irgen.scope_stack.length == 0;
-           var->name   = irgen.str_anon;
-           var->declared_ir = ir->unary;
-           var->declared = type_unary;
-      result = type_pointer_var(ir->var);
-      type_of_cell_put(block, 0, var, type_unary);
+      Cell* cell = arena_push_zero_type(sem.perm_arena, Cell, 1);
+      cell->global = sem.current_fun->global;
+      // TODO:
+      // result = type_pointer_var(ir->var);
+      sem_cell_at_block_put(block, cell, type_unary);
     }
   } break;
   case Ir_Kind_fun: {
@@ -4641,7 +4639,7 @@ Type* sem_fun(Fun* fun) {
             function->foreign_id   = 0;
             function->fun = fun;
             function->arg = fun->arg_var->var->declared;
-            function->ret = type_of_var(fun->ret_block, fun->ret_ir->var);
+            function->ret = type_of_cell(fun->ret_block, fun->ret_ir->var->cell, fun->ret_ir->var->declared);
 
   if (function->ret->kind == Type_Kind_type) {
     function->ret = function->ret->type;

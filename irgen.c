@@ -328,6 +328,7 @@ typedef enum Fun_Kind {
 
 struct Fun {
   Fun_Kind kind;
+  B8      global;
   Str*    name;
   Blocks* blocks;
   Block*  ret_block;
@@ -842,7 +843,7 @@ Var* irgen_var_new(void) {
   Fun* fun = irgen_fun_top();
   Var* var = &new(irgen.vars);
   var->cell = arena_push_zero_type(irgen.perm_arena, Cell, 1);
-  var->cell->global = irgen.scope_stack.length == 0;
+  var->cell->global = fun->global;
   fa_extend(irgen.temp_var_arena, fun->vars, var);
   return var;
 }
@@ -2028,6 +2029,7 @@ Fun_Pool irgen_ast_root(Sources sources, Arena* arena, Ast* ast) {
     irgen.ast_loc  = ast->loc;
     Fun* fun = irgen_fun_enter();
          fun->name = irgen.str_main;
+         fun->global = true;
 
     Var* arg_var = irgen_var_new();
          arg_var->name = str_from_cstr("__arg");
