@@ -1844,6 +1844,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     if (var_common) {
       return var_common;
     }
+
     Type* var_type = type_of_cell(block, var->cell, var->declared);
     Join* join = var_type->join;
     Type* type_joined = sem.type_none;
@@ -1865,6 +1866,8 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
           sem_error_name(Diag_Code_join_field_mismatch, sem.current_ir->loc, name);
         }
         is_size_defined |= has_flag(type->flag, Type_Flag_size_defined);
+        // cell->relations
+        //   type => element
         type_joined = type_join(type_joined, type);
       }
     }
@@ -2540,6 +2543,15 @@ void sem_narrow_cell(Sem_Tasks* tasks, Cell* cell, Type* type) {
                 narrowed->next = tasks->narrowed;
   tasks->narrowed = narrowed;
 
+  /*
+  cells:[0, 16, 32]
+  A:(t:I8 0; a:F32)
+  B:(t:I8 1; b:I16; c:I8)
+  v: A \ B;
+  cell->relations
+    type meet I8 0 => add A
+    type meet I8 1 => add B
+  */
   // if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
   //   Type* old_type_parent = type_of_var(tasks->block, var->parent);
   //   Type* new_type_parent = sem_narrow_var_parent_join_records(var, old_type_parent, type);
@@ -3212,6 +3224,7 @@ void type_of_cell_put(Block* block, Ir** ir, Cell* cell, Type* declared, Type* t
         }
       }
 
+      // TODO:
       // if (var->parent && var->parent->declared->kind == Type_Kind_join_records) {
       //   Type* new_type_parent = sem_narrow_var_parent_join_records(var, var->parent->declared, type);
       //   sem_cell_at_block_put(block, var->parent, new_type_parent);
@@ -3279,20 +3292,6 @@ void sem_record_declare_fields(Var* var, Type* type) {
         I32 offset = record->offsets[j];
         if (offset >= 0) {
           sem_cell_get_or_add(var->cells, offset);
-        }
-      }
-    }
-
-    for (I32 i = 0; i < join->records.len; i++) {
-      Type* element = join->records.list[i];
-      var->vars[i] = sem_var_init(i, irgen.str_nil, var, element);
-
-      Record* record = element->record;
-      for (I32 j = 0; j < record->length; j++) {
-        I32 offset = record->offsets[j];
-        if (offset >= 0) {
-          Cell* cell = sem_cell_find(var->cells, offset);
-          var->vars[i]->vars[j]->cell = cell;
         }
       }
     }

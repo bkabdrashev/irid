@@ -9,7 +9,7 @@ a = ((U32; U32); U64) // implicit [2]([2] U32\U64)
 
 - [ ] Flexible arrays
 ```irid
-arr = [2]I32(2; 3) // stores (len:2) and @(2, 3)
+arr = [2]I32(2; 3) // stores (2;) and @(2, 3)
 for i in arr.len do
   arr[i] = 1
 ```
