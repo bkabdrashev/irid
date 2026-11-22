@@ -3,7 +3,8 @@ I32_MIN : -2147483647 - 1
 I32 : #type 32'#bits(I32_MIN..I32_MAX)
 F32 : #type #float(8; 23)
 
-v:(t:I32 0; a:F32)\(t:I32 1; b:I32);
+v:(t:I32 0; a:F32)\(t:I32 1; b:I32; c:I32);
 
 v.t = 1 // v:(t:I32 1; b:I32)
+v.b = 2
 v

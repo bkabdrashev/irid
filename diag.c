@@ -56,11 +56,13 @@ typedef enum  Diag_Code {
 } Diag_Code;
 
 typedef struct Var Var;
+typedef struct Type Type;
 typedef union Diag_Data Diag_Data;
 union Diag_Data {
   Str* name;
   Var* var;
   Cstr text;
+  Type* type;
   U32  unknown_char;
   struct { Token_Kind expected; Token_Kind found; B8 end_of_line; } expected;
   struct { Token_Kind open; Token_Kind close; }      delimiter;
@@ -475,9 +477,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_not_assigned:
-    string_builder_push_cstr(sb, "'");
-    string_builder_push_var(sb, diag->data.var);
-    string_builder_push_cstr(sb, "' may be not assigned at this location");
+    string_builder_push_cstr(sb, "not assigned at this location");
   break;
   case Diag_Code_join_field_missing:
     string_builder_push_cstr(sb, "field '");
@@ -515,7 +515,7 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
   break;
   case Diag_Code_assign_to_constant:
     string_builder_push_cstr(sb, "cannot assign to constant '");
-    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_type(sb, diag->data.type);
     string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_invalid_store:

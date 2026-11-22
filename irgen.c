@@ -126,13 +126,27 @@ typedef struct Type Type;
 typedef struct Var Var;
 typedef struct Blocks Blocks;
 
+typedef struct Relation Relation;
+struct Relation {
+  Type* lhs;
+  Type* rhs;
+};
+
 typedef struct Cell Cell;
+typedef struct Relations Relations;
+struct Relations {
+  Cell*     cell;
+  I32       length;
+  Relation* base;
+};
+
 typedef struct Cells Cells;
 struct Cell {
   I32    offset;
   B8     global;
   Type** block_types;
   Fun*   current_fun;
+  Relations relations;
   Cell** cells;
 };
 
