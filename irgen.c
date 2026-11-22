@@ -147,7 +147,7 @@ struct Cell {
   Type** block_types;
   Fun*   current_fun;
   Relations relations;
-  Cell** cells;
+  Cells* cells;
 };
 
 struct Cells {
@@ -181,8 +181,6 @@ struct Var {
   Type*   declared;
   Var**   vars;
   Cell*   cell;
-  Cells*  cells;
-  Hash_Map join_vars; // common fields of joined records, keyed by name + offset
 };
 
 struct Ir {

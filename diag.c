@@ -60,7 +60,6 @@ typedef struct Type Type;
 typedef union Diag_Data Diag_Data;
 union Diag_Data {
   Str* name;
-  Var* var;
   Cstr text;
   Type* type;
   U32  unknown_char;
@@ -477,7 +476,9 @@ void diag_render_message(String_Builder* sb, Diag* diag) {
     string_builder_push_cstr(sb, "'");
   break;
   case Diag_Code_not_assigned:
-    string_builder_push_cstr(sb, "not assigned at this location");
+    string_builder_push_cstr(sb, "'");
+    string_builder_push_str(sb, diag->data.name);
+    string_builder_push_cstr(sb, "' is not assigned on all paths");
   break;
   case Diag_Code_join_field_missing:
     string_builder_push_cstr(sb, "field '");

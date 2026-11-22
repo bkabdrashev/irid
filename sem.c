@@ -62,7 +62,6 @@ struct Record {
   // NOTE: computed below
   I32*     offsets;
   Hash_Map position_from_name;
-  Hash_Map position_from_offset;
 };
 
 typedef struct Join Join;
@@ -502,12 +501,6 @@ void sem_error_name_impl(Diag_Code code, Loc loc, Str* name, Cstr compiler_file,
   sem_fail();
 }
 
-void sem_error_var_impl(Diag_Code code, Loc loc, Var* var, Cstr compiler_file, I32 compiler_line) {
-  Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
-  if (diag) diag->data.var = var;
-  sem_fail();
-}
-
 void sem_error_name_type_impl(Diag_Code code, Loc loc, Str* name, Type* type, Cstr compiler_file, I32 compiler_line) {
   Diag* diag = sem_diag_impl(code, loc, compiler_file, compiler_line);
   if (diag) {
@@ -560,8 +553,6 @@ void sem_error_call_mismatch_impl(Loc loc, Type* expected, Type* found, Cstr com
 
 #define sem_diag(code, loc) \
   sem_diag_impl((code), (loc), __FILE__, __LINE__)
-#define sem_error_var(code, loc, var) \
-  sem_error_var_impl((code), (loc), (var), __FILE__, __LINE__)
 #define sem_error_name(code, loc, name) \
   sem_error_name_impl((code), (loc), (name), __FILE__, __LINE__)
 #define sem_error_name_type(code, loc, name, type) \
@@ -1150,7 +1141,6 @@ Record* type_record_init(I32 length) {
   result->types   = arena_push(sem.perm_arena, length * sizeof(Type*));
   result->offsets = arena_push(sem.perm_arena, length * sizeof(I32));
   result->position_from_name   = hash_map_init(sem.perm_arena, length);
-  result->position_from_offset = hash_map_init(sem.perm_arena, length);
   return result;
 }
 
@@ -1208,7 +1198,6 @@ Type* type_record(Record* record) {
       else {
         record->offsets[j] = -1;
       }
-      hash_map_i32_put_i32(&record->position_from_offset, record->offsets[j], j);
       bits_size = align_up(bits_size, bits_align);
     }
 
@@ -1826,7 +1815,7 @@ I64 sem_name_offset_combine(Str* name, I32 offset) {
 
 Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type);
 void sem_record_declare_fields(Var* var, Type* type);
-void sem_cell_not_assigned(Block* block, Cell* cell, Type* declared);
+void sem_cell_not_assigned(Block* block, Cell* cell);
 
 
 Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) {
@@ -1841,7 +1830,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
   }
   else if (var->declared->kind == Type_Kind_join_records) {
     // INVARIANT: offsets are equal for each record in the join
-    Cell* cell = sem_cell_find(var->cells, offset);
+    Cell* cell = sem_cell_find(var->cell->cells, offset);
     Type* var_type = type_of_cell(block, var->cell, var->declared);
     Join* join = var_type->join;
     if (var_type == sem.type_undef) {
@@ -1879,7 +1868,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     Var* var_common = sem_var_init(offset, name, var, type_joined);
          var_common->cell = cell;
     if (var_type == sem.type_undef) {
-      sem_cell_not_assigned(block, var_common->cell, var_common->declared);
+      sem_cell_not_assigned(block, var_common->cell);
     }
 
 
@@ -2512,32 +2501,6 @@ Type* sem_cell_at_block(Block* block, Cell* cell) {
 }
 
 void sem_narrow_cell(Sem_Tasks* tasks, Cell* cell, Type* type);
-Type* sem_narrow_var_parent_join_records(Var* var, Type* old_type, Type* type_kid) {
-  Join* old_join = old_type->join;
-  Join* new_join = arena_push(sem.perm_arena, sizeof(Join));
-  new_join->records = hash_set_init(sem.perm_arena, old_join->records.len);
-
-  for (I32 i = 0; i < old_join->records.len; i++) {
-    Type* element = old_join->records.list[i];
-    Record* record = element->record;
-    if (record->length > 0) {
-      I32 position = hash_map_i32_get_i32(record->position_from_offset, var->index);
-      Type* type_field = record->types[position];
-      Type* type_field_new = type_meet(type_field, type_kid);
-      if (type_field_new != sem.type_none) {
-        hash_set_put(&new_join->records, element);
-      }
-      else {
-        hash_set_put(&new_join->records, sem.type_empty_record);
-      }
-    }
-    else {
-      hash_set_put(&new_join->records, element);
-    }
-  }
-  Type* new_type = type_join_records(new_join);
-  return new_type;
-}
 
 void sem_narrow_cell(Sem_Tasks* tasks, Cell* cell, Type* type) {
   Type* old_type = sem_cell_at_block(tasks->block, cell);
@@ -2948,7 +2911,7 @@ Type* type_of_cell(Block* block, Cell* cell, Type* declared) {
   return type;
 }
 
-Type* type_of_cell_defined(Block* block, Cell* cell, Type* declared, Loc loc) {
+Type* type_of_cell_defined(Block* block, Cell* cell, Type* declared, Str* name, Loc loc) {
   Type* result = sem.type_none;
   if (declared->kind == Type_Kind_record) {
     Record* record = declared->record;
@@ -2958,28 +2921,39 @@ Type* type_of_cell_defined(Block* block, Cell* cell, Type* declared, Loc loc) {
             new_record->offsets = record->offsets;
             new_record->names   = record->names;
             new_record->position_from_name   = record->position_from_name;
-            new_record->position_from_offset = record->position_from_offset;
     for (I32 i = 0; i < record->length; i++) {
-      Type* type = type_of_cell(block, cell->cells[i], record->types[i]);
-      if (type == sem.type_undef) {
-        // sem_error_var(Diag_Code_not_assigned, loc, var->vars[i]);
-        sem_diag(Diag_Code_not_assigned, loc);
-      }
+      Type* type = type_of_cell_defined(block, &cell->cells->base[i], record->types[i], record->names[i], loc);
       new_record->types[i] = type;
     }
     result = type_record(new_record);
   }
   else if (declared->kind == Type_Kind_join_records) {
-    Type* type = type_of_cell(block, cell, declared);
-    // TODO:
-    // type_of_cell_defined(block, cell->cells[i], loc);
-    result = type;
+    result = type_of_cell(block, cell, declared);
+    if (result == sem.type_undef) {
+      sem_error_name(Diag_Code_not_assigned, loc, name);
+    }
+    else if (result->join->records.len == 1) {
+      Type* element = result->join->records.list[0];
+      Record* record = element->record;
+      Record* new_record = arena_push(sem.perm_arena, sizeof(Record));
+              new_record->types   = arena_push_type(sem.perm_arena, Type, record->length);
+              new_record->length  = record->length;
+              new_record->offsets = record->offsets;
+              new_record->names   = record->names;
+              new_record->position_from_name   = record->position_from_name;
+      for (I32 i = 0; i < record->length; i++) {
+        I32 offset = record->offsets[i];
+        Cell* cell_kid = sem_cell_find(cell->cells, offset);
+        Type* type_kid = type_of_cell_defined(block, cell_kid, record->types[i], record->names[i], loc);
+        new_record->types[i] = type_kid;
+      }
+      result = type_record(new_record);
+    }
   }
   else {
     result = type_of_cell(block, cell, declared);
     if (result == sem.type_undef) {
-      // sem_error_var(Diag_Code_not_assigned, loc, var);
-      sem_diag(Diag_Code_not_assigned, loc);
+      sem_error_name(Diag_Code_not_assigned, loc, name);
     }
   }
   return result;
@@ -3190,14 +3164,14 @@ void type_of_cell_put(Block* block, Ir** ir, Cell* cell, Type* declared, Type* t
           }
           field_decl = type_record_get_by_position(declared->record, i);
         }
-        type_of_cell_put(block, 0, cell->cells[field_decl.pos], declared->record->types[i], field.type);
+        type_of_cell_put(block, 0, &cell->cells->base[field_decl.pos], declared->record->types[i], field.type);
       }
     }
     else if (type->kind == Type_Kind_array) {
       Array* array = type->array;
       I32 length = array->length;
       for (I32 i = 0; i < length; i++) {
-        type_of_cell_put(block, 0, cell->cells[i], declared->array->of_type, array->types[i]);
+        type_of_cell_put(block, 0, &cell->cells->base[i], declared->array->of_type, array->types[i]);
       }
     }
 
@@ -3267,8 +3241,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
       total_length += element->record->length;
     }
     var->vars = arena_push(sem.perm_arena, join->records.len*sizeof(Var*));
-    var->join_vars = hash_map_init(sem.perm_arena, max(total_length, 1));
-    fa_init(sem.perm_arena, var->cells, total_length);
+    fa_init(sem.perm_arena, var->cell->cells, total_length);
 
     // v:(t:I8; a:I32) \ (t:I8; b:I16; c:I16)
     // cells: [0, 16, 32]
@@ -3278,7 +3251,7 @@ void sem_record_declare_fields(Var* var, Type* type) {
       for (I32 j = 0; j < record->length; j++) {
         I32 offset = record->offsets[j];
         if (offset >= 0) {
-          sem_cell_get_or_add(var->cells, offset);
+          sem_cell_get_or_add(var->cell->cells, offset);
         }
       }
     }
@@ -3334,15 +3307,13 @@ Type* sem_var_declare(Var* var) {
   return type;
 }
 
-void sem_cell_not_assigned(Block* block, Cell* cell, Type* declared) {
-  if (declared->kind == Type_Kind_record) {
-    for (I32 i = 0; i < declared->record->length; i++) {
-      sem_cell_not_assigned(block, cell->cells[i], declared->record->types[i]);
+void sem_cell_not_assigned(Block* block, Cell* cell) {
+  if (cell->cells) {
+    for (I32 i = 0; i < cell->cells->length; i++) {
+      sem_cell_not_assigned(block, &cell->cells->base[i]);
     }
   }
-  else {
-    sem_cell_at_block_put(block, cell, sem.type_undef);
-  }
+  sem_cell_at_block_put(block, cell, sem.type_undef);
 }
 
 Type* sem_fun(Fun* fun);
@@ -3514,7 +3485,7 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_declare: {
     Var* var = ir->declare.var;
     result = sem_var_declare(var);
-    sem_cell_not_assigned(block, var->cell, var->declared);
+    sem_cell_not_assigned(block, var->cell);
   } break;
   case Ir_Kind_def_declare: {
     result = sem_var_declare(ir->declare.var);
@@ -3841,7 +3812,6 @@ void sem_ir(Block* block, Ir* ir) {
       new_record->types[i] = type;
     }
     new_record->position_from_name   = ir->rec->position_from_name;
-    new_record->position_from_offset = hash_map_init(sem.perm_arena, new_record->length);
 
     result = type_record(new_record);
   } break;
@@ -3859,7 +3829,6 @@ void sem_ir(Block* block, Ir* ir) {
       new_record->types[i] = type;
     }
     new_record->position_from_name   = ir->rec->position_from_name;
-    new_record->position_from_offset = hash_map_init(sem.perm_arena, new_record->length);
 
     result = type_record(new_record);
   } break;
@@ -4031,10 +4000,10 @@ void sem_ir(Block* block, Ir* ir) {
           sem_var_declare(stack_vars.list[i]);
         }
         Var* var = stack_vars.list[0];
-        result = type_of_cell_defined(block, var->cell, var->declared, ir->loc);
+        result = type_of_cell_defined(block, var->cell, var->declared, var->name, ir->loc);
         for (I32 i = 1; i < stack_vars.len; i++) {
           var = stack_vars.list[i];
-          Type* type = type_of_cell_defined(block, var->cell, var->declared, ir->loc);
+          Type* type = type_of_cell_defined(block, var->cell, var->declared, var->name, ir->loc);
           result = type_join(result, type);
         }
       }
