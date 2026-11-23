@@ -27,7 +27,6 @@ Str : #type ([]I8)
 
 putchar: #foreign.c "putchar" (char:I32)->I32
 print_i64:(n:I64) ->
-
   if n == 0
     putchar 48
     putchar 10

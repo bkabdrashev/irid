@@ -93,6 +93,9 @@ LLVMTypeRef llvm_of_type(Type* type) {
     case Type_Kind_none: {
       result = llvm_gen.type_none;
     } break;
+    case Type_Kind_undefined: {
+      result = llvm_gen.type_none;
+    } break;
     case Type_Kind_type: {
       result = llvm_gen.type_none;
     } break;
@@ -226,6 +229,9 @@ LLVMValueRef llvm_default_of_type(Type* type) {
   }
   else switch (type->kind) {
   case Type_Kind_none: {
+    result = llvm_gen.none;
+  } break;
+  case Type_Kind_undefined: {
     result = llvm_gen.none;
   } break;
   case Type_Kind_type: {

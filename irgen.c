@@ -1488,7 +1488,6 @@ Ir* irgen_ast(Ast* ast) {
     irgen_ast(ast->binary.rhs);
     result = irgen_push_load(block_ir);
     block_var->declared_ir = result;
-    irgen_push_def_declare(block_var);
 
     irgen_scope_leave();
     // arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
