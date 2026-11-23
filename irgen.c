@@ -179,7 +179,6 @@ struct Var {
   Ir*     declared_ir;
   Blocks* blocks;
   Type*   declared;
-  Var**   vars;
   Cell*   cell;
 };
 
@@ -1765,7 +1764,6 @@ Ir* irgen_ast(Ast* ast) {
 
     result = irgen_push_unary(Ir_Kind_load, else_ir);
     else_var->declared_ir = result;
-    irgen_push_def_declare(else_var);
 
   } break;
 

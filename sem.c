@@ -1813,7 +1813,7 @@ I64 sem_name_offset_combine(Str* name, I32 offset) {
   return result;
 }
 
-Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type);
+Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type, Cell* cell);
 void sem_record_declare_fields(Var* var, Type* type);
 void sem_cell_not_assigned(Block* block, Cell* cell);
 
@@ -1865,8 +1865,7 @@ Var* sem_get_var_by_name(Block* block, Ir* ir, Var* var, Str* name, I32 offset) 
     if (is_size_defined) {
       type_joined = type_size_defined(bits_size, type_joined);
     }
-    Var* var_common = sem_var_init(offset, name, var, type_joined);
-         var_common->cell = cell;
+    Var* var_common = sem_var_init(offset, name, var, type_joined, cell);
     if (var_type == sem.type_undef) {
       sem_cell_not_assigned(block, var_common->cell);
     }
@@ -2506,21 +2505,25 @@ Type* sem_cell_at_block(Block* block, Cell* cell) {
 void sem_narrow_cell(Sem_Tasks* tasks, Cell* cell, Type* type);
 
 void sem_narrow_cell(Sem_Tasks* tasks, Cell* cell, Type* type) {
-  Type* old_type = sem_cell_at_block(tasks->block, cell);
+  if (tasks->cell == cell) {
+    Type* old_type = sem_cell_at_block(tasks->block, cell);
+    assert(old_type);
 
-  Sem_Narrowed* narrowed = arena_push(sem.temp_arena, sizeof(Sem_Narrowed));
-                narrowed->cell  = cell;
-                narrowed->type = old_type;
-                narrowed->next = tasks->narrowed;
+    Sem_Narrowed* narrowed = arena_push(sem.temp_arena, sizeof(Sem_Narrowed));
+                  narrowed->cell  = cell;
+                  narrowed->type = old_type;
+                  narrowed->next = tasks->narrowed;
+    tasks->narrowed = narrowed;
 
-  Type* new_type_but_flag_as_old = &new(sem.types);
-       *new_type_but_flag_as_old = *type;
-        new_type_but_flag_as_old->flag       = old_type->flag;
-        new_type_but_flag_as_old->bits_size  = old_type->bits_size;
-        new_type_but_flag_as_old->bits_align = old_type->bits_align;
-  type = type_in_set(new_type_but_flag_as_old);
+    Type* new_type_but_flag_as_old = &new(sem.types);
+        *new_type_but_flag_as_old = *type;
+          new_type_but_flag_as_old->flag       = old_type->flag;
+          new_type_but_flag_as_old->bits_size  = old_type->bits_size;
+          new_type_but_flag_as_old->bits_align = old_type->bits_align;
+    type = type_in_set(new_type_but_flag_as_old);
 
-  tasks->narrowed = narrowed;
+    sem_cell_at_block_put(tasks->block, cell, type);
+  }
 
   if (cell->relations.cell) {
     Cell* relative = cell->relations.cell;
@@ -2535,8 +2538,6 @@ void sem_narrow_cell(Sem_Tasks* tasks, Cell* cell, Type* type) {
     }
     sem_narrow_cell(tasks, relative, joined);
   }
-
-  sem_cell_at_block_put(tasks->block, cell, type);
 }
 
 void sem_type_of_ir_narrow(Sem_Tasks* tasks, Ir* ir, Type* new_type) {
@@ -2850,11 +2851,11 @@ Type* type_of_cell(Block* block, Cell* cell, Type* declared) {
   }
 
   Type* type = sem.type_none;
-  if (declared) {
-    type = declared;
-  }
 
   if (block->is_loop_head) {
+    if (declared) {
+      type = declared;
+    }
     sem_cell_at_block_put(block, cell, type);
 
     for (I32 i = 0; i < block->preds.length; i++) {
@@ -3195,7 +3196,6 @@ void type_of_cell_put(Block* block, Ir** ir, Cell* cell, Type* declared, Type* t
     sem_cell_at_block_put(block, cell, type);
   }
   else {
-    assert(0);
     sem_error_type_mismatch(sem.current_ir->loc, declared, type);
   }
 }
@@ -3207,11 +3207,12 @@ Type* type_of_fun(Fun* fun) {
 void sem_block(Block* block);
 void sem_block_preds_init(Block* block);
 
-Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
+Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type, Cell* cell) {
   Var* var = &new(irgen.vars);
        var->index    = index;
        var->name     = name;
        var->parent   = parent;
+       var->cell     = cell;
        var->declared = type;
        var->state    = Var_State_resolved;
        var->kind     = Var_Kind_declared;
@@ -3222,9 +3223,7 @@ Var* sem_var_init(I32 index, Str* name, Var* parent, Type* type) {
 }
 
 Var* sem_var_cell_init(I32 index, Str* name, Var* parent, Type* type) {
-  Var* var = sem_var_init(index, name, parent, type);
-       var->cell = arena_push_zero_type(sem.perm_arena, Cell, 1);
-       var->cell->global  = parent->cell->global;
+  Var* var = sem_var_init(index, name, parent, type, cell);
   return var;
 }
 
@@ -3232,7 +3231,9 @@ void sem_record_declare_fields(Var* var, Type* type) {
   if (type->kind == Type_Kind_record) {
     var->vars = arena_push(sem.perm_arena, type->record->length*sizeof(Var*));
     for (I32 i = 0; i < type->record->length; i++) {
-      var->vars[i] = sem_var_cell_init(i, type->record->names[i], var, type->record->types[i]);
+      Cell* cell = arena_push_zero_type(sem.perm_arena, Cell, 1);
+            cell->global  = var->cell->global;
+      var->cell->cells[i] = cell;
     }
   }
   else if (type->kind == Type_Kind_join_records) {
