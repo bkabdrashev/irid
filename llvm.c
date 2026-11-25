@@ -116,7 +116,7 @@ LLVMTypeRef llvm_of_type(Type* type) {
       }
     } break;
     case Type_Kind_ptr: {
-      Type* declared = type_pointer_declared(type->pointer);
+      Type* declared = type->pointer->declared;
       LLVMTypeRef pointer_to = llvm_of_type(declared);
       result = LLVMPointerType(pointer_to, 0);
     } break;
@@ -242,12 +242,12 @@ LLVMValueRef llvm_default_of_type(Type* type) {
     result = LLVMConstInt(llvm_type, 0, false);
   } break;
   case Type_Kind_ptr: {
-    if (type->pointer->stack_vars.len > 0) {
-      Var* var = type->pointer->stack_vars.list[0];
+    if (type->pointer->set.len > 0) {
+      Var* var = type->pointer->set.list[0];
       result = llvm_of_ir(var->declared_ir);
     }
     else {
-      Type* declared = type_pointer_declared(type->pointer);
+      Type* declared = type->pointer->declared;
       LLVMValueRef llvm_of_default = llvm_default_of_type(declared);
       LLVMTypeRef llvm_var_type = llvm_of_type(declared);
       LLVMValueRef llvm_global = LLVMAddGlobal(llvm_gen.module, llvm_var_type, "__stub");
@@ -584,7 +584,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_ptr_offset: {
     Type* of_type = type_of_ir(ir->binary.one);
     if (of_type->kind == Type_Kind_ptr) {
-      Type* ptr_to = type_pointer_declared(of_type->pointer);
+      Type* ptr_to = of_type->pointer->declared;
       if (ptr_to->kind == Type_Kind_array) {
         LLVMValueRef llvm_ptr_to_array = llvm_of_ir(ir->binary.one);
         LLVMTypeRef  llvm_ptr_to       = llvm_of_type(ptr_to);
@@ -623,7 +623,7 @@ void llvm_ir(Ir* ir) {
   case Ir_Kind_name_offset: {
     Type* of_type = type_of_ir(ir->name_offset.of);
     if (of_type->kind == Type_Kind_ptr) {
-      Type* object_type = type_pointer_declared(of_type->pointer);
+      Type* object_type = of_type->pointer->declared;
       if (object_type->kind == Type_Kind_record) {
         LLVMValueRef ptr = llvm_of_ir(ir->name_offset.of);
         I32 position = hash_map_get_i32(object_type->record->position_from_name, ir->name_offset.at);
@@ -665,7 +665,7 @@ void llvm_ir(Ir* ir) {
 
     if (of_type->kind == Type_Kind_ptr) {
       I32 at = ir->position.at;
-      Type* rec_type = type_pointer_declared(of_type->pointer);
+      Type* rec_type = of_type->pointer->declared;
       LLVMValueRef ptr = llvm_of_ir(ir->position.of);
       LLVMTypeRef llvm_type = llvm_of_type(rec_type);
       result = LLVMBuildStructGEP2(llvm_gen.builder, llvm_type, ptr, at, "");
@@ -753,7 +753,7 @@ void llvm_ir(Ir* ir) {
     assert(type_to->kind == Type_Kind_span);
     Type* type_from = type_of_ir(ir->cast_value);
     assert(type_from->kind == Type_Kind_ptr);
-    Type* declared = type_pointer_declared(type_from->pointer);
+    Type* declared = type_from->pointer->declared;
     assert(declared->kind == Type_Kind_array);
     Array* array = declared->array;
 
@@ -796,8 +796,6 @@ void llvm_ir(Ir* ir) {
     }
   } break;
 
-  case Ir_Kind_declare:     result = llvm_gen.none; break;
-  case Ir_Kind_def_declare: result = llvm_gen.none; break;
   case Ir_Kind_none:    result = llvm_gen.none; break;
   case Ir_Kind_type:    result = llvm_gen.none; break;
   case Ir_Kind_str: case Ir_Kind_span: case Ir_Kind_array:
