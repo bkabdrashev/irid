@@ -1466,7 +1466,6 @@ Ir* irgen_ast(Ast* ast) {
 
     irgen_ast(ast->binary.rhs);
     result = irgen_push_load(block_ir);
-    block_var->declared_ir = result;
 
     irgen_scope_leave();
     // arena_release_mark(irgen.temp_block_arena, irgen.unresolved_breaks);
@@ -1741,8 +1740,6 @@ Ir* irgen_ast(Ast* ast) {
     irgen_block_link_jump_to_block(&jump_from_nez->jump, merge_block);
 
     result = irgen_push_unary(Ir_Kind_load, else_ir);
-    else_var->declared_ir = result;
-
   } break;
 
   case Ast_Kind_while: {
