@@ -3128,7 +3128,7 @@ void sem_block_preds_init(Block* block);
 
 void sem_record_declare_fields(Cell* cell, Type* type) {
   if (type->kind == Type_Kind_record) {
-    fa_init(sem.perm_arena, cell->cells, type->record->length);
+    fa_init_zero(sem.perm_arena, cell->cells, type->record->length);
     for (I32 i = 0; i < type->record->length; i++) {
       cell->cells->base[i].global = cell->global;
     }
@@ -3140,7 +3140,7 @@ void sem_record_declare_fields(Cell* cell, Type* type) {
       Type* element = join->records.list[i];
       total_length += element->record->length;
     }
-    fa_init(sem.perm_arena, cell->cells, total_length);
+    fa_init_zero(sem.perm_arena, cell->cells, total_length);
 
     // v:(t:I8; a:I32) \ (t:I8; b:I16; c:I16)
     // cells: [0, 16, 32]
@@ -3158,7 +3158,7 @@ void sem_record_declare_fields(Cell* cell, Type* type) {
   else if (type->kind == Type_Kind_array) {
     Array* array = type->array;
     I32 length = array->length;
-    fa_init(sem.perm_arena, cell->cells, length + 1);
+    fa_init_zero(sem.perm_arena, cell->cells, length + 1);
     cell->cells->base[0].global = cell->global;
     Type* type_item = array->of_type;
     if (type_item->kind == Type_Kind_type) {
@@ -3169,7 +3169,7 @@ void sem_record_declare_fields(Cell* cell, Type* type) {
     }
   }
   else if (type->kind == Type_Kind_span) {
-    fa_init(sem.perm_arena, cell->cells, 2);
+    fa_init_zero(sem.perm_arena, cell->cells, 2);
     cell->cells->base[0].global = cell->global;
     cell->cells->base[1].global = cell->global;
   }
@@ -3179,7 +3179,6 @@ void sem_record_declare_fields(Cell* cell, Type* type) {
 Type* sem_var_declare(Var* var) {
   if (var->state == Var_State_resolved) return var->declared;
   if (var->state == Var_State_resolving) {
-    assert(0);
     sem_error_name(Diag_Code_cyclic_declaration, var->loc, var->name);
   }
   var->state = Var_State_resolving;
@@ -3309,7 +3308,7 @@ void sem_ir(Block* block, Ir* ir) {
   Loc saved_loc = sem.current_loc;
   sem.current_ir = ir;
   sem.current_loc = ir->loc;
-  Type* result = sem.type_none;
+  Type* result = 0;
   switch (ir->kind) {
   case Ir_Kind_none: {
     result = sem.type_none;
@@ -3388,7 +3387,7 @@ void sem_ir(Block* block, Ir* ir) {
   case Ir_Kind_arg: {
     sem_var_declare(ir->var);
     result = type_pointer_cell(ir->var->cell, ir->var->declared);
-    sem_cell_at_block_put(block, ir->var->cell, ir->var->declared);
+    type_of_cell_put(block, 0, ir->var->cell, ir->var->declared, ir->var->declared);
   } break;
   case Ir_Kind_var: {
     sem_var_declare(ir->var);
